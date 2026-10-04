@@ -1,0 +1,65 @@
+# Lint configuration for the lab, including the two module rules
+# docs/system-design.md § Package Structure states (REQ-SIM-004).
+#
+# The enabled set beyond the standard linters is the one CLAUDE.md § Lint
+# Troubleshooting documents as fixable by `make lint-fix`, plus depguard and
+# forbidigo, which carry the module rules.
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - depguard
+    - errorlint
+    - forbidigo
+    - godot
+    - modernize
+    - perfsprint
+    - revive
+
+  settings:
+    depguard:
+      rules:
+        # The layering rule: a run's description and its observed outcome are
+        # immutable values that name no Kubernetes type, so the mapping between
+        # the two vocabularies stays inside internal/cluster.
+        scenario-stays-kubernetes-free:
+          files:
+            - "**/internal/scenario/**"
+          deny:
+            - pkg: k8s.io
+              desc: internal/scenario imports no Kubernetes package; Kubernetes types stay inside internal/cluster (docs/system-design.md § Package Structure)
+
+        # The credential rule, module-wide: the lab drives only the Simulated
+        # Cluster it provisioned itself, so no package may reach a kubeconfig, a
+        # home directory holding one, or a credential plugin. NG-1 made mechanical.
+        no-cluster-credential-discovery:
+          deny:
+            - pkg: k8s.io/client-go/tools/clientcmd
+              desc: the lab reads no kubeconfig; the client is built from the address the lab provisioned, with no credential (docs/system-design.md § Threat Model)
+            - pkg: k8s.io/client-go/util/homedir
+              desc: locating a home directory is the first step of kubeconfig discovery, which the lab never performs (docs/system-design.md § Threat Model)
+            - pkg: k8s.io/client-go/plugin/pkg/client/auth
+              desc: credential plugins authenticate against a cluster the lab did not provision (docs/system-design.md § Threat Model)
+
+    # § Package Structure denies in-cluster configuration as a *call*, not as an
+    # import: it is a function in k8s.io/client-go/rest, the same package a client
+    # built from a provisioned address needs, so depguard cannot carry this half.
+    forbidigo:
+      # analyze-types resolves the call through the type checker instead of
+      # matching source text, so an import alias cannot defeat the rule:
+      # `import k8srest "k8s.io/client-go/rest"` still expands to
+      # `rest.InClusterConfig`. `pkg` pins the match to that import path, so
+      # the rule cannot be tripped by an unrelated package also named `rest`.
+      analyze-types: true
+      forbid:
+        - pattern: ^rest\.InClusterConfig$
+          pkg: ^k8s\.io/client-go/rest$
+          msg: the lab reads no service-account token; the client is built from the address the lab provisioned (docs/system-design.md § Threat Model)
+
+    # The three rules CLAUDE.md § Lint Troubleshooting documents for this project.
+    revive:
+      rules:
+        - name: unused-parameter
+        - name: unused-receiver
+        - name: redefines-builtin-id

@@ -1,0 +1,432 @@
+package cluster
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
+
+	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
+)
+
+const (
+	// clusterImageRepository is the one repository every pull and create names. No
+	// run input reaches it, so a run can never start an image that is not a KWOK
+	// cluster image, per docs/adr/2026-10-03-kubernetes-version-pin.md.
+	clusterImageRepository = "registry.k8s.io/kwok/cluster"
+
+	// kwokRelease is the KWOK release the image tag carries, and
+	// defaultKubernetesVersion the version a run mirrors when it names none. The
+	// default is written in the form ParseKubernetesVersion normalises to, so the
+	// lab's own default needs no parsing.
+	kwokRelease              = "v0.8.0"
+	defaultKubernetesVersion = "v1.36.1"
+
+	// workloadNamespace is the namespace a Workload is deployed into. The lab
+	// deploys one Workload at a time into a cluster of its own, so it needs no
+	// namespace of its own.
+	workloadNamespace = "default"
+
+	// defaultServiceAccount is the ServiceAccount the control plane admits a Pod of
+	// that namespace against.
+	defaultServiceAccount = "default"
+)
+
+const (
+	// settleTimeout is the budget AwaitSettled polls within, and pollInterval the
+	// gap between polls.
+	//
+	// The interval is what makes "two consecutive observations agree" mean
+	// settled: a Deployment's Pods are created and then bound over several
+	// control-plane round trips, so two observations a few milliseconds apart can
+	// agree merely by falling inside one of them.
+	settleTimeout = 90 * time.Second
+	pollInterval  = time.Second
+)
+
+// DefaultKubernetesVersion is the version a run mirrors when it names none. It is
+// a code constant: the lab looks up no newest version anywhere.
+func DefaultKubernetesVersion() KubernetesVersion {
+	return KubernetesVersion{value: defaultKubernetesVersion}
+}
+
+// clusterImage is the image a Simulated Cluster of version runs. The repository
+// and the KWOK release are constants and the version is validated, so no
+// reference, path or scheme character can reach the tag.
+func clusterImage(version KubernetesVersion) string {
+	return fmt.Sprintf("%s:%s-k8s.%s", clusterImageRepository, kwokRelease, version)
+}
+
+// SimulatedCluster is the provisioned cluster a run drives: the aggregate root
+// through which a Topology, a Workload and an observation are reached. Its close
+// removes the container, so a Scenario's cluster cannot outlive the Scenario.
+type SimulatedCluster struct {
+	container *ClusterContainer
+	client    *kubernetes.Clientset
+}
+
+// Provision starts a Simulated Cluster for one Scenario on a resolved engine, for
+// a resolved Kubernetes version, and waits for its API server to answer. It
+// returns the handle whose close removes the cluster, or an error naming what it
+// could not reach; a cluster whose API server never answers is removed rather
+// than left behind.
+func Provision(ctx context.Context, endpoint Endpoint, version KubernetesVersion, scenarioName string) (*SimulatedCluster, error) {
+	engine, err := newEngine(endpoint, scenarioName)
+	if err != nil {
+		return nil, err
+	}
+
+	container, err := engine.StartCluster(ctx, version)
+	if err != nil {
+		return nil, err
+	}
+
+	provisioned, err := awaitControlPlane(ctx, container)
+	if err != nil {
+		return nil, errors.Join(err, container.Remove(ctx))
+	}
+
+	return provisioned, nil
+}
+
+// awaitControlPlane polls the started container until its API server answers,
+// within the start timeout.
+func awaitControlPlane(ctx context.Context, container *ClusterContainer) (*SimulatedCluster, error) {
+	starting, cancel := context.WithTimeout(ctx, startTimeout)
+	defer cancel()
+
+	var unreached error
+	for {
+		client, err := reachControlPlane(starting, container)
+		if err == nil {
+			return &SimulatedCluster{container: container, client: client}, nil
+		}
+		unreached = err
+
+		select {
+		case <-starting.Done():
+			return nil, fmt.Errorf("the API server of %s did not answer within %s: %w", container.Name(), startTimeout, unreached)
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// reachControlPlane builds a client for the container's published address and
+// makes one request through it, so a client is returned only once the control
+// plane is actually serving.
+func reachControlPlane(ctx context.Context, container *ClusterContainer) (*kubernetes.Clientset, error) {
+	address, err := container.APIAddress(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := newControlPlaneClient(address)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 1}); err != nil {
+		return nil, fmt.Errorf("ask the control plane at %s for its Nodes: %w", address, err)
+	}
+
+	return client, nil
+}
+
+// Name is the name of the container this cluster runs in.
+func (c *SimulatedCluster) Name() string {
+	return c.container.Name()
+}
+
+// ApplyTopology creates every Node of the Topology, each already Ready and
+// carrying the capacity the Topology declared, so no Pod waits on a heartbeat. It
+// returns once the scheduler has placed and released one probe Pod on every one
+// of them, which is what the Topology-provisioned state means, or an error naming
+// the Nodes it never placed one on.
+func (c *SimulatedCluster) ApplyTopology(ctx context.Context, topology scenario.Topology) error {
+	for _, node := range topology.Nodes() {
+		declared := toNode(node)
+
+		if _, err := c.client.CoreV1().Nodes().Create(ctx, declared, metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("create Node %s: %w", node.Name, err)
+		}
+		if err := c.reportReady(ctx, declared); err != nil {
+			return err
+		}
+	}
+
+	return c.awaitTopologyProvisioned(ctx, topology)
+}
+
+// reportReady writes a created Node's Ready condition and declared capacity
+// through the status subresource, which a create does not carry.
+//
+// The write is retried on a conflict because the KWOK controller maintains these
+// same Nodes: it can modify one between the create and this write, which makes
+// the version held here stale. Retrying from a fresh read is the client's own
+// idiom for that, and the alternative — writing without a version — would let
+// this call silently overwrite whatever the controller had just decided.
+func (c *SimulatedCluster) reportReady(ctx context.Context, declared *corev1.Node) error {
+	reported := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest, err := c.client.CoreV1().Nodes().Get(ctx, declared.Name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		latest.Status = declared.Status
+		_, err = c.client.CoreV1().Nodes().UpdateStatus(ctx, latest, metav1.UpdateOptions{})
+
+		return err
+	})
+	if reported != nil {
+		return fmt.Errorf("report Node %s Ready with its capacity: %w", declared.Name, reported)
+	}
+
+	return nil
+}
+
+// awaitTopologyProvisioned returns once the scheduler has placed a probe Pod on
+// every declared Node, and every probe Pod is gone again.
+//
+// Waiting matters because a spread rule is evaluated when a Pod is scheduled and
+// never again (docs/adr/2026-10-04-scenario-declared-pod-spread.md). A Workload
+// deployed over a Topology the scheduler holds only part of is spread perfectly
+// over the Nodes it had seen, which is a wrong answer rather than a late one:
+// nine Pods over six of nine Nodes settle at a Skew of one per Node and leave a
+// whole Zone empty, and nothing rebalances them afterwards.
+//
+// The wait asks the scheduler rather than the API server, because the API server
+// reports a Node Ready as soon as its status is committed while the scheduler
+// places Pods from a snapshot of its own that no API call shows. A Running probe
+// Pod is the one observable proof that the snapshot holds its Node
+// (docs/adr/2026-10-04-scheduler-observable-provisioning.md).
+//
+// The probe Pods are removed whether or not every one of them ran, so a Workload
+// is never deployed into a cluster still holding them.
+func (c *SimulatedCluster) awaitTopologyProvisioned(ctx context.Context, topology scenario.Topology) error {
+	placed := c.awaitProbePodOnEveryNode(ctx, topology)
+
+	return errors.Join(placed, c.removeProbePods(ctx))
+}
+
+// awaitProbePodOnEveryNode creates one probe Pod per declared Node and polls at
+// the poll interval, within the start timeout, until each of them is Running. It
+// names the Nodes that never held one rather than reporting a count, because that
+// name is what a failed provisioning leaves to look at. The scheduler itself
+// re-queues a probe Pod it cannot place yet, so the wait needs no retry of its
+// own.
+func (c *SimulatedCluster) awaitProbePodOnEveryNode(ctx context.Context, topology scenario.Topology) error {
+	probing, cancel := context.WithTimeout(ctx, startTimeout)
+	defer cancel()
+
+	if err := c.awaitPodAdmission(probing); err != nil {
+		return err
+	}
+
+	declared := topology.Nodes()
+	for _, node := range declared {
+		if _, err := c.client.CoreV1().Pods(workloadNamespace).Create(probing, toProbePod(node), metav1.CreateOptions{}); err != nil {
+			return fmt.Errorf("create the probe Pod for Node %s: %w", node.Name, err)
+		}
+	}
+
+	for {
+		probes, err := c.probePods(probing)
+		if err != nil {
+			return err
+		}
+		unheld := nodesWithoutProbe(declared, nodesHoldingRunningProbe(probes))
+		if len(unheld) == 0 {
+			return nil
+		}
+
+		select {
+		case <-probing.Done():
+			return fmt.Errorf("the scheduler of %s placed no Pod on %d of the %d Nodes of the Topology within %s: %s",
+				c.Name(), len(unheld), len(declared), startTimeout, strings.Join(unheld, ", "))
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// awaitPodAdmission returns once the namespace holds the default ServiceAccount
+// the control plane admits a Pod against, polling at the poll interval within the
+// start timeout its caller's context carries.
+//
+// The control plane creates that ServiceAccount a moment after it starts serving,
+// and admission refuses a Pod created before it exists rather than leaving the
+// Pod Pending. A Deployment's own controller retries such a refusal, so a
+// Workload never sees it; provisioning creates its probe Pods directly, so the
+// wait belongs here.
+func (c *SimulatedCluster) awaitPodAdmission(ctx context.Context) error {
+	for {
+		_, err := c.client.CoreV1().ServiceAccounts(workloadNamespace).Get(ctx, defaultServiceAccount, metav1.GetOptions{})
+		if err == nil {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("the %s namespace of %s held no %s ServiceAccount to admit a Pod against within %s: %w",
+				workloadNamespace, c.Name(), defaultServiceAccount, startTimeout, err)
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// removeProbePods deletes every probe Pod and returns once the cluster reports
+// none left, so no probe Pod can be part of the Placement a Workload reports.
+//
+// The delete names a zero grace period because a probe Pod is fake: no kubelet
+// confirms it stopped, so a graceful delete would leave it Terminating for the
+// default grace period and hold its Pod slot on the Node.
+func (c *SimulatedCluster) removeProbePods(ctx context.Context) error {
+	removing, cancel := context.WithTimeout(ctx, startTimeout)
+	defer cancel()
+
+	immediately := int64(0)
+	if err := c.client.CoreV1().Pods(workloadNamespace).DeleteCollection(removing,
+		metav1.DeleteOptions{GracePeriodSeconds: &immediately},
+		metav1.ListOptions{LabelSelector: probeSelector()}); err != nil {
+		return fmt.Errorf("remove the probe Pods of %s: %w", c.Name(), err)
+	}
+
+	for {
+		remaining, err := c.probePods(removing)
+		if err != nil {
+			return err
+		}
+		if len(remaining) == 0 {
+			return nil
+		}
+
+		select {
+		case <-removing.Done():
+			return fmt.Errorf("%d probe Pods of %s were still there %s after their removal",
+				len(remaining), c.Name(), startTimeout)
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+// probePods are the probe Pods the cluster currently holds, read by the label
+// provisioning marks its own Pods with.
+func (c *SimulatedCluster) probePods(ctx context.Context) ([]corev1.Pod, error) {
+	listed, err := c.client.CoreV1().Pods(workloadNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: probeSelector(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list the probe Pods of %s: %w", c.Name(), err)
+	}
+
+	return listed.Items, nil
+}
+
+// nodesWithoutProbe names the declared Nodes that are absent from holding, in
+// declaration order.
+func nodesWithoutProbe(declared []scenario.Node, holding []string) []string {
+	unheld := make([]string, 0, len(declared))
+	for _, node := range declared {
+		if !slices.Contains(holding, node.Name) {
+			unheld = append(unheld, node.Name)
+		}
+	}
+
+	return unheld
+}
+
+// Deploy creates the Workload's Deployment, so the control plane's own
+// controllers produce the Placement.
+func (c *SimulatedCluster) Deploy(ctx context.Context, workload scenario.Workload) error {
+	if _, err := c.client.AppsV1().Deployments(workloadNamespace).Create(ctx, toDeployment(workload), metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("deploy the Workload %s: %w", workload.Name(), err)
+	}
+
+	return nil
+}
+
+// ReadyNodes are the Nodes this cluster reports Ready, each with the Zone read
+// from its own label. They are the Nodes a Placement is read against.
+func (c *SimulatedCluster) ReadyNodes(ctx context.Context) ([]scenario.Node, error) {
+	listed, err := c.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list the Nodes of %s: %w", c.Name(), err)
+	}
+
+	return fromNodes(readyNodesIn(listed.Items))
+}
+
+// Observe reads one Placement of the Workload against the Nodes that could hold
+// its Pods.
+func (c *SimulatedCluster) Observe(ctx context.Context, workload scenario.Workload) (scenario.Placement, error) {
+	nodes, err := c.ReadyNodes(ctx)
+	if err != nil {
+		return scenario.Placement{}, err
+	}
+
+	listed, err := c.client.CoreV1().Pods(workloadNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: podSelectorOf(workload),
+	})
+	if err != nil {
+		return scenario.Placement{}, fmt.Errorf("list the Pods of the Workload %s: %w", workload.Name(), err)
+	}
+
+	return scenario.NewPlacement(nodes, fromPods(listed.Items)), nil
+}
+
+// AwaitSettled is the only wait in the project: it polls one Workload's Placement
+// until it has settled, or the settle timeout expires. The control plane is
+// eventually consistent, so every reported Placement comes from here rather than
+// from a single observation.
+func (c *SimulatedCluster) AwaitSettled(ctx context.Context, workload scenario.Workload) (scenario.Placement, error) {
+	settling, cancel := context.WithTimeout(ctx, settleTimeout)
+	defer cancel()
+
+	previous, err := c.Observe(settling, workload)
+	if err != nil {
+		return scenario.Placement{}, err
+	}
+
+	for {
+		select {
+		case <-settling.Done():
+			return scenario.Placement{}, fmt.Errorf("the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes",
+				workload.Name(), settleTimeout, len(previous.Pods()), workload.Pods(), len(previous.Nodes()))
+		case <-time.After(pollInterval):
+		}
+
+		current, err := c.Observe(settling, workload)
+		if err != nil {
+			return scenario.Placement{}, err
+		}
+		if hasSettled(previous, current, workload) {
+			return current, nil
+		}
+		previous = current
+	}
+}
+
+// hasSettled reports whether current can be the Workload's settled Placement:
+// every Pod it declares has been created, and this observation agrees with the
+// one before it.
+//
+// The Pod count is part of the condition because a Deployment's Pods appear a
+// moment after the Deployment does. Two observations taken in that moment agree
+// on finding nothing, which is an early Placement rather than a settled one. A
+// Pod that cannot be placed still counts, because the control plane creates it
+// and reports it Pending (edge case 1).
+func hasSettled(previous, current scenario.Placement, workload scenario.Workload) bool {
+	return len(current.Pods()) >= workload.Pods() && current.Equal(previous)
+}
+
+// Close removes the Simulated Cluster this run provisioned. The runner defers it
+// around each Scenario, so a Scenario that fails part-way through its steps still
+// loses its cluster, per docs/adr/2026-10-04-cluster-per-scenario.md.
+func (c *SimulatedCluster) Close(ctx context.Context) error {
+	return c.container.Remove(ctx)
+}

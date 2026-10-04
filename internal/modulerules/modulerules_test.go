@@ -1,0 +1,192 @@
+package modulerules_test
+
+import (
+	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/woditschka/k8s-resilience-lab/internal/expect"
+	"github.com/woditschka/k8s-resilience-lab/internal/modulerules"
+)
+
+const (
+	// everyPackageInTheModule is the pattern a module-wide rule is asserted over.
+	everyPackageInTheModule = "./..."
+
+	// probedModulePath is the module path of the module each test below builds.
+	probedModulePath = "probed"
+
+	// importedPath is the path the built module imports, and unimportedPath a path
+	// no file in it names.
+	importedPath   = "encoding/json"
+	unimportedPath = "k8s.io/client-go/rest"
+
+	// scannedCall is the function the call-rule scan looks for, and callAlias the
+	// name the calling file imports its package under, so the scan has to resolve
+	// the alias rather than match the text of the call.
+	scannedCall = "InClusterConfig"
+	callAlias   = "rename"
+
+	// callAtLine and callAtColumn are where the call sits in callingSource.
+	callAtLine   = 5
+	callAtColumn = 18
+)
+
+// importingSource imports a denied path; callingSource calls a denied function
+// through a renamed import, and cleanSource names neither.
+const (
+	importingSource = `package probed
+
+import "encoding/json"
+
+var Decoder = json.NewDecoder
+`
+
+	callingSource = `package probed
+
+import rename "k8s.io/client-go/rest"
+
+var Reached, _ = rename.InClusterConfig()
+`
+
+	cleanSource = `package probed
+
+var Nothing = "nothing denied here"
+`
+
+	importingTestSource = `package probed
+
+import "encoding/json"
+
+var TestDecoder = json.NewDecoder
+`
+)
+
+func TestAPackageImportingADeniedPath_ShouldBeNamedWithThePathItImports(t *testing.T) {
+	probed := aModuleWhoseFilesAre(t, map[string]string{"decode.go": importingSource})
+
+	offenders, err := modulerules.OffendingImporters(t.Context(), probed, everyPackageInTheModule, modulerules.EveryPackage, []string{importedPath})
+	if err != nil {
+		t.Fatalf("walk the package graph of %s: %v", probed, err)
+	}
+
+	expect.Expect(t, offenders).To(expect.Equal([]string{
+		fmt.Sprintf("  %s imports %s", probedModulePath, importedPath),
+	}))
+}
+
+func TestAPathNoPackageOfTheModuleImports_ShouldBeReportedNowhere(t *testing.T) {
+	probed := aModuleWhoseFilesAre(t, map[string]string{"decode.go": importingSource})
+
+	offenders, err := modulerules.OffendingImporters(t.Context(), probed, everyPackageInTheModule, modulerules.EveryPackage, []string{unimportedPath})
+	if err != nil {
+		t.Fatalf("walk the package graph of %s: %v", probed, err)
+	}
+
+	expect.Expect(t, offenders).To(expect.HaveLen[string](0))
+}
+
+func TestAPathOnlyATestFileImports_ShouldBeReportedAtTheWiderScopeAlone(t *testing.T) {
+	reportsPerScope := map[string]struct {
+		scope    modulerules.Scope
+		reported []string
+	}{
+		"every package of the module": {
+			scope: modulerules.EveryPackage,
+			reported: []string{
+				fmt.Sprintf("  %s [%s.test] imports %s", probedModulePath, probedModulePath, importedPath),
+			},
+		},
+		"the production packages alone": {
+			scope:    modulerules.ProductionPackagesOnly,
+			reported: nil,
+		},
+	}
+
+	for scope, expected := range reportsPerScope {
+		t.Run(scope, func(t *testing.T) {
+			probed := aModuleWhoseFilesAre(t, map[string]string{
+				"clean.go":       cleanSource,
+				"decode_test.go": importingTestSource,
+			})
+
+			offenders, err := modulerules.OffendingImporters(t.Context(), probed, everyPackageInTheModule, expected.scope, []string{importedPath})
+			if err != nil {
+				t.Fatalf("walk the package graph of %s: %v", probed, err)
+			}
+
+			expect.Expect(t, offenders).To(expect.Equal(expected.reported))
+		})
+	}
+}
+
+func TestACallThroughARenamedImport_ShouldBeNamedWithItsPosition(t *testing.T) {
+	probed := aModuleWhoseFilesAre(t, map[string]string{
+		"reach.go": callingSource,
+		"clean.go": cleanSource,
+	})
+
+	offenders, err := modulerules.CallsTo(probed, unimportedPath, scannedCall)
+	if err != nil {
+		t.Fatalf("scan the files under %s: %v", probed, err)
+	}
+
+	expect.Expect(t, offenders).To(expect.Equal([]string{
+		fmt.Sprintf("  %s:%d:%d calls %s.%s",
+			filepath.Join(probed, "reach.go"), callAtLine, callAtColumn, callAlias, scannedCall),
+	}))
+}
+
+func TestAFileCallingNothingDenied_ShouldBeReportedNowhere(t *testing.T) {
+	probed := aModuleWhoseFilesAre(t, map[string]string{"clean.go": cleanSource})
+
+	offenders, err := modulerules.CallsTo(probed, unimportedPath, scannedCall)
+	if err != nil {
+		t.Fatalf("scan the files under %s: %v", probed, err)
+	}
+
+	expect.Expect(t, offenders).To(expect.HaveLen[string](0))
+}
+
+func TestADirectoryUnderNoModule_ShouldBeRefusedRatherThanWalked(t *testing.T) {
+	outsideAnyModule := t.TempDir()
+
+	_, err := modulerules.Root(t.Context(), outsideAnyModule)
+
+	if err == nil {
+		t.Fatalf("a directory under no module is refused, but %s was accepted", outsideAnyModule)
+	}
+}
+
+func TestTheRootOfAModule_ShouldBeTheDirectoryHoldingItsModuleFile(t *testing.T) {
+	probed := aModuleWhoseFilesAre(t, map[string]string{"clean.go": cleanSource})
+
+	root, err := modulerules.Root(t.Context(), probed)
+	if err != nil {
+		t.Fatalf("locate the root of the module in %s: %v", probed, err)
+	}
+
+	expect.Expect(t, root).To(expect.Equal(probed))
+}
+
+// aModuleWhoseFilesAre is the named default for a module the rules are asserted
+// over: a directory of its own holding a module file and the named sources, each
+// declaring the one package. The module requires nothing, so the graph walk needs
+// no download.
+func aModuleWhoseFilesAre(t *testing.T, sources map[string]string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	written := map[string]string{"go.mod": fmt.Sprintf("module %s\n\ngo 1.27\n", probedModulePath)}
+	maps.Copy(written, sources)
+
+	for name, content := range written {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s of the probed module: %v", name, err)
+		}
+	}
+
+	return root
+}
