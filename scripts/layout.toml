@@ -46,6 +46,7 @@ prod_roots = [
     "internal/",
     "cmd/",
     "pkg/",
+    "scenarios/",
     "main.go",
 ]
 
@@ -98,6 +99,10 @@ extensions = []
 # gitignore re-include and the doctor's untracked check also key on it). The
 # coordinator gate waits on the floor plus every name here. Reviewers are named `*-reviewer`.
 extra_reviewers = []
+# Word ceilings for the two docs the doctor budgets. Lower than the harness
+# defaults: this is a small project.
+prd_max_words = 8000
+system_design_max_words = 8000
 
 # Change grading: whether the pipeline auto-dispatches the terminal, advisory
 # change-grader once the roster approves. The grader judges how much human
@@ -183,6 +188,10 @@ from = "dir"
 
 [[module]]
 match = "pkg/**"
+from = "dir"
+
+[[module]]
+match = "scenarios/**"
 from = "dir"
 
 [[module]]

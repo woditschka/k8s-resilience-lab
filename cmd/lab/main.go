@@ -18,9 +18,9 @@ import (
 	"strings"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
-	"github.com/woditschka/k8s-resilience-lab/internal/expect"
+	"github.com/woditschka/k8s-resilience-lab/internal/lab"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
-	"github.com/woditschka/k8s-resilience-lab/internal/scenarios"
+	"github.com/woditschka/k8s-resilience-lab/scenarios"
 )
 
 func main() {
@@ -51,10 +51,14 @@ func run(ctx context.Context, arguments []string, report, warnings io.Writer) er
 	reported.printf("engine version:     %s\n", engine.EngineVersion())
 	reported.printf("Kubernetes version: %s\n", version)
 
-	// One Scenario today. Running every Scenario of the lab, and selecting one by
-	// name, are REQ-SIM-002 and REQ-SIM-003.
-	if err := runScenario(ctx, engine, version, scenarios.EvenSpreadName, scenarios.EvenSpread, reported); err != nil {
-		return err
+	// The Scenarios the lab holds, in the order the list beside them names: the
+	// command names no Scenario, so adding one touches the Scenarios' place alone.
+	// Selecting one by name is REQ-SIM-003.
+	runner := lab.NewRunner(engine, version)
+	for _, steps := range scenarios.All() {
+		if err := runScenario(ctx, runner, steps, reported); err != nil {
+			return err
+		}
 	}
 
 	return reported.err
@@ -77,42 +81,52 @@ func resolveVersion(arguments []string, warnings io.Writer) (cluster.KubernetesV
 	return cluster.ParseKubernetesVersion(*named)
 }
 
-// scenarioFunc is one Scenario: a function over a Simulated Cluster provisioned
-// for it, reporting what it asserted and returning the Placement it observed.
-type scenarioFunc func(context.Context, *cluster.SimulatedCluster, expect.T) (scenario.Placement, error)
-
-// runScenario provisions a Simulated Cluster for one Scenario, runs it, and
-// removes that cluster whether the Scenario passed, failed or returned an error.
-func runScenario(ctx context.Context, engine cluster.Endpoint, version cluster.KubernetesVersion, name string, steps scenarioFunc, report *runReport) error {
-	provisioned, err := cluster.Provision(ctx, engine, version, name)
+// runScenario runs one Scenario through the runner and reports the name it ran
+// under, the Steps it carried out, what it found, and the Placement it settled
+// at. The run name is the runner's to derive, so the command names no Scenario.
+func runScenario(ctx context.Context, runner *lab.Runner, steps func(*lab.Scenario), report *runReport) error {
+	outcome, err := runner.Run(ctx, steps)
 	if err != nil {
 		return err
 	}
-	report.printf("\nScenario %s, on %s\n", name, provisioned.Name())
 
-	// The removal is deferred here rather than left to the Scenario, so a Scenario
-	// that fails part-way through its steps still loses its cluster, per
-	// docs/adr/2026-10-04-cluster-per-scenario.md. The context is detached from
-	// ctx so that a cancelled run still removes what it created.
-	defer func() {
-		if err := provisioned.Close(context.WithoutCancel(ctx)); err != nil {
-			report.printf("could not remove the Simulated Cluster: %v\n", err)
-		}
-	}()
-
-	var reported scenarioReport
-	settled, err := steps(ctx, provisioned, &reported)
-	if err != nil {
-		return fmt.Errorf("the Scenario %s: %w", name, err)
+	report.printf("\nScenario %s, on %s\n", outcome.Name, outcome.Cluster)
+	writeSteps(report, outcome)
+	if !outcome.Ended() {
+		writePlacement(report, outcome.Placement)
 	}
 
-	writePlacement(report, settled)
+	return didNotHold(outcome)
+}
 
-	if failed := reported.failures; len(failed) > 0 {
-		return fmt.Errorf("the Scenario %s did not hold:\n  %s", name, strings.Join(failed, "\n  "))
+// writeSteps reports every Step the Scenario carried out, in order, so the run
+// reads the way the Scenario does, and every Finding under them.
+func writeSteps(report *runReport, outcome lab.Outcome) {
+	for _, step := range outcome.Steps {
+		report.printf("  %s\n", step)
 	}
 
-	return nil
+	for _, finding := range outcome.Findings {
+		report.printf("  Finding, %s: %s\n", finding.Step, finding.Mismatch)
+	}
+}
+
+// didNotHold names what stopped a Scenario or what it found, so a run whose
+// Scenario ended at a Step or reported a Finding exits non-zero.
+func didNotHold(outcome lab.Outcome) error {
+	if outcome.Held() {
+		return nil
+	}
+	if outcome.Ended() {
+		return fmt.Errorf("the Scenario %s ended at %s: %w", outcome.Name, outcome.EndedAt, outcome.Cause)
+	}
+
+	found := make([]string, 0, len(outcome.Findings))
+	for _, finding := range outcome.Findings {
+		found = append(found, fmt.Sprintf("%s: %s", finding.Step, finding.Mismatch))
+	}
+
+	return fmt.Errorf("the Scenario %s did not hold:\n  %s", outcome.Name, strings.Join(found, "\n  "))
 }
 
 // writePlacement reports a Settled Placement per Zone and per Node, in name
@@ -152,17 +166,4 @@ func (r *runReport) printf(format string, args ...any) {
 	if _, err := fmt.Fprintf(r.to, format, args...); err != nil {
 		r.err = fmt.Errorf("write the run's report: %w", err)
 	}
-}
-
-// scenarioReport collects what a Scenario's assertions reported, so a Scenario
-// that does not hold is named with what failed and the run exits non-zero. It is
-// the Scenario-runner side of the interface *testing.T satisfies in a go test.
-type scenarioReport struct {
-	failures []string
-}
-
-func (*scenarioReport) Helper() {}
-
-func (r *scenarioReport) Errorf(format string, args ...any) {
-	r.failures = append(r.failures, fmt.Sprintf(format, args...))
 }

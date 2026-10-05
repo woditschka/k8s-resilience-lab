@@ -30,6 +30,24 @@ linters:
             - pkg: k8s.io
               desc: internal/scenario imports no Kubernetes package; Kubernetes types stay inside internal/cluster (docs/system-design.md § Package Structure)
 
+        # The Scenario rule: a Scenario source is Steps alone, so it reaches the
+        # Step surface and nothing else of the lab. It keeps the place an engineer
+        # finds the experiments in from re-accumulating machinery.
+        scenarios-hold-steps-alone:
+          files:
+            - "**/scenarios/**"
+          deny:
+            - pkg: github.com/woditschka/k8s-resilience-lab/internal/cluster
+              desc: a Scenario reaches the Simulated Cluster through its Steps; internal/lab is the one package naming both (docs/system-design.md § Package Structure)
+            - pkg: github.com/woditschka/k8s-resilience-lab/internal/scenario
+              desc: a Scenario declares through its Given Steps; the immutable values they construct stay behind internal/lab (docs/system-design.md § Package Structure)
+            - pkg: github.com/woditschka/k8s-resilience-lab/internal/expect
+              desc: a Scenario judges through its Then Steps; the assertion helper stays behind internal/lab (docs/system-design.md § Package Structure)
+            - pkg: github.com/woditschka/k8s-resilience-lab/internal/modulerules
+              desc: the module-rule helpers are for test files, and the rules governing the Scenarios live with the machinery (docs/adr/2026-10-04-module-rule-test-support.md)
+            - pkg: k8s.io
+              desc: a Scenario names no Kubernetes type; Kubernetes types stay inside internal/cluster (docs/system-design.md § Package Structure)
+
         # The credential rule, module-wide: the lab drives only the Simulated
         # Cluster it provisioned itself, so no package may reach a kubeconfig, a
         # home directory holding one, or a credential plugin. NG-1 made mechanical.

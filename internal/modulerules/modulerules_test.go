@@ -32,6 +32,10 @@ const (
 	// callAtLine and callAtColumn are where the call sits in callingSource.
 	callAtLine   = 5
 	callAtColumn = 18
+
+	// declaredType is the type scannedSource writes on the one constant that names
+	// one, which is what a rule over a declaration of a named type reads.
+	declaredType = "Name"
 )
 
 // importingSource imports a denied path; callingSource calls a denied function
@@ -61,6 +65,29 @@ var Nothing = "nothing denied here"
 import "encoding/json"
 
 var TestDecoder = json.NewDecoder
+`
+
+	// scannedSource holds one of each top-level declaration, so a scan of it
+	// reports every kind, the type a declaration names where it names one, the
+	// parameters a function takes and the lines of its body.
+	scannedSource = `package probed
+
+import "encoding/json"
+
+type Decoded struct{}
+
+type Name string
+
+const limit = 1
+
+const Labelled Name = "labelled"
+
+var Decoder = json.NewDecoder
+
+func Scan(into *Decoded, from string) {
+	Decoder(nil)
+	_ = from
+}
 `
 )
 
@@ -148,6 +175,51 @@ func TestAFileCallingNothingDenied_ShouldBeReportedNowhere(t *testing.T) {
 	}
 
 	expect.Expect(t, offenders).To(expect.HaveLen[string](0))
+}
+
+func TestAScannedGoFile_ShouldReportItsImportsAndEveryDeclarationItHolds(t *testing.T) {
+	probed := aModuleWhoseFilesAre(t, map[string]string{"scan.go": scannedSource})
+
+	scanned, err := modulerules.ScanGoFiles(probed, modulerules.ProductionGoFilesOnly)
+	if err != nil {
+		t.Fatalf("scan the Go files under %s: %v", probed, err)
+	}
+
+	expect.Expect(t, scanned).To(expect.Equal([]modulerules.GoFile{{
+		Path:    filepath.Join(probed, "scan.go"),
+		Package: probedModulePath,
+		Imports: []string{importedPath},
+		Declarations: []modulerules.Declaration{
+			{Kind: modulerules.TypeDeclaration, Name: "Decoded", Exported: true},
+			{Kind: modulerules.TypeDeclaration, Name: "Name", Exported: true},
+			{Kind: modulerules.ConstDeclaration, Name: "limit"},
+			{Kind: modulerules.ConstDeclaration, Name: "Labelled", Exported: true, Type: declaredType},
+			{Kind: modulerules.VarDeclaration, Name: "Decoder", Exported: true},
+			{
+				Kind:       modulerules.FuncDeclaration,
+				Name:       "Scan",
+				Exported:   true,
+				Parameters: []modulerules.Parameter{{Name: "into", Type: "*Decoded"}, {Name: "from", Type: "string"}},
+				Statements: []string{"Decoder(nil)", "_ = from"},
+			},
+		},
+	}}))
+}
+
+func TestAGoFileOfTestsAlone_ShouldBeScannedAtTheWiderFileSetAlone(t *testing.T) {
+	probed := aModuleWhoseFilesAre(t, map[string]string{"scan_test.go": importingTestSource})
+
+	shipped, err := modulerules.ScanGoFiles(probed, modulerules.ProductionGoFilesOnly)
+	if err != nil {
+		t.Fatalf("scan what the probed module ships: %v", err)
+	}
+	every, err := modulerules.ScanGoFiles(probed, modulerules.EveryGoFile)
+	if err != nil {
+		t.Fatalf("scan every Go file of the probed module: %v", err)
+	}
+
+	expect.Expect(t, shipped).To(expect.HaveLen[modulerules.GoFile](0))
+	expect.Expect(t, every).To(expect.HaveLen[modulerules.GoFile](1))
 }
 
 func TestADirectoryUnderNoModule_ShouldBeRefusedRatherThanWalked(t *testing.T) {

@@ -13,6 +13,12 @@ import "fmt"
 // zone-a, so the alphabet bounds how many a Topology can name.
 const maxZones = 'z' - 'a' + 1
 
+// DefaultNodeCapacity is what a declared Node holds when a Scenario names no
+// capacity. It leaves room for more than one Pod per Node, so an even Placement
+// is the scheduler honouring the Workload's declared spread rather than the
+// Nodes running out of room.
+const DefaultNodeCapacity = 10
+
 // NodeCapacity is what one Node can hold, so a Workload can declare more Pods
 // than its Topology has room for.
 type NodeCapacity struct {

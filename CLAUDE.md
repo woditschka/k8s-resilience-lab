@@ -37,7 +37,7 @@ Mid-slice, run `python3 scripts/handoff.py route` after each dispatch returns an
 
 ### Surfacing reviewer and grader output
 
-A subagent's final message returns as a tool result; the user sees only what the orchestrator relays. Report each reviewer's verdict — `approved`, `changes_requested`, or `blocked` — and relay the findings behind anything short of approval. Relay the change-grade report (verdict, rationale, per-facet notes) verbatim: it is the human's merge-decision signal, and nothing downstream acts on it. Summaries suffice for the pipeline's other internal hops. `auto_grade = false` keeps the `change-grader` out of the pipeline: it grades the final result alone, dispatched once per slice when the owner calls the slice final, before the commit.
+A subagent's final message returns as a tool result; the user sees only what the orchestrator relays. Report each reviewer's verdict — `approved`, `changes_requested`, or `blocked` — and relay the findings behind anything short of approval. Relay the change-grade report (verdict, rationale, per-facet notes) verbatim: it is the human's merge-decision signal, and nothing downstream acts on it. Summaries suffice for the pipeline's other internal hops. The `change-grader` runs as the terminal advisory hop unless `auto_grade = false` disables it. With the flag off, it runs only when the owner asks for it.
 
 ### Orchestrator economy
 

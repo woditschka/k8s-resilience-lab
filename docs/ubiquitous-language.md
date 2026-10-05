@@ -58,7 +58,11 @@
 
 **Required Capacity**: The minimum number of Running Pods a Workload needs to count as surviving a Failure. Relationships: judged twice per Failure — once immediately after it, once after Placement settles again. Avoid: quorum, minimum availability, headroom.
 
-**Scenario**: A named sequence of steps run against a Simulated Cluster, ending in an asserted Placement outcome. Relationships: a Scenario provisions one Simulated Cluster with one Topology, deploys one or more Workloads, and injects zero or more Failures. Avoid: test case, experiment, simulation.
+**Scenario**: A named sequence of Steps run against a Simulated Cluster, ending in an asserted Placement outcome. Relationships: a Scenario provisions one Simulated Cluster with one Topology, deploys one or more Workloads, and injects zero or more Failures. Avoid: test case, experiment, simulation.
+
+**Step**: One line of a Scenario, either a Given that sets up, a When that injects a Failure, or a Then that asserts an outcome. Relationships: a Scenario is a sequence of Steps; a Given declares a Topology or a Workload, a When injects one Failure, a Then asserts one Placement outcome. Avoid: stage, phase, clause, instruction.
+
+**Finding**: An outcome a Then asserts that the Placement does not meet. Relationships: a Finding is a result of the Scenario, unlike a Step that cannot be carried out, which ends it. Avoid: failure (that word is the injected loss), error, bug, violation.
 
 ## Example Dialogue
 

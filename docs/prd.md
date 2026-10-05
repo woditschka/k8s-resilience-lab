@@ -20,6 +20,7 @@ The lab serves two uses from one body of behavior. Unattended, it runs each Scen
 | G-1 | Placement under a declared Topology is verified automatically, with no real cluster involved. | Every Scenario runs unattended on a developer machine and in a build, needing only a container runtime. |
 | G-2 | The behavior each Scenario asserts is also demonstrable live. | An engineer starts the lab, watches the Placement of a running Workload, and injects a Failure without editing code. |
 | G-3 | A Workload's survival of a Failure is judged against a stated threshold. | Each Scenario names the Required Capacity it expects and judges it immediately after the Failure and again after Placement settles. |
+| G-4 | Writing and reading a Scenario takes no knowledge of the lab's machinery. | A Scenario is a sequence of Given, When and Then Steps and nothing else, and an engineer finds every Scenario in one place. |
 
 ## Non-Goals
 
@@ -52,6 +53,9 @@ One Scenario also runs on its own, named by the engineer, so a single behavior i
 <a id="req-sim-004"></a>
 A Scenario's outcome is trusted only when the lab itself is sound, and one command decides that. It checks the lab's own rules, runs the lab's own tests, and builds the lab `[REQ-SIM-004]`. The same command fails when any part of the lab could reach a cluster the lab did not provision itself `[REQ-SIM-004]`. The repository holds exactly one implementation of the lab `[REQ-SIM-004]`.
 
+<a id="req-sim-007"></a>
+The lab also accounts for what it depends on and for what it leaves open. The one command confirms every dependency is the one the lab declared `[REQ-SIM-007]`. It fails when a dependency carries a known vulnerability `[REQ-SIM-007]`. Its check for cluster access identifies each part of the lab exactly `[REQ-SIM-007]`. A part whose name resembles a permitted one is not mistaken for it `[REQ-SIM-007]`. Every connection the lab opens to a Simulated Cluster is closed when its work ends, the lab's own tests included `[REQ-SIM-007]`.
+
 **Done when:**
 
 - `[REQ-SIM-001]` given no Simulated Cluster is up, when Even spread runs, then the lab reports a Topology of three Zones with three Nodes each, every Node Ready.
@@ -73,6 +77,10 @@ A Scenario's outcome is trusted only when the lab itself is sound, and one comma
 - `[REQ-SIM-004]` given any one of those checks fails, when the one command finishes, then it reports failure.
 - `[REQ-SIM-004]` given a part of the lab could reach a cluster the lab did not provision itself, when the one command runs, then it fails and names that part.
 - `[REQ-SIM-004]` given the repository, when an engineer looks for the lab, then exactly one implementation of it is present.
+- `[REQ-SIM-007]` given a dependency differs from the one the lab declared, when the one command runs, then it fails and names that dependency.
+- `[REQ-SIM-007]` given a dependency carries a known vulnerability, when the one command runs, then it fails and names that vulnerability.
+- `[REQ-SIM-007]` given a part of the lab whose name resembles a permitted one, when the one command runs, then that part is reported rather than permitted.
+- `[REQ-SIM-007]` given the lab's own tests have run, when the run ends, then no connection the lab opened to a Simulated Cluster is still open.
 
 **Edge cases:**
 
@@ -83,6 +91,25 @@ A Scenario's outcome is trusted only when the lab itself is sound, and one comma
 5. A Scenario fails part-way through its steps. Its Simulated Cluster is removed anyway, and the run reports the failure.
 
 **ADR:** [ADR: Kubernetes version pin](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: The lab provisions the Simulated Cluster it drives](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: Each Scenario provisions its own Simulated Cluster](adr/2026-10-04-cluster-per-scenario.md) · [ADR: A Scenario's Workload declares the spread of its own Pods](adr/2026-10-04-scenario-declared-pod-spread.md)  ·  **Design:** [system-design.md](system-design.md)
+
+### Writing and finding a Scenario
+
+<a id="req-sim-006"></a>
+An engineer writes a Scenario as a short sequence of Steps, one per line `[REQ-SIM-006]`. A Given sets up the Topology and the Workload, a When injects a Failure, a Then asserts the Placement outcome `[REQ-SIM-006]`. A Scenario that injects no Failure has no When Step `[REQ-SIM-006]`. A Scenario handles no error of its own `[REQ-SIM-006]`. A Step that cannot be carried out ends the Scenario and names that Step `[REQ-SIM-006]`. A Then the Placement does not meet is reported as a Finding, and the Steps after it still run `[REQ-SIM-006]`.
+
+An engineer opening the repository finds every Scenario in one place `[REQ-SIM-006]`. The machinery that runs them is kept apart from them `[REQ-SIM-006]`. A README beside the Scenarios names each one and the outcome it asserts `[REQ-SIM-006]`.
+
+**Done when:**
+
+- `[REQ-SIM-006]` given any Scenario of the lab, when its lines are read, then each line is one Given, When or Then Step and no line handles an error.
+- `[REQ-SIM-006]` given a Scenario that injects no Failure, when it runs, then it carries no When Step and still reports its Placement.
+- `[REQ-SIM-006]` given a Step that cannot be carried out, when the Scenario runs, then it ends, names that Step, and runs no later Step.
+- `[REQ-SIM-006]` given a Then the Placement does not meet, when the Scenario runs, then the run reports the Finding and the later Steps still run.
+- `[REQ-SIM-006]` given Even spread written as Steps, when it runs, then it reports the Placement REQ-SIM-001 asserts.
+- `[REQ-SIM-006]` given an engineer opening the repository, when they look for the Scenarios, then one place holds every Scenario and nothing of the machinery.
+- `[REQ-SIM-006]` given that place, when an engineer reads its README, then the README names every Scenario and the outcome each asserts.
+
+**ADR:** [ADR: Scenarios are Go functions over immutable descriptions](adr/2026-10-03-scenarios-as-go-functions.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ## Superseded
 

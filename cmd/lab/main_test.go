@@ -27,6 +27,16 @@ const (
 	placementSettled = "Placement settled"
 )
 
+// The lines a run of the lab's own Scenarios is read by: the Even spread
+// Scenario's heading under the run name derived for it, the two Then Steps its
+// Placement has to meet, and what a Finding is reported under.
+const (
+	evenSpreadReported     = "Scenario even-spread"
+	threePodsPerZoneJudged = "Then 3 Pods per Zone"
+	onePodPerNodeJudged    = "Then 1 Pod per Node"
+	aFindingReported       = "Finding"
+)
+
 // requireEngine is the one guard every test that needs a container engine goes
 // through; on a machine where none answers the calling test fails here, naming
 // why, and it fails on its own, so every test that needs no engine still runs
@@ -66,6 +76,26 @@ func reportLacks(t *testing.T, reported, line string) {
 	if strings.Contains(reported, line) {
 		t.Errorf("the run reports no %q, but reported:\n%s", line, reported)
 	}
+}
+
+// This is where the lab's own Scenarios run: on a Simulated Cluster the run
+// provisions for each of them, which is what makes the Placement the control
+// plane's own doing. A Scenario has no test of its own — it is itself the check —
+// so the command's suite is what fails when one reports a Finding or ends at a
+// Step (docs/adr/2026-10-03-scenarios-as-go-functions.md).
+func TestEvenSpreadWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNode(t *testing.T) {
+	requireEngine(t)
+
+	reported, err := aRun(t)
+	if err != nil {
+		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
+	}
+
+	reportShows(t, reported, evenSpreadReported)
+	reportShows(t, reported, threePodsPerZoneJudged)
+	reportShows(t, reported, onePodPerNodeJudged)
+	reportShows(t, reported, placementSettled)
+	reportLacks(t, reported, aFindingReported)
 }
 
 func TestARunNamingNoVersion_ShouldReportThePinnedDefaultVersion(t *testing.T) {
