@@ -109,6 +109,30 @@ func (p Placement) PodsPerZone() map[string]int {
 	return counts
 }
 
+// PodsItCannotAccountFor are the Pods this observation found on a Node it was
+// not read against. It can name no Zone for such a Pod, so it counts it in none,
+// which is why the Placement reports it rather than passing it over.
+//
+// An unplaced Pod is accounted for: the observation holds no Node for it because
+// the control plane has placed it nowhere, which the Placement already states.
+// A Pod on a Node that has left the observation is the other case — a Node that
+// stopped responding still holding a Pod the control plane has yet to move.
+func (p Placement) PodsItCannotAccountFor() []Pod {
+	held := make(map[string]struct{}, len(p.nodes))
+	for _, node := range p.nodes {
+		held[node.Name] = struct{}{}
+	}
+
+	var unaccounted []Pod
+	for _, pod := range p.pods {
+		if _, known := held[pod.Node]; pod.Placed() && !known {
+			unaccounted = append(unaccounted, pod)
+		}
+	}
+
+	return unaccounted
+}
+
 // Skew is the gap between the fullest and the emptiest domain of this
 // observation: zero when every domain holds the same number of Pods.
 func (p Placement) Skew(domain SpreadDomain) int {

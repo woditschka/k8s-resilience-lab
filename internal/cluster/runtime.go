@@ -391,6 +391,57 @@ const containerNamePrefix = "k8s-resilience-lab"
 // name the same container (docs/adr/2026-10-04-cluster-per-scenario.md).
 const invocationSuffixLength = 8
 
+// NodeHeartbeatFactor is the factor the cluster's heartbeat timings run at under
+// the lab, and DefaultNodeHeartbeatFactor the image's own factor that it
+// replaces. They are the factors as the container's argument spells them, so the
+// setting a run reports and the setting its container is created with cannot
+// drift.
+//
+// The image scales every heartbeat duration by five — a Node lease of 200s, a
+// monitor period of 25s and a grace period of 3m20s — which is longer than a
+// Scenario waits for a Placement to settle. At one, the stock Kubernetes set is
+// restored coherently, so a Node the lab reports unresponsive is noticed within
+// one monitor period rather than after minutes.
+const (
+	NodeHeartbeatFactor        = "1"
+	DefaultNodeHeartbeatFactor = "5"
+)
+
+// heartbeatFactorArgument puts the cluster's heartbeat timings back to the ones
+// Kubernetes itself runs on.
+const heartbeatFactorArgument = "--heartbeat-factor=" + NodeHeartbeatFactor
+
+// manageAllNodesArgument and manageMarkedNodesArgument are what make the KWOK
+// controller maintain the Nodes carrying the lab's marking alone. The image
+// starts it managing every Node, which is why switching that off is not
+// optional: managing all either beats a selector or is refused beside one, and
+// an extra argument is appended after kwokctl's own, where a repeated boolean
+// flag takes the last value.
+//
+// The selector is composed from the same two constants a Node is created with
+// (resources.go toNode), so the marking cannot drift between creation and
+// selection. Taking that label off a Node is then how a Failure leaves it
+// unmaintained, per
+// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
+const (
+	manageAllNodesArgument    = "--extra-args=kwok-controller=manage-all-nodes=false"
+	manageMarkedNodesArgument = "--extra-args=kwok-controller=manage-nodes-with-label-selector=" + fakeNodeLabel + "=" + fakeNodeLabelValue
+)
+
+// clusterArguments are the arguments every Simulated Cluster's container is
+// created with. The image's entrypoint forwards them verbatim to the command
+// that creates the cluster inside it.
+//
+// They are package constants and nothing else. No run input reaches the image,
+// the container or its arguments, which is the same property the pinned
+// repository and the composed container name carry
+// (docs/system-design.md § Threat Model).
+var clusterArguments = []string{
+	heartbeatFactorArgument,
+	manageAllNodesArgument,
+	manageMarkedNodesArgument,
+}
+
 // Engine is the restricted engine surface over one resolved unix socket, bound to
 // the one container it may create and to nothing else on the machine.
 //
@@ -488,10 +539,12 @@ func (e Engine) pullWhenAbsent(ctx context.Context, image string) error {
 }
 
 // createContainer creates this Scenario's container from image, publishing the
-// API server's port on a loopback host port the engine chooses.
+// API server's port on a loopback host port the engine chooses and passing the
+// arguments the cluster inside it runs with.
 func (e Engine) createContainer(ctx context.Context, image string) (string, error) {
 	requested, err := json.Marshal(map[string]any{
 		"Image":        image,
+		"Cmd":          clusterArguments,
 		"ExposedPorts": map[string]any{apiServerPort: map[string]any{}},
 		"HostConfig": map[string]any{
 			"PortBindings": map[string]any{

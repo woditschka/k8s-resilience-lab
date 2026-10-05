@@ -61,6 +61,14 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	reported.printf("engine socket:      %s\n", engine.Socket())
 	reported.printf("engine version:     %s\n", engine.EngineVersion())
 	reported.printf("Kubernetes version: %s\n", asked.version)
+	// Each waiting setting the lab makes is reported against the default it
+	// replaces, and no total is derived from them: what a run waits for after a
+	// Failure is the control plane's to decide, and these two are only the parts
+	// the lab sets (docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md).
+	reported.printf("unresponsive Node:  its Pods leave after %s, where a default cluster waits %s\n",
+		cluster.UnresponsiveNodeWait, cluster.DefaultUnresponsiveNodeWait)
+	reported.printf("Node heartbeats:    at factor %s, where this cluster image runs them at factor %s\n",
+		cluster.NodeHeartbeatFactor, cluster.DefaultNodeHeartbeatFactor)
 
 	// The Scenarios the lab holds, in the order the list beside them names: the
 	// command names no Scenario, so adding one touches the Scenarios' place alone.

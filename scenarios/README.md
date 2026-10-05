@@ -25,6 +25,30 @@ The Scenario the lab starts from: with room on every Node for more than one Pod,
 is the scheduler honouring the Workload's declared spread rather than the Nodes running out of
 space.
 
+## Node loss
+
+`node_loss.go`, running as `node-loss`
+
+| | |
+|---|---|
+| Given | three Zones of three Nodes |
+| Given | the `Checkout` Workload of nine Pods, spread evenly over the Zones and over the Nodes |
+| When | one Node fails |
+| Then | every Pod is Running |
+| Then | three Pods sit in every Zone |
+| Then | no Pod sits on the Nodes that failed |
+
+Even spread's world, and then one Node stops responding. The When says how many Nodes fail rather than
+naming one: the lab picks the first Nodes the declared Topology derives, the same pick on every run,
+and reports which in the Step's own line. The Scenario waits for the Placement to settle before the
+Failure, and the Thens after it judge the Placement the control plane reached next.
+
+Nothing here moves a Pod. Noticing the Node, tainting it and replacing its Pods on the Nodes still
+responding are the control plane's own doing, which is what makes the judged Placement an observation
+about Kubernetes rather than about the lab. The lab does shorten one wait: a Pod leaves an
+unresponsive Node after seconds rather than the five minutes a default cluster allows, and every run
+reports that setting at its start.
+
 ## Writing one
 
 A Step declares or judges; it never handles an error. A Given constructs the Topology or the

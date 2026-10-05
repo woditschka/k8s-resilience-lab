@@ -39,7 +39,7 @@ The lab serves two uses from one body of behavior. Unattended, it runs each Scen
 ### Simulated cluster lab
 
 <a id="req-sim-001"></a>
-The lab brings up a Simulated Cluster of its own for every Scenario and provisions that Scenario's Topology into it before any Workload is deployed `[REQ-SIM-001]`. Each Scenario names the Topology it provisions, the Workload it deploys with the rules that constrain where its Pods may land, and the Placement it asserts `[REQ-SIM-001]`. The lab reports that Placement per Zone and per Node, counting the Pods that are Running and the Pods that stay Pending `[REQ-SIM-001]`. Zone and Node names follow from the Topology alone, so every run of the same Topology reports the same names `[REQ-SIM-001]`. A Scenario's Simulated Cluster is removed when the Scenario ends, also when it fails `[REQ-SIM-001]`. No Node or Pod of an earlier Scenario can be mistaken for a current one `[REQ-SIM-001]`.
+The lab brings up a Simulated Cluster of its own for every Scenario and provisions that Scenario's Topology into it before any Workload is deployed `[REQ-SIM-001]`. Each Scenario names the Topology it provisions, the Workload it deploys with the rules that constrain where its Pods may land, and the Placement it asserts `[REQ-SIM-001]`. The lab reports that Placement per Zone and per Node, counting the Pods that are Running and the Pods that stay Pending `[REQ-SIM-001]`. Zone and Node names follow from the Topology alone, so every run of the same Topology reports the same names `[REQ-SIM-001]`. Each Zone is numbered from one in the order the Topology declares it, and each Node from one within its Zone `[REQ-SIM-001]`. A reported name therefore states the position its Zone or Node holds `[REQ-SIM-001]`. A Scenario's Simulated Cluster is removed when the Scenario ends, also when it fails `[REQ-SIM-001]`. No Node or Pod of an earlier Scenario can be mistaken for a current one `[REQ-SIM-001]`.
 
 The lab's main Scenario is Even spread. It provisions three Zones with three Nodes each, which leaves two Nodes in a Zone once one of its Nodes is lost `[REQ-SIM-001]`. Its nine-Pod Workload declares even spread over Zones and over Nodes, and the Scenario asserts three Pods in every Zone and one Pod on every Node `[REQ-SIM-001]`.
 
@@ -63,6 +63,7 @@ The lab also accounts for what it depends on and for what it leaves open. The on
 - `[REQ-SIM-001]` given Even spread's Topology, when its nine-Pod Workload is deployed, then the reported Placement is Settled at nine Running Pods, three in every Zone and one on every Node.
 - `[REQ-SIM-001]` given an earlier run created Nodes and Pods, when a run starts, then the reported Placement names only the Nodes and Pods of the current run.
 - `[REQ-SIM-001]` given the same Topology, when two runs are compared, then both report the same Zone and Node names.
+- `[REQ-SIM-001]` given a Topology of three Zones, when a run reports its Placement, then each Zone and each Node is named by its position, counted from one.
 - `[REQ-SIM-001]` given a run names no Kubernetes version, when it starts, then it reports the lab's pinned default version.
 - `[REQ-SIM-001]` given a run names a Kubernetes version, when it starts, then its Simulated Cluster mirrors that version and the run reports it.
 - `[REQ-SIM-001]` given other containers run on the machine, when a run starts and ends, then the lab's own Simulated Cluster is created and removed and no other container is touched.
@@ -92,6 +93,31 @@ The lab also accounts for what it depends on and for what it leaves open. The on
 5. A Scenario fails part-way through its steps. Its Simulated Cluster is removed anyway, and the run reports the failure.
 
 **ADR:** [ADR: Kubernetes version pin](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: The lab provisions the Simulated Cluster it drives](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: Each Scenario provisions its own Simulated Cluster](adr/2026-10-04-cluster-per-scenario.md) · [ADR: A Scenario's Workload declares the spread of its own Pods](adr/2026-10-04-scenario-declared-pod-spread.md)  ·  **Design:** [system-design.md](system-design.md)
+
+### Surviving a Node Failure
+
+<a id="req-sim-008"></a>
+A Scenario also injects a Failure and judges the Placement that settles next. Node loss starts from Even spread's Topology and Workload, then stops one Node responding, as a machine does when it hangs or loses its network `[REQ-SIM-008]`. That Node stays in the cluster, and the control plane moves its Pods away after a waiting time `[REQ-SIM-008]`. The lab sets that waiting time to a few seconds rather than the Kubernetes default, and every run reports it `[REQ-SIM-008]`. A Scenario therefore states no waiting time of its own `[REQ-SIM-008]`.
+
+Node loss says how many Nodes fail, and the lab picks them the same way on every run and reports which `[REQ-SIM-008]`. The Step that injects the Failure carries no Node name, so the failing Node is readable from the Scenario's own Steps `[REQ-SIM-008]`.
+
+Once the Placement settles again, Node loss asserts nine Running Pods, three in every Zone, and none on the Node that stopped responding `[REQ-SIM-008]`. One surviving Node then holds two Pods, so Node loss asserts no Placement of one Pod per Node `[REQ-SIM-008]`.
+
+**Done when:**
+
+- `[REQ-SIM-008]` given Even spread's Topology and Workload are Settled, when one Node stops responding, then that Node's Pod is moved away within a few seconds.
+- `[REQ-SIM-008]` given a Node has stopped responding, when the Placement settles again, then nine Pods are Running, three in every Zone, and none on that Node.
+- `[REQ-SIM-008]` given Node loss says one Node fails, when it runs twice, then the same Node fails in both runs and the run reports which.
+- `[REQ-SIM-008]` given any run, when it starts, then it reports that Pods leave an unresponsive Node sooner than in a default cluster.
+- `[REQ-SIM-008]` given Node loss, when its lines are read, then one When Step injects the Failure, carries no Node name and states no waiting time.
+
+**Edge cases:**
+
+1. A Pod of the Node that stopped responding cannot be placed anywhere else. It stays Pending with the control plane's reason.
+2. A When asks for more failing Nodes than the Topology holds. The Scenario ends at that Step and names it.
+3. The Placement does not settle again within the lab's wait. The Scenario reports what it observed, rather than waiting longer.
+
+**ADR:** [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](adr/2026-10-05-node-failure-withholds-the-nodes-status.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ### Explaining a Placement after the run
 
@@ -160,4 +186,7 @@ An engineer opening the repository finds every Scenario in one place `[REQ-SIM-0
 - How long a Timeline file is kept, and whether the lab ever removes one.
 - How an engineer reaches a recorded Timeline beyond opening its file, and whether a Scenario may assert on its own Timeline.
 - Does the lab promise anything about a team's own production manifests, or only about the manifests it declares itself? A run mirrors a chosen Kubernetes version, so the stronger promise needs the Topology and the admission behavior to mirror a named environment as well.
-- Which Failure the Scenario after Even spread injects — Pod, Node, or Zone — and the Required Capacity it asserts (G-3).
+- The Required Capacity Node loss states, and what counts as a Running Pod at the judging moment right after the Failure, while the unresponsive Node still holds one (G-3). Also open: how a missed minimum is reported, and what a minimum above the Workload's Pod count does. The two judging moments G-3 names are settled; no Scenario states a Required Capacity yet.
+- Which Scenario first points at a Node by its position in the Topology its Given declared, rather than saying how many Nodes fail. Both forms are settled vocabulary; only the count form exists today, and a position the Topology does not hold has no stated outcome.
+- What limits how many Zones a Topology may name. The lab refuses a count above a limit of its own, and a numbered Zone name puts no bound on the count.
+- Which Failure the Scenario after Node loss injects — a Pod, a whole Zone, or a Node removed from the cluster rather than left unresponsive.

@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	provisionedZone = "zone-a"
-	anotherZone     = "zone-b"
-	aThirdZone      = "zone-c"
+	provisionedZone = "zone-1"
+	anotherZone     = "zone-2"
+	aThirdZone      = "zone-3"
 )
 
 // recordedReports is a T that keeps what a failing assertion reported instead of

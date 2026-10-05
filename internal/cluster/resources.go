@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"fmt"
+	"maps"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -24,8 +25,10 @@ const (
 	// one Workload's Pods and an observation reads one Workload's Pods.
 	workloadLabel = "k8s-resilience-lab/workload"
 
-	// fakeNodeAnnotation marks a Node for the KWOK controller to maintain, and
-	// fakeNodeLabel is the label KWOK's own stages select such a Node by.
+	// fakeNodeAnnotation marks a Node as one KWOK simulates, and fakeNodeLabel is
+	// the marking the KWOK controller is started to select the Nodes it maintains
+	// by (runtime.go manageMarkedNodesArgument). A Failure takes the label off its
+	// Node and leaves the annotation, so the Node still reads as a simulated one.
 	fakeNodeAnnotation      = "kwok.x-k8s.io/node"
 	fakeNodeAnnotationValue = "fake"
 	fakeNodeLabel           = "type"
@@ -35,6 +38,12 @@ const (
 	// provisioned Node is Ready at creation rather than after a heartbeat, per
 	// docs/adr/2026-10-03-go-program-on-a-kwok-simulated-cluster.md.
 	nodeReadyReason = "KubeletReady"
+
+	// nodeLostHeartbeatReason and nodeLostHeartbeatMessage are what a Node that
+	// stopped responding reports its Ready condition Unknown with: the words a
+	// control plane uses for a Node it has stopped hearing from.
+	nodeLostHeartbeatReason  = "NodeStatusUnknown"
+	nodeLostHeartbeatMessage = "Kubelet stopped posting node status."
 
 	// workloadImage is the image a Workload's Pod template names, and
 	// workloadContainer the container's name. The image is never pulled: a
@@ -52,6 +61,23 @@ const (
 	probeLabelValue    = "provisioning"
 	probePodNamePrefix = "provisioning-probe-"
 	probeContainer     = "probe"
+)
+
+// UnresponsiveNodeWait is how long a Pod stays on a Node that stopped
+// responding, and DefaultUnresponsiveNodeWait the admission default the lab's
+// own value replaces.
+//
+// The lab's value is short so a Scenario stays fast: it is above the interval a
+// Placement is polled at and far below the default, which is longer than the whole
+// settle wait. It is only part of what a run waits — the control plane's own
+// period for noticing adds seconds on top, and the lab sets that period too,
+// through the heartbeat factor its cluster container runs with (runtime.go
+// heartbeatFactorArgument) — so every run prints the settings it makes and claims
+// no total, per
+// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
+const (
+	UnresponsiveNodeWait        = 2 * time.Second
+	DefaultUnresponsiveNodeWait = 300 * time.Second
 )
 
 // observedPhases maps the phases the control plane reports onto the lab's own.
@@ -173,6 +199,7 @@ func toDeployment(workload scenario.Workload) *appsv1.Deployment {
 						{Name: workloadContainer, Image: workloadImage},
 					},
 					TopologySpreadConstraints: constraints,
+					Tolerations:               toNodeConditionTolerations(),
 				},
 			},
 		},
@@ -193,6 +220,71 @@ func toSpreadConstraint(rule scenario.SpreadRule, workloadName string) corev1.To
 		LabelSelector:     &metav1.LabelSelector{MatchLabels: workloadLabels(workloadName)},
 		NodeTaintsPolicy:  &honourTaints,
 	}
+}
+
+// toNodeConditionTolerations are the tolerations every Workload's Pod template
+// carries: the two taints the control plane adds to a Node it cannot reach,
+// tolerated for the lab's own waiting time rather than the admission default.
+//
+// The effect tolerated is NoExecute alone, so a Pod stays on a Node that stopped
+// responding for that time and no replacement is scheduled onto it, per
+// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
+func toNodeConditionTolerations() []corev1.Toleration {
+	leavingAfter := int64(UnresponsiveNodeWait.Seconds())
+	nodeConditions := []string{corev1.TaintNodeNotReady, corev1.TaintNodeUnreachable}
+
+	tolerations := make([]corev1.Toleration, 0, len(nodeConditions))
+	for _, condition := range nodeConditions {
+		tolerations = append(tolerations, corev1.Toleration{
+			Key:               condition,
+			Operator:          corev1.TolerationOpExists,
+			Effect:            corev1.TaintEffectNoExecute,
+			TolerationSeconds: &leavingAfter,
+		})
+	}
+
+	return tolerations
+}
+
+// toUnresponsive is the status of a Node that stopped responding: the status it
+// reported, with its Ready condition Unknown and the reason a lost heartbeat
+// carries. Every other condition is left as reported, because the lab stops the
+// Node answering and does not decide what else is true of it.
+func toUnresponsive(reported corev1.NodeStatus) corev1.NodeStatus {
+	unresponsive := reported
+	unresponsive.Conditions = append(conditionsOtherThanReady(reported.Conditions), corev1.NodeCondition{
+		Type:    corev1.NodeReady,
+		Status:  corev1.ConditionUnknown,
+		Reason:  nodeLostHeartbeatReason,
+		Message: nodeLostHeartbeatMessage,
+	})
+
+	return unresponsive
+}
+
+// conditionsOtherThanReady are the conditions a Node reports apart from its Ready
+// one, in a slice of their own, so replacing that one condition does not write
+// through the Node the lab read.
+func conditionsOtherThanReady(reported []corev1.NodeCondition) []corev1.NodeCondition {
+	others := make([]corev1.NodeCondition, 0, len(reported)+1)
+	for _, condition := range reported {
+		if condition.Type != corev1.NodeReady {
+			others = append(others, condition)
+		}
+	}
+
+	return others
+}
+
+// withoutTheKWOKMarking are the labels of a Node the KWOK controller no longer
+// maintains: the labels it carried, less the marking the controller selects by.
+// Its Zone and hostname labels stay, so the Node keeps its place in every
+// Topology read and every spread domain.
+func withoutTheKWOKMarking(labelled map[string]string) map[string]string {
+	unmarked := maps.Clone(labelled)
+	delete(unmarked, fakeNodeLabel)
+
+	return unmarked
 }
 
 // topologyKeyOf is the label a spread domain is counted over.
@@ -250,10 +342,17 @@ func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 }
 
 // fromPods reads the Pods of one observation, each with the Node the control
-// plane placed it on and the phase it reports.
+// plane placed it on and the phase it reports. A Pod the control plane has
+// marked for deletion is left out: it is leaving, which is how the Workload's
+// own ReplicaSet counts it, so a Pod still terminating on a Node that stopped
+// responding holds no place in the Placement, per
+// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
 func fromPods(observed []corev1.Pod) []scenario.Pod {
 	pods := make([]scenario.Pod, 0, len(observed))
 	for _, pod := range observed {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
 		pods = append(pods, scenario.Pod{
 			Name:  pod.Name,
 			Node:  pod.Spec.NodeName,

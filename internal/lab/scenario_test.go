@@ -9,6 +9,7 @@ package lab
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
@@ -43,6 +44,19 @@ const (
 	noPods                                   = 0
 	noSuchSpreadDomain scenario.SpreadDomain = "Racks"
 
+	// moreNodesThanTheTopologyHolds is a Failure that Topology cannot satisfy, so
+	// the When asking for it is a Step that cannot be carried out.
+	moreNodesThanTheTopologyHolds = twoZones*twoNodesPerZone + 1
+
+	// theWhenThatNeverRan is what a Then reading the Nodes a Failure stopped names
+	// when no When ran before it, which is what a reader has to add.
+	theWhenThatNeverRan = "no When"
+
+	// onePodLeftBehind is the Pod the control plane has not moved off the Node that
+	// stopped responding, and podLeftOnTheFailedNode what it is called there.
+	onePodLeftBehind       = 1
+	podLeftOnTheFailedNode = string(someWorkloadName) + "-left-behind"
+
 	// someWorkloadName is the name a Workload's Pods are labelled with. A Then
 	// counts Pods per domain and reads no meaning into the name, so it stands for
 	// any. It is named here rather than taken from the Scenarios' place, which
@@ -60,6 +74,13 @@ func aScenario() *Scenario {
 // world every Then judges in.
 func aScenarioOver(placed scenario.Placement) *Scenario {
 	return &Scenario{observed: placed, settled: true}
+}
+
+// aScenarioAfterFailing is a Scenario whose When stopped these Nodes responding
+// and which has settled at placed since, which is the world a Then reading the
+// Failure judges in.
+func aScenarioAfterFailing(placed scenario.Placement, stopped ...string) *Scenario {
+	return &Scenario{observed: placed, settled: true, failed: stopped}
 }
 
 // aTopologyOf is the Topology of the stated shape, at the capacity a Given
@@ -124,6 +145,62 @@ func onePodPerNodeOf(topology scenario.Topology) scenario.Placement {
 	return scenario.NewPlacement(nodes, placed)
 }
 
+// theNodeThatStopped is the Node a When of one Node stops responding: the first
+// the Topology derives, which is the pick internal/scenario makes.
+func theNodeThatStopped(topology scenario.Topology) string {
+	return topology.Nodes()[0].Name
+}
+
+// everyPodBackOnTheRespondingNodesOf is the Placement a Failure settles at: every
+// Pod the Workload declared Running on a Node still responding, and none on the
+// Node that stopped. That Node is no Ready Node, so the observation is read
+// against the rest.
+func everyPodBackOnTheRespondingNodesOf(topology scenario.Topology, stopped string) scenario.Placement {
+	responding := theNodesStillRespondingIn(topology, stopped)
+
+	return scenario.NewPlacement(responding, podsRunningOver(responding, podsOverEveryNode))
+}
+
+// onePodLeftOnTheFailedNodeOf is the same Placement observed while the control
+// plane has not moved one Pod off the Node that stopped: the Pod is counted under
+// that Node's name, because the report states what was observed.
+func onePodLeftOnTheFailedNodeOf(topology scenario.Topology, stopped string) scenario.Placement {
+	responding := theNodesStillRespondingIn(topology, stopped)
+	moved := podsRunningOver(responding, podsOverEveryNode-onePodLeftBehind)
+	leftBehind := scenario.Pod{Name: podLeftOnTheFailedNode, Node: stopped, Phase: scenario.PodRunning}
+
+	return scenario.NewPlacement(responding, append(moved, leftBehind))
+}
+
+// theNodesStillRespondingIn are the Nodes an observation is read against once
+// stopped has left it, which a Node that stopped responding does at once.
+func theNodesStillRespondingIn(topology scenario.Topology, stopped string) []scenario.Node {
+	declared := topology.Nodes()
+	responding := make([]scenario.Node, 0, len(declared))
+	for _, node := range declared {
+		if node.Name != stopped {
+			responding = append(responding, node)
+		}
+	}
+
+	return responding
+}
+
+// podsRunningOver is pods Running Pods dealt over these Nodes in turn, so a Node
+// takes a second Pod only once every Node holds one.
+func podsRunningOver(nodes []scenario.Node, pods int) []scenario.Pod {
+	placed := make([]scenario.Pod, 0, pods)
+	for at := range pods {
+		placed = append(placed, scenario.Pod{
+			Name:  fmt.Sprintf("%s-%d", someWorkloadName, at),
+			Node:  nodes[at%len(nodes)].Name,
+			Phase: scenario.PodRunning,
+		})
+	}
+
+	return placed
+}
+
 // everyPodOnOneNodeOf is a Placement of the same Pods crowded onto the first Node
 // of topology, which no even Then is met by.
 func everyPodOnOneNodeOf(topology scenario.Topology) scenario.Placement {
@@ -182,6 +259,16 @@ func podsPerZoneStepOf(pods int) Step {
 
 func podsPerNodeStepOf(pods int) Step {
 	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pod per Node", pods)}
+}
+
+// nodesFailStepOf is the Step a When records before it resolves the Nodes it
+// stops; once it has them, it renames that line to carry their names.
+func nodesFailStepOf(nodes int) Step {
+	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Nodes fail", nodes)}
+}
+
+func noPodsOnTheFailedNodesStep() Step {
+	return Step{Kind: ThenStep, Name: "no Pod on the Nodes that failed"}
 }
 
 // judgedFinding is one Finding as this suite reads it: the Step it names, and
@@ -281,6 +368,52 @@ func TestThenThePlacementDoesNotMeet_ShouldReportAFindingAndRunTheLaterSteps(t *
 	}))
 }
 
+// The two tests below judge the Then that reads a Failure where every sibling Then
+// is judged: over a Placement the test built, with no cluster. Stopping a Node
+// responding is the Simulated Cluster's, and this Then's own decision is a count
+// read off the Placement the Scenario settled at.
+func TestAPlacementHoldingNoPodOnTheNodesThatFailed_ShouldRecordNoFinding(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stopped := theNodeThatStopped(declared)
+	judging := aScenarioAfterFailing(everyPodBackOnTheRespondingNodesOf(declared, stopped), stopped)
+	judging.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+
+	judging.Then().NoPodsOnTheFailedNodes()
+	judging.Then().AllPodsRunning()
+
+	judged := judging.outcome()
+	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{}))
+	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		noPodsOnTheFailedNodesStep(),
+		allPodsRunningStep(),
+	}))
+}
+
+func TestAPlacementStillHoldingAPodOnANodeThatFailed_ShouldReportAFindingAndRunTheLaterSteps(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stopped := theNodeThatStopped(declared)
+	judging := aScenarioAfterFailing(onePodLeftOnTheFailedNodeOf(declared, stopped), stopped)
+	judging.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+
+	judging.Then().NoPodsOnTheFailedNodes()
+	judging.Then().AllPodsRunning()
+
+	judged := judging.outcome()
+	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{
+		{Step: noPodsOnTheFailedNodesStep(), Mismatching: true},
+	}))
+	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		noPodsOnTheFailedNodesStep(),
+		allPodsRunningStep(),
+	}))
+}
+
 func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testing.T) {
 	// Each case declares the same world up to the one Given its constructor
 	// refuses, and names the Steps recorded up to and including that line: a
@@ -369,6 +502,46 @@ func TestScenarioWithoutAFailure_ShouldCarryNoWhenStep(t *testing.T) {
 	expect.Expect(t, reported.Placement).To(expect.Equal(settled))
 }
 
+func TestAWhenAskingForMoreFailingNodesThanTheTopologyHolds_ShouldEndTheScenarioNamingThatStep(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	ending := aScenarioOver(onePodPerNodeOf(declared))
+	ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+
+	ending.When().NodesFail(Nodes(moreNodesThanTheTopologyHolds))
+	ending.Then().AllPodsRunning()
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(nodesFailStepOf(moreNodesThanTheTopologyHolds)))
+	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		nodesFailStepOf(moreNodesThanTheTopologyHolds),
+	}))
+	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+	causeNames(t, ended, fmt.Sprintf("a Failure of %d Nodes is refused", moreNodesThanTheTopologyHolds))
+}
+
+func TestAThenReadingAFailureWithNoWhenBeforeIt_ShouldEndTheScenarioNamingThatThen(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	ending := aScenarioOver(onePodPerNodeOf(declared))
+	ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+
+	ending.Then().NoPodsOnTheFailedNodes()
+	ending.Then().AllPodsRunning()
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(noPodsOnTheFailedNodesStep()))
+	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		noPodsOnTheFailedNodesStep(),
+	}))
+	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+	causeNames(t, ended, theWhenThatNeverRan)
+}
+
 // causeOf is why a Scenario ended, as a Scenario that ran to its last Step
 // reports no cause at all.
 func causeOf(reported Outcome) string {
@@ -377,6 +550,17 @@ func causeOf(reported Outcome) string {
 	}
 
 	return reported.Cause.Error()
+}
+
+// causeNames asserts a Scenario ended for a reason naming what a reader has to
+// act on, the way the suites of the refusing constructors read their own
+// refusals.
+func causeNames(t *testing.T, ended Outcome, named string) {
+	t.Helper()
+
+	if !strings.Contains(causeOf(ended), named) {
+		t.Errorf("the Scenario ended for a reason naming %q, but it reads: %s", named, causeOf(ended))
+	}
 }
 
 func TestAnEvenExpectation_ShouldGiveEveryDomainTheSameShare(t *testing.T) {

@@ -9,9 +9,10 @@ package scenario
 
 import "fmt"
 
-// maxZones is the highest Zone count a Topology admits: Zones are lettered from
-// zone-a, so the alphabet bounds how many a Topology can name.
-const maxZones = 'z' - 'a' + 1
+// maxZones is the highest Zone count a Topology admits. It is a limit of the
+// lab's own: what should bound a Zone count is an open question in
+// docs/prd.md, so the count admitted stands until that question is settled.
+const maxZones = 26
 
 // DefaultNodeCapacity is what a declared Node holds when a Scenario names no
 // capacity. It leaves room for more than one Pod per Node, so an even Placement
@@ -47,7 +48,7 @@ func (c NodeCapacity) Equal(other NodeCapacity) bool {
 }
 
 // Node is one simulated machine a Pod can be placed on, named after the Zone it
-// belongs to and its index within that Zone. A Topology derives every Node it
+// belongs to and its position within that Zone. A Topology derives every Node it
 // holds, so the type carries no invariant of its own.
 type Node struct {
 	Name     string
@@ -57,7 +58,8 @@ type Node struct {
 
 // Topology is the arrangement of Zones and Nodes a Scenario provisions. The same
 // Topology always expands to the same Zone and Node names, because every name is
-// derived from the Zone's letter and the Node's index rather than generated.
+// derived from positions counted from one rather than generated: a Zone zone-<n>,
+// a Node <zone>-node-<n>.
 type Topology struct {
 	zones        int
 	nodesPerZone int
@@ -65,13 +67,13 @@ type Topology struct {
 }
 
 // NewTopology builds the Topology a Scenario provisions, refusing a count it
-// could not provision or could not name.
+// could not provision and a Zone count past the lab's own limit.
 func NewTopology(zones, nodesPerZone int, capacity NodeCapacity) (Topology, error) {
 	if zones < 1 {
 		return Topology{}, fmt.Errorf("a Topology holds at least one Zone, so a count of %d Zones is refused", zones)
 	}
 	if zones > maxZones {
-		return Topology{}, fmt.Errorf("a Zone is lettered from zone-a, so a Topology names at most %d Zones and a count of %d is refused", maxZones, zones)
+		return Topology{}, fmt.Errorf("the lab's limit is %d Zones, so a count of %d Zones is refused", maxZones, zones)
 	}
 	if nodesPerZone < 1 {
 		return Topology{}, fmt.Errorf("a Zone holds at least one Node, so a count of %d Nodes per Zone is refused", nodesPerZone)
@@ -98,9 +100,9 @@ func (t Topology) Nodes() []Node {
 	return nodes
 }
 
-// zoneNameAt is the name of the Zone at index, lettered from zone-a.
+// zoneNameAt is the name of the Zone at index, numbered from one.
 func zoneNameAt(index int) string {
-	return fmt.Sprintf("zone-%c", 'a'+rune(index))
+	return fmt.Sprintf("zone-%d", index+1)
 }
 
 // nodeNameAt is the name of the Node at index within zoneName, numbered from one.

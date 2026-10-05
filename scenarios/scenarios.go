@@ -13,5 +13,6 @@ import "github.com/woditschka/k8s-resilience-lab/internal/lab"
 func All() []func(*lab.Scenario) {
 	return []func(*lab.Scenario){
 		AnEvenlySpreadWorkload_ShouldPlaceThreePodsPerZoneAndOnePerNode,
+		ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding,
 	}
 }

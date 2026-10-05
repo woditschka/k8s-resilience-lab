@@ -9,7 +9,9 @@ package lab
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,6 +24,10 @@ import (
 // emptiest domain differ by at most one Pod.
 const evenSkew = 1
 
+// noPod is what a Node that stopped responding holds once the control plane has
+// moved its Pods away.
+const noPod = 0
+
 // Zones is how many Zones a Topology Step declares.
 type Zones int
 
@@ -30,6 +36,11 @@ type NodesPerZone int
 
 // Pods is a count of Pods: what a Workload Step declares, or what one Node holds.
 type Pods int
+
+// Nodes is how many Nodes a When Step stops responding. A Scenario states the
+// count and the lab resolves which, so no Scenario names a Node by a string its
+// Givens do not derive.
+type Nodes int
 
 // WorkloadName is what a Workload Step deploys under, and what its Pods are
 // labelled with. A Scenario may name it outright; the lab's own Scenarios take
@@ -100,7 +111,17 @@ type Scenario struct {
 	steps    []Step
 	findings []Finding
 
+	// failed are the Nodes every When of this Scenario stopped responding, by
+	// name and in the order they were stopped, which is what the Thens reading a
+	// Failure judge against.
+	failed []string
+
 	observed scenario.Placement
+	// deployed is whether the declaration has reached the Simulated Cluster, and
+	// settled whether the Placement observed since the last Failure has settled. A
+	// When clears the settled flag alone, so the next Step awaits a fresh Settled
+	// Placement without the Topology being applied or the Workload deployed again.
+	deployed bool
 	settled  bool
 
 	endedAt Step
@@ -116,6 +137,11 @@ func newScenario(ctx context.Context, provisioned *cluster.SimulatedCluster) *Sc
 // Given opens a Given Step, which declares the world the Scenario runs in.
 func (s *Scenario) Given() Given {
 	return Given{scenario: s}
+}
+
+// When opens a When Step, which injects the Failure the Scenario studies.
+func (s *Scenario) When() When {
+	return When{scenario: s}
 }
 
 // Then opens a Then Step, which judges the Placement the Scenario settled at.
@@ -156,26 +182,19 @@ func (s *Scenario) end(step Step, cause error) {
 	s.cause = cause
 }
 
-// placement is the Settled Placement every Then judges. The declaration reaches
-// the Simulated Cluster here, at the first Step that needs an observed Placement:
-// the Topology is applied, the Workload deployed, and the Placement awaited, once
-// per Scenario. A Scenario that cannot get that far ends at the Step that needed
-// it, naming what it could not reach.
+// placement is the Settled Placement every Then judges: the one already observed,
+// or a fresh one awaited at this Step. A Scenario awaits one before its first
+// Then and one after every When, each within a budget of its own. A Scenario that
+// cannot get that far ends at the Step that needed it, naming what it could not
+// reach.
 func (s *Scenario) placement(at Step) (scenario.Placement, bool) {
 	if s.settled {
 		return s.observed, true
 	}
-
-	if err := s.provisioned.ApplyTopology(s.ctx, s.topology); err != nil {
-		s.end(at, fmt.Errorf("apply the Topology: %w", err))
-
+	if !s.deploy(at) {
 		return scenario.Placement{}, false
 	}
-	if err := s.provisioned.Deploy(s.ctx, s.workload); err != nil {
-		s.end(at, fmt.Errorf("deploy the Workload: %w", err))
 
-		return scenario.Placement{}, false
-	}
 	settled, err := s.provisioned.AwaitSettled(s.ctx, s.workload)
 	if err != nil {
 		s.end(at, fmt.Errorf("await the Settled Placement: %w", err))
@@ -186,6 +205,30 @@ func (s *Scenario) placement(at Step) (scenario.Placement, bool) {
 	s.observed, s.settled = settled, true
 
 	return s.observed, true
+}
+
+// deploy is where the declaration reaches the Simulated Cluster: the Topology is
+// applied and the Workload deployed, once per Scenario, at the first Step that
+// needs an observed Placement. A later Step awaits the Placement again without
+// declaring the world again.
+func (s *Scenario) deploy(at Step) bool {
+	if s.deployed {
+		return true
+	}
+
+	if err := s.provisioned.ApplyTopology(s.ctx, s.topology); err != nil {
+		s.end(at, fmt.Errorf("apply the Topology: %w", err))
+
+		return false
+	}
+	if err := s.provisioned.Deploy(s.ctx, s.workload); err != nil {
+		s.end(at, fmt.Errorf("deploy the Workload: %w", err))
+
+		return false
+	}
+	s.deployed = true
+
+	return true
 }
 
 // Given declares one part of the world a Scenario runs in. Each of its methods
@@ -331,6 +374,64 @@ func (d DeclaredWorkload) named() string {
 	return named + " spread evenly " + strings.Join(over, " and ")
 }
 
+// When injects the Failure a Scenario studies. It waits for the world to have
+// settled before it injects, so what the next Then judges is the Placement the
+// control plane reached after the Failure and not the one it was still in.
+type When struct {
+	scenario *Scenario
+}
+
+// NodesFail stops the stated number of Nodes responding: the first ones the
+// declared Topology derives, which makes the pick the same on every run. The Step
+// is renamed to carry the Nodes resolved, so a run reports which of them failed,
+// and the Scenario is left awaiting a fresh Settled Placement.
+func (w When) NodesFail(nodes Nodes) {
+	step, open := w.scenario.record(WhenStep, nodesFailing(int(nodes)))
+	if !open {
+		return
+	}
+
+	if _, observed := w.scenario.placement(step); !observed {
+		return
+	}
+
+	failure, err := scenario.NewNodeFailure(w.scenario.topology, int(nodes))
+	if err != nil {
+		w.scenario.end(step, err)
+
+		return
+	}
+	stopping := w.scenario.rename(nodesFailing(int(nodes)) + ", " + strings.Join(failure.Names(), ", "))
+
+	w.scenario.stop(stopping, failure.Names())
+}
+
+// stop stops each of these Nodes responding and leaves this Scenario awaiting a
+// fresh Settled Placement, ending it at the When that could not stop one. The
+// observation held until now is the world before the Failure, so it is discarded
+// rather than judged by the Thens after it.
+func (s *Scenario) stop(at Step, nodes []string) {
+	for _, node := range nodes {
+		if err := s.provisioned.FailNode(s.ctx, node); err != nil {
+			s.end(at, fmt.Errorf("stop Node %s responding: %w", node, err))
+
+			return
+		}
+		s.failed = append(s.failed, node)
+	}
+
+	s.observed, s.settled = scenario.Placement{}, false
+}
+
+// nodesFailing is how a When's line reads before it names the Nodes it resolved.
+func nodesFailing(count int) string {
+	if count == 1 {
+		return counted(count, "Node", "Nodes") + " fails"
+	}
+
+	return counted(count, "Node", "Nodes") + " fail"
+}
+
 // Then judges one part of the Placement a Scenario settled at. A Then the
 // Placement does not meet records a Finding, and the Steps after it still run.
 type Then struct {
@@ -363,6 +464,31 @@ func (t Then) PodsPerNode(pods int) {
 	})
 }
 
+// NoPodsOnTheFailedNodes asserts no Node a When stopped holds a Pod of the
+// Workload. A Node that stopped responding is no Ready Node, so it is in no
+// Placement the lab observes; a Pod still on it is counted under its name all the
+// same, because the report states what was observed.
+//
+// It reads what a When left, so a Scenario with no When before it has nothing to
+// judge and ends at this Step.
+func (t Then) NoPodsOnTheFailedNodes() {
+	step, open := t.scenario.record(ThenStep, "no Pod on the Nodes that failed")
+	if !open {
+		return
+	}
+
+	failed := slices.Clone(t.scenario.failed)
+	if len(failed) == 0 {
+		t.scenario.end(step, errors.New("this Then judges the Nodes a When stopped responding, and no When ran before it"))
+
+		return
+	}
+
+	t.judgeAt(step, func(settled scenario.Placement, judged expect.T) {
+		expect.Expect(judged, podsOn(failed, settled)).To(expect.Equal(evenlyOver(failed, noPod)))
+	})
+}
+
 // judge records a Then Step under this name and judges the Settled Placement
 // against it. A mismatch becomes a Finding rather than an error, which is what
 // lets a Scenario's lines name no error and the Steps after a Finding still run.
@@ -372,6 +498,12 @@ func (t Then) judge(name string, against func(scenario.Placement, expect.T)) {
 		return
 	}
 
+	t.judgeAt(step, against)
+}
+
+// judgeAt judges the Settled Placement against a Then Step already recorded,
+// which is what a Then that has something of its own to refuse records first.
+func (t Then) judgeAt(step Step, against func(scenario.Placement, expect.T)) {
 	settled, observed := t.scenario.placement(step)
 	if !observed {
 		return
@@ -406,6 +538,19 @@ func evenlyOver(names []string, count int) map[string]int {
 	}
 
 	return expected
+}
+
+// podsOn counts this observation's Pods on each of these Nodes, a Node holding
+// none included as zero, so a Then over the failed Nodes compares one whole map
+// rather than one count per Node.
+func podsOn(nodes []string, settled scenario.Placement) map[string]int {
+	observed := settled.PodsPerNode()
+	counts := make(map[string]int, len(nodes))
+	for _, node := range nodes {
+		counts[node] = observed[node]
+	}
+
+	return counts
 }
 
 // zonesOf are the Zone names of the Topology, each named once.

@@ -8,13 +8,13 @@ import (
 )
 
 const (
-	fullestNode  = "zone-a-node-1"
-	emptiestNode = "zone-a-node-2"
-	nextNode     = "zone-b-node-1"
-	lastNode     = "zone-b-node-2"
+	fullestNode  = "zone-1-node-1"
+	emptiestNode = "zone-1-node-2"
+	nextNode     = "zone-2-node-1"
+	lastNode     = "zone-2-node-2"
 
-	fullestZone = "zone-a"
-	nextZone    = "zone-b"
+	fullestZone = "zone-1"
+	nextZone    = "zone-2"
 )
 
 const (
@@ -90,13 +90,31 @@ func TestAnUnplacedPod_ShouldBeCountedOnNoNodeAndInNoZone(t *testing.T) {
 }
 
 func TestAPodOnANodeTheObservationDoesNotHold_ShouldBeCountedInNoZone(t *testing.T) {
-	const nodeOutsideTheObservation = "zone-z-node-1"
+	const nodeOutsideTheObservation = "zone-9-node-1"
 	strayPod := scenario.Pod{Name: podOnNoNodeAtAll, Node: nodeOutsideTheObservation, Phase: scenario.PodRunning}
 
 	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), []scenario.Pod{strayPod})
 
 	expect.Expect(t, placement.PodsPerNode()[nodeOutsideTheObservation]).To(expect.Equal(1))
 	expect.Expect(t, placement.PodsPerZone()).To(expect.Equal(map[string]int{fullestZone: 0, nextZone: 0}))
+}
+
+func TestAPodOnANodeTheObservationDoesNotHold_ShouldBeReportedAsUnaccountedFor(t *testing.T) {
+	const nodeThatLeftTheObservation = "zone-9-node-1"
+	stillOnTheNodeThatLeft := scenario.Pod{Name: podOnNoNodeAtAll, Node: nodeThatLeftTheObservation, Phase: scenario.PodRunning}
+	unplaced := scenario.Pod{Name: podOnTheNextNode, Phase: scenario.PodPending}
+
+	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), append(threePlacedPodsOverTwoZones(), stillOnTheNodeThatLeft, unplaced))
+
+	expect.Expect(t, placement.PodsItCannotAccountFor()).To(expect.Equal([]scenario.Pod{stillOnTheNodeThatLeft}))
+}
+
+func TestAPlacementOfPlacedAndUnplacedPodsAlone_ShouldAccountForEveryOne(t *testing.T) {
+	unplaced := scenario.Pod{Name: podOnNoNodeAtAll, Phase: scenario.PodPending}
+
+	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), append(threePlacedPodsOverTwoZones(), unplaced))
+
+	expect.Expect(t, placement.PodsItCannotAccountFor()).To(expect.HaveLen[scenario.Pod](0))
 }
 
 func TestAPlacement_ShouldReportThePodsOfOnePhaseAlone(t *testing.T) {

@@ -38,10 +38,35 @@ const (
 // Scenario's heading under the run name derived for it, the two Then Steps its
 // Placement has to meet, and what a Finding is reported under.
 const (
-	evenSpreadReported     = "Scenario even-spread"
+	// aScenarioHeading opens each Scenario's own part of a report, which is the
+	// boundary a Timeline's count and its printed entries are read inside.
+	aScenarioHeading = "Scenario "
+
+	evenSpreadReported     = aScenarioHeading + "even-spread"
 	threePodsPerZoneJudged = "Then 3 Pods per Zone"
 	onePodPerNodeJudged    = "Then 1 Pod per Node"
 	aFindingReported       = "Finding"
+)
+
+// The lines a run of the Node loss Scenario is read by: its heading under the run
+// name derived for it, the When Step naming the Node the lab picked, and the Then
+// that judges what the Failure left behind.
+//
+// theNodePickedToFail is the first Node the Scenario's Topology derives, which is
+// the pick a run has to report and has to repeat on every run.
+const (
+	nodeLossReported            = aScenarioHeading + "node-loss"
+	theNodePickedToFail         = "zone-1-node-1"
+	oneNodeFailsReported        = "When 1 Node fails, " + theNodePickedToFail
+	noPodOnTheFailedNodesJudged = "Then no Pod on the Nodes that failed"
+)
+
+// The labels a run opens each of its two waiting settings with. What such a line
+// has to carry is the pair the cluster package declares — the value the lab sets
+// and the default it replaces — rather than a wording this suite repeats.
+const (
+	unresponsiveNodeSetting = "unresponsive Node:"
+	nodeHeartbeatSetting    = "Node heartbeats:"
 )
 
 // wholeTimelineAsked is the argument an engineer asks a run for every entry of
@@ -95,6 +120,60 @@ func reportLacks(t *testing.T, reported, line string) {
 	}
 }
 
+// theScenarioSectionsOf are the parts of a report that are one Scenario each. A
+// run carries out every Scenario of the lab and reports each under its own
+// heading, each with a Timeline of its own; a reported entry count and the
+// entries printed under it are therefore only comparable inside one section.
+func theScenarioSectionsOf(t *testing.T, reported string) []string {
+	t.Helper()
+
+	sections := strings.Split(reported, "\n"+aScenarioHeading)
+	if len(sections) < 2 {
+		t.Fatalf("a run reports each Scenario it carried out under its own heading, but reported:\n%s", reported)
+	}
+
+	return sections[1:]
+}
+
+// theScenarioNamedIn is the run name the heading of one such section carries,
+// which is what names the case reading it.
+func theScenarioNamedIn(section string) string {
+	named, _, _ := strings.Cut(section, ",")
+
+	return named
+}
+
+// reportLineNames asserts the line a run opens with label names every one of
+// these values. A setting is read this way rather than as a whole line, because
+// what the run owes a reader is the pair of values and not the wording around
+// them.
+func reportLineNames(t *testing.T, reported, label string, named ...string) {
+	t.Helper()
+
+	line := theLineOpeningWith(reported, label)
+	if line == "" {
+		t.Fatalf("the run reports a line opening with %q, but reported:\n%s", label, reported)
+	}
+
+	for _, value := range named {
+		if !strings.Contains(line, value) {
+			t.Errorf("the line opening with %q names %q, but reads: %s", label, value, line)
+		}
+	}
+}
+
+// theLineOpeningWith is the reported line that starts with label, and empty when
+// the report holds none.
+func theLineOpeningWith(reported, label string) string {
+	for line := range strings.SplitSeq(reported, "\n") {
+		if strings.HasPrefix(line, label) {
+			return line
+		}
+	}
+
+	return ""
+}
+
 // This is where the lab's own Scenarios run: on a Simulated Cluster the run
 // provisions for each of them, which is what makes the Placement the control
 // plane's own doing. A Scenario has no test of its own — it is itself the check —
@@ -115,6 +194,39 @@ func TestEvenSpreadWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNode(t *te
 	reportLacks(t, reported, aFindingReported)
 }
 
+// Node loss runs in the same suite and for the same reason: the Placement it
+// judges after the Failure is the control plane's own doing, and the Scenario is
+// itself the check. Its When Step is read too, because the Node the lab picked is
+// something only the run can report.
+func TestNodeLossWrittenAsSteps_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFailedNode(t *testing.T) {
+	requireEngine(t)
+
+	reported, err := aRun(t)
+	if err != nil {
+		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
+	}
+
+	reportShows(t, reported, nodeLossReported)
+	reportShows(t, reported, oneNodeFailsReported)
+	reportShows(t, reported, noPodOnTheFailedNodesJudged)
+	reportShows(t, reported, threePodsPerZoneJudged)
+	reportLacks(t, reported, aFindingReported)
+}
+
+func TestARun_ShouldReportTheShortenedWaitBeforePodsLeaveAnUnresponsiveNode(t *testing.T) {
+	requireEngine(t)
+
+	reported, err := aRun(t)
+	if err != nil {
+		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
+	}
+
+	reportLineNames(t, reported, unresponsiveNodeSetting,
+		cluster.UnresponsiveNodeWait.String(), cluster.DefaultUnresponsiveNodeWait.String())
+	reportLineNames(t, reported, nodeHeartbeatSetting,
+		cluster.NodeHeartbeatFactor, cluster.DefaultNodeHeartbeatFactor)
+}
+
 func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(t *testing.T) {
 	requireEngine(t)
 
@@ -123,9 +235,13 @@ func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(
 		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
 	}
 
-	printed := theEntriesPrintedIn(t, reported)
-	expect.Expect(t, printed).To(expect.HaveLen[float64](theEntryCountReportedIn(t, reported)))
-	expect.Expect(t, slices.IsSorted(printed)).To(expect.Equal(true))
+	for _, section := range theScenarioSectionsOf(t, reported) {
+		t.Run(theScenarioNamedIn(section), func(t *testing.T) {
+			printed := theEntriesPrintedIn(t, section)
+			expect.Expect(t, printed).To(expect.HaveLen[float64](theEntryCountReportedIn(t, section)))
+			expect.Expect(t, slices.IsSorted(printed)).To(expect.Equal(true))
+		})
+	}
 }
 
 func TestACollapsedSummary_ShouldLeaveEveryEntryInTheTimelineFile(t *testing.T) {
@@ -266,7 +382,7 @@ const (
 	theThenStepName     = "3 Pods per Zone"
 	aTopologyStepName   = "a Topology of 3 Zones of 3 Nodes"
 
-	whatEndedTheScenario      = "apply the Topology: create Node zone-a-node-1: already exists"
+	whatEndedTheScenario      = "apply the Topology: create Node zone-1-node-1: already exists"
 	whyTheTimelineWasNotFiled = "create the Timeline folder /read-only/timelines: permission denied"
 	someTimelinePath          = "/tmp/a-run/timelines/k8s-resilience-lab-even-spread-7f3a9c.jsonl"
 )
@@ -275,13 +391,13 @@ const (
 // Placement the control plane reported for a Pod.
 const (
 	whenTheNodeWasAdded    = 120 * time.Millisecond
-	theNodeAdded           = "zone-a-node-1"
+	theNodeAdded           = "zone-1-node-1"
 	theNodeReady           = "Ready"
 	theNodeCapacity        = "10 Pods"
 	whenThePodWasScheduled = 3470 * time.Millisecond
 	thePodReported         = "web-5d8f9b7c6-2xk4m"
 	thePodScheduled        = "Scheduled"
-	whereThePodWasPlaced   = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-a-node-1"
+	whereThePodWasPlaced   = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-1-node-1"
 )
 
 // theScenarioRecorded is what the header of a filed Timeline names its Scenario

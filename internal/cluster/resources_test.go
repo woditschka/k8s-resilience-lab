@@ -96,6 +96,117 @@ func TestADeployedPodTemplate_ShouldCarryNoPodAffinityRule(t *testing.T) {
 	expect.Expect(t, deployed.Spec.Template.Spec.Affinity).To(expect.Equal[*corev1.Affinity](nil))
 }
 
+// A Pod template tolerates the two Node-condition taints the control plane adds
+// to a Node that stopped responding, for the waiting time the lab sets rather
+// than the admission default it replaces, per
+// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
+func TestADeployedPodTemplate_ShouldTolerateTheNodeConditionTaintsForTheLabsWaitingTime(t *testing.T) {
+	theLabsWait := int64(UnresponsiveNodeWait.Seconds())
+
+	deployed := toDeployment(aWorkload(t))
+
+	expect.Expect(t, deployed.Spec.Template.Spec.Tolerations).To(expect.Equal([]corev1.Toleration{
+		{
+			Key:               corev1.TaintNodeNotReady,
+			Operator:          corev1.TolerationOpExists,
+			Effect:            corev1.TaintEffectNoExecute,
+			TolerationSeconds: &theLabsWait,
+		},
+		{
+			Key:               corev1.TaintNodeUnreachable,
+			Operator:          corev1.TolerationOpExists,
+			Effect:            corev1.TaintEffectNoExecute,
+			TolerationSeconds: &theLabsWait,
+		},
+	}))
+}
+
+// aReportedStatus is the status a Node reports: the capacity this suite
+// provisions with, and the conditions named.
+func aReportedStatus(conditions ...corev1.NodeCondition) corev1.NodeStatus {
+	return corev1.NodeStatus{
+		Capacity: corev1.ResourceList{
+			corev1.ResourcePods: *resource.NewQuantity(somePodsPerNode, resource.DecimalSI),
+		},
+		Conditions: conditions,
+	}
+}
+
+// theReadyCondition is what a Node answering reports about itself, and
+// someOtherCondition one further condition the control plane sets on it, which the
+// lab reads and does not decide.
+func theReadyCondition() corev1.NodeCondition {
+	return corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionTrue, Reason: nodeReadyReason}
+}
+
+func someOtherCondition() corev1.NodeCondition {
+	return corev1.NodeCondition{Type: corev1.NodeMemoryPressure, Status: corev1.ConditionFalse}
+}
+
+// theLostHeartbeatCondition is the Ready condition the lab writes for a Node that
+// stopped responding, which is a lost heartbeat as the control plane reads it.
+func theLostHeartbeatCondition() corev1.NodeCondition {
+	return corev1.NodeCondition{
+		Type:    corev1.NodeReady,
+		Status:  corev1.ConditionUnknown,
+		Reason:  nodeLostHeartbeatReason,
+		Message: nodeLostHeartbeatMessage,
+	}
+}
+
+// The status of a Node that stopped responding reports its Ready condition
+// Unknown and leaves every other condition as the Node reported it: the lab stops
+// the Node answering and does not decide what else is true of it, per
+// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md. Each case also
+// asserts the status the lab read is left as it was, since the lab writes a
+// changed copy back and reads the same Node again on the next Failure.
+func TestTheStatusOfANodeThatStoppedResponding_ShouldReportReadyUnknownAndLeaveEveryOtherConditionAsReported(t *testing.T) {
+	nodes := map[string]struct {
+		reported, withheld []corev1.NodeCondition
+	}{
+		"a Node reporting Ready beside another condition": {
+			reported: []corev1.NodeCondition{theReadyCondition(), someOtherCondition()},
+			withheld: []corev1.NodeCondition{someOtherCondition(), theLostHeartbeatCondition()},
+		},
+		"a Node reporting its Ready condition alone": {
+			reported: []corev1.NodeCondition{theReadyCondition()},
+			withheld: []corev1.NodeCondition{theLostHeartbeatCondition()},
+		},
+		"a Node reporting no condition at all": {
+			reported: nil,
+			withheld: []corev1.NodeCondition{theLostHeartbeatCondition()},
+		},
+	}
+
+	for node, status := range nodes {
+		t.Run(node, func(t *testing.T) {
+			reported := aReportedStatus(status.reported...)
+
+			withheld := toUnresponsive(reported)
+
+			expect.Expect(t, withheld).To(expect.Equal(aReportedStatus(status.withheld...)))
+			expect.Expect(t, reported).To(expect.Equal(aReportedStatus(status.reported...)))
+		})
+	}
+}
+
+// A Node the KWOK controller no longer maintains keeps its place in every Topology
+// read and every spread domain, so the marking the controller selects by is the
+// one label the lab takes off. The labels it read keep it, because it writes a
+// changed copy back.
+func TestANodeTheKWOKControllerNoLongerMaintains_ShouldKeepEveryLabelButTheMarkingItSelectsBy(t *testing.T) {
+	provisioned := aNode(t)
+	labelled := toNode(provisioned).Labels
+
+	unmarked := withoutTheKWOKMarking(labelled)
+
+	expect.Expect(t, unmarked).To(expect.Equal(map[string]string{
+		zoneLabel:     provisioned.Zone,
+		hostnameLabel: provisioned.Name,
+	}))
+	expect.Expect(t, labelled[fakeNodeLabel]).To(expect.Equal(fakeNodeLabelValue))
+}
+
 func TestADeployedWorkload_ShouldLabelAndSelectItsPodsByItsName(t *testing.T) {
 	deployed := toDeployment(aWorkload(t))
 
@@ -144,7 +255,7 @@ func TestAProbePod_ShouldNameItsOwnNodeByHostnameAndLeaveThePlacingToTheSchedule
 
 func TestOnlyAProbePodReportedRunning_ShouldCountAsItsNodeBeingHeld(t *testing.T) {
 	heldNode := aNode(t)
-	const unplacedProbeName = probePodNamePrefix + "zone-b-node-1"
+	const unplacedProbeName = probePodNamePrefix + "zone-2-node-1"
 
 	holding := nodesHoldingRunningProbe([]corev1.Pod{
 		{
@@ -197,7 +308,7 @@ func TestAPhaseTheLabDoesNotName_ShouldBeReadAsUnknown(t *testing.T) {
 }
 
 func TestAnObservedNode_ShouldTakeItsZoneFromItsLabelRatherThanItsName(t *testing.T) {
-	const observedNodeName, labelledZone = "zone-a-node-1", "zone-c"
+	const observedNodeName, labelledZone = "zone-1-node-1", "zone-3"
 
 	observed, err := fromNodes([]corev1.Node{{
 		Name:   observedNodeName,
@@ -216,7 +327,7 @@ func TestAnObservedNode_ShouldTakeItsZoneFromItsLabelRatherThanItsName(t *testin
 }
 
 func TestAnObservedNodeWithNoUsableCapacity_ShouldBeRefused(t *testing.T) {
-	const observedNodeName = "zone-a-node-1"
+	const observedNodeName = "zone-1-node-1"
 
 	_, err := fromNodes([]corev1.Node{{
 		Name: observedNodeName,
@@ -233,12 +344,12 @@ func TestAnObservedNodeWithNoUsableCapacity_ShouldBeRefused(t *testing.T) {
 // Pod it placed.
 const (
 	observedAfter     = 2500 * time.Millisecond
-	watchedNodeName   = "zone-b-node-2"
+	watchedNodeName   = "zone-2-node-2"
 	watchedPodName    = "web-5d8f9b7c6-2xk4m"
 	watchedReplicaSet = "web-5d8f9b7c6"
 	replicasRunning   = 3
 	scheduledReason   = "Scheduled"
-	scheduledMessage  = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-b-node-2"
+	scheduledMessage  = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-2-node-2"
 )
 
 // The kind a Kubernetes Event below is about: one a Timeline records, and one

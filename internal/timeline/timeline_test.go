@@ -30,14 +30,14 @@ const (
 const (
 	whenTheNodeWasAdded    = 120 * time.Millisecond
 	theNodeAddedAsFiled    = "120ms"
-	aNodeName              = "zone-a-node-1"
+	aNodeName              = "zone-1-node-1"
 	theReadyCondition      = "Ready"
 	theNodeCapacity        = "10 Pods"
 	whenThePodWasScheduled = 3470 * time.Millisecond
 	thePodScheduledAsFiled = "3.47s"
 	aPodName               = "web-5d8f9b7c6-2xk4m"
 	theScheduledReason     = "Scheduled"
-	theScheduledMessage    = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-a-node-1"
+	theScheduledMessage    = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-1-node-1"
 )
 
 // aHeader is the first line of the Timeline of the Scenario above, and

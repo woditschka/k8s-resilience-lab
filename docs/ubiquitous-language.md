@@ -54,7 +54,7 @@
 
 **Skew**: The difference between the highest and the lowest Pod count across the Zones, or across the Nodes, of one Workload. Avoid: imbalance, spread delta.
 
-**Failure**: A loss injected into the Simulated Cluster on purpose, scoped to one Pod, one Node, or one whole Zone. Relationships: a Scenario injects zero or more Failures. Avoid: chaos, fault, outage, incident.
+**Failure**: A loss injected into the Simulated Cluster on purpose, scoped to one Pod, one Node, or one whole Zone. Relationships: a Scenario injects zero or more Failures. A Node Failure leaves the Node in the cluster and unresponsive, so the control plane moves its Pods away after a waiting time. A Scenario states how many Nodes fail, or points at one by its position in the Topology. Avoid: chaos, fault, outage, incident.
 
 **Required Capacity**: The minimum number of Running Pods a Workload needs to count as surviving a Failure. Relationships: judged twice per Failure — once immediately after it, once after Placement settles again. Avoid: quorum, minimum availability, headroom.
 

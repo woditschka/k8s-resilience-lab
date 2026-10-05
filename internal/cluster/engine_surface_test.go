@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -166,6 +167,179 @@ func TestTheEngineSurface_ShouldNameNoEndpointThatListsOrPrunesTheMachine(t *tes
 	if len(offenders) > 0 {
 		t.Errorf("the package names no engine endpoint that lists or prunes the machine, but:\n%s", strings.Join(offenders, "\n"))
 	}
+}
+
+// clusterCommandDeclaration is the package-level list a Simulated Cluster's
+// container is created with, and createRequestCommandKey the field of the create
+// request it is sent as.
+const (
+	clusterCommandDeclaration = "clusterArguments"
+	createRequestCommandKey   = "Cmd"
+)
+
+// TestTheContainersCommand_ShouldBeComposedFromThePackagesOwnConstantsAlone
+// asserts what a container start rests on: the command the cluster inside the
+// container is created with is written in this package and nowhere else, so no
+// run input reaches the image, the container or its arguments
+// (docs/system-design.md § Threat Model).
+//
+// It reads the package's own declarations like the two tests above, so it needs
+// no engine: a value composed at call time out of something a run supplied would
+// read here as an expression that is neither a literal nor one of this package's
+// constants. Both halves are needed — a command composed inline would leave the
+// constants untouched, and a constant list the request does not send proves
+// nothing about the container.
+func TestTheContainersCommand_ShouldBeComposedFromThePackagesOwnConstantsAlone(t *testing.T) {
+	expect.Expect(t, commandSentToTheEngine(t)).To(expect.Equal(clusterCommandDeclaration))
+	expect.Expect(t, argumentsThatAreNoConstant(t)).To(expect.Equal([]string{}))
+}
+
+// argumentsThatAreNoConstant is every argument of the container's command that is
+// built from something other than a string literal and this package's own string
+// constants, as the source spells it.
+func argumentsThatAreNoConstant(t *testing.T) []string {
+	t.Helper()
+
+	constants := stringConstantsOf(t)
+
+	offenders := make([]string, 0)
+	for _, argument := range elementsOf(t, clusterCommandDeclaration) {
+		if !composedOfConstants(argument, constants) {
+			offenders = append(offenders, types.ExprString(argument))
+		}
+	}
+
+	return offenders
+}
+
+// composedOfConstants reports whether expression is built from string literals and
+// this package's own constants alone. A call, a variable, a parameter or a
+// conversion is none of those, and is the shape a run-supplied value would arrive
+// in.
+func composedOfConstants(expression ast.Expr, constants map[string]ast.Expr) bool {
+	switch named := expression.(type) {
+	case *ast.BasicLit:
+		return named.Kind == token.STRING
+	case *ast.BinaryExpr:
+		return named.Op == token.ADD &&
+			composedOfConstants(named.X, constants) &&
+			composedOfConstants(named.Y, constants)
+	case *ast.Ident:
+		declared, isConstant := constants[named.Name]
+
+		return isConstant && composedOfConstants(declared, constants)
+	default:
+		return false
+	}
+}
+
+// commandSentToTheEngine is what the request creating a container names as that
+// container's command, as the source spells it. More than one such request, or
+// none, is itself a finding: the property holds over the one place the command is
+// sent from.
+func commandSentToTheEngine(t *testing.T) string {
+	t.Helper()
+
+	var sent []string
+	for _, parsed := range packageFiles(t) {
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			pair, isPair := node.(*ast.KeyValueExpr)
+			if !isPair || fieldNameOf(pair) != createRequestCommandKey {
+				return true
+			}
+			sent = append(sent, types.ExprString(pair.Value))
+
+			return true
+		})
+	}
+
+	if len(sent) != 1 {
+		t.Fatalf("one request creates a container and names its command once, but %d name a %s: %s",
+			len(sent), createRequestCommandKey, strings.Join(sent, ", "))
+	}
+
+	return sent[0]
+}
+
+// fieldNameOf is the field a request body's key names, and empty for a key that
+// is no string literal at all.
+func fieldNameOf(pair *ast.KeyValueExpr) string {
+	key, isLiteral := pair.Key.(*ast.BasicLit)
+	if !isLiteral || key.Kind != token.STRING {
+		return ""
+	}
+	named, err := strconv.Unquote(key.Value)
+	if err != nil {
+		return ""
+	}
+
+	return named
+}
+
+// stringConstantsOf is every package-level constant of this package, by name,
+// with the expression it is declared as.
+func stringConstantsOf(t *testing.T) map[string]ast.Expr {
+	t.Helper()
+
+	constants := make(map[string]ast.Expr)
+	for _, parsed := range packageFiles(t) {
+		for _, declaration := range parsed.Decls {
+			for _, specified := range valueSpecsOf(declaration, token.CONST) {
+				for at, name := range specified.Names {
+					if at < len(specified.Values) {
+						constants[name.Name] = specified.Values[at]
+					}
+				}
+			}
+		}
+	}
+
+	return constants
+}
+
+// elementsOf is the elements of the package-level list variable named, as the
+// source declares them.
+func elementsOf(t *testing.T, named string) []ast.Expr {
+	t.Helper()
+
+	for _, parsed := range packageFiles(t) {
+		for _, declaration := range parsed.Decls {
+			for _, specified := range valueSpecsOf(declaration, token.VAR) {
+				if len(specified.Names) != 1 || specified.Names[0].Name != named || len(specified.Values) != 1 {
+					continue
+				}
+				listed, isList := specified.Values[0].(*ast.CompositeLit)
+				if !isList {
+					t.Fatalf("%s is declared as a list of arguments, but it reads %s",
+						named, types.ExprString(specified.Values[0]))
+				}
+
+				return listed.Elts
+			}
+		}
+	}
+
+	t.Fatalf("this package declares %s, the list its cluster container is created with", named)
+
+	return nil
+}
+
+// valueSpecsOf is every value this declaration declares under kind, and nothing
+// for a declaration of another kind.
+func valueSpecsOf(declaration ast.Decl, kind token.Token) []*ast.ValueSpec {
+	general, isGeneral := declaration.(*ast.GenDecl)
+	if !isGeneral || general.Tok != kind {
+		return nil
+	}
+
+	values := make([]*ast.ValueSpec, 0, len(general.Specs))
+	for _, specified := range general.Specs {
+		if value, isValue := specified.(*ast.ValueSpec); isValue {
+			values = append(values, value)
+		}
+	}
+
+	return values
 }
 
 // exportedMethod is one exported method of the engine surface, as the package's

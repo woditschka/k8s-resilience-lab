@@ -20,10 +20,10 @@ const (
 const (
 	aPodName         = "web-5d8f9b7c6-2xk4m"
 	scheduledReason  = "Scheduled"
-	scheduledMessage = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-b-node-2"
+	scheduledMessage = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-2-node-2"
 	aWorkloadName    = "web"
 	readyReplicas    = "3 of 9 Pods ready"
-	aNodeName        = "zone-b-node-2"
+	aNodeName        = "zone-2-node-2"
 	aStreamGap       = "the Pod stream closed and could not be re-opened"
 )
 
@@ -33,7 +33,7 @@ const (
 // the control plane made for the first Workload.
 const (
 	someNodeCapacity        = "10 Pods"
-	aSecondNodeName         = "zone-c-node-1"
+	aSecondNodeName         = "zone-3-node-1"
 	aProbePodName           = "provisioning-probe-" + aNodeName
 	aSecondPodName          = "web-5d8f9b7c6-9ptwz"
 	aNestedWorkloadName     = aWorkloadName + "-cache"

@@ -344,6 +344,75 @@ func nodesWithoutProbe(declared []scenario.Node, holding []string) []string {
 	return unheld
 }
 
+// FailNode stops one Node responding, the way a machine that hangs or loses its
+// network stops: the Node keeps its place in the cluster and the control plane
+// stops hearing from it.
+//
+// Two writes do it. The marking the KWOK controller selects the Nodes it
+// maintains by is taken off the Node, which stops anything refreshing its
+// heartbeat, and its Ready condition is then reported Unknown with a lost
+// heartbeat's reason. Everything after that is the control plane's own doing:
+// its node-lifecycle controller taints the Node unreachable, its taint-eviction
+// controller deletes the Pods that stop tolerating that taint, and the Workload's
+// ReplicaSet replaces them on the Nodes still responding. The lab writes no taint
+// and deletes no Pod, because what the lab is for is watching Kubernetes do it,
+// per docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
+func (c *SimulatedCluster) FailNode(ctx context.Context, name string) error {
+	if err := c.stopMaintaining(ctx, name); err != nil {
+		return err
+	}
+
+	return c.reportUnresponsive(ctx, name)
+}
+
+// stopMaintaining takes the KWOK marking off one Node, so the controller started
+// to maintain the marked Nodes alone stops maintaining this one and the status
+// reported next stands.
+func (c *SimulatedCluster) stopMaintaining(ctx context.Context, name string) error {
+	unmarked := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest, err := c.client.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		latest.Labels = withoutTheKWOKMarking(latest.Labels)
+		_, err = c.client.CoreV1().Nodes().Update(ctx, latest, metav1.UpdateOptions{})
+
+		return err
+	})
+	if unmarked != nil {
+		return fmt.Errorf("take Node %s off the Nodes the KWOK controller maintains: %w", name, unmarked)
+	}
+
+	return nil
+}
+
+// reportUnresponsive reports one Node's Ready condition Unknown through the status
+// subresource, which is what a control plane reports for a Node it has stopped
+// hearing from.
+//
+// The write is retried on a conflict for the reason reportReady's is: the KWOK
+// controller maintains these same Nodes and can modify one between the read and
+// the write.
+func (c *SimulatedCluster) reportUnresponsive(ctx context.Context, name string) error {
+	reported := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest, err := c.client.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		latest.Status = toUnresponsive(latest.Status)
+		_, err = c.client.CoreV1().Nodes().UpdateStatus(ctx, latest, metav1.UpdateOptions{})
+
+		return err
+	})
+	if reported != nil {
+		return fmt.Errorf("report Node %s as no longer responding: %w", name, reported)
+	}
+
+	return nil
+}
+
 // Deploy creates the Workload's Deployment, so the control plane's own
 // controllers produce the Placement.
 func (c *SimulatedCluster) Deploy(ctx context.Context, workload scenario.Workload) error {
@@ -399,8 +468,7 @@ func (c *SimulatedCluster) AwaitSettled(ctx context.Context, workload scenario.W
 	for {
 		select {
 		case <-settling.Done():
-			return scenario.Placement{}, fmt.Errorf("the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes",
-				workload.Name(), settleTimeout, len(previous.Pods()), workload.Pods(), len(previous.Nodes()))
+			return scenario.Placement{}, didNotSettle(workload, previous)
 		case <-time.After(pollInterval):
 		}
 
@@ -415,17 +483,36 @@ func (c *SimulatedCluster) AwaitSettled(ctx context.Context, workload scenario.W
 	}
 }
 
+// didNotSettle is what an expired settle wait reports: the Placement last
+// observed, rather than a longer wait. It names one count per clause of
+// hasSettled — the Pods created of the Pods declared, the Ready Nodes they were
+// read against, and the Pods on a Node the observation does not hold — so a
+// reader of an expired wait can tell which clause held it open (PRD edge case 3).
+func didNotSettle(workload scenario.Workload, observed scenario.Placement) error {
+	return fmt.Errorf("the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold",
+		workload.Name(), settleTimeout, len(observed.Pods()), workload.Pods(), len(observed.Nodes()), len(observed.PodsItCannotAccountFor()))
+}
+
 // hasSettled reports whether current can be the Workload's settled Placement:
-// every Pod it declares has been created, and this observation agrees with the
-// one before it.
+// every Pod it declares has been created, every Pod it found is on a Node it was
+// read against, and this observation agrees with the one before it.
 //
 // The Pod count is part of the condition because a Deployment's Pods appear a
 // moment after the Deployment does. Two observations taken in that moment agree
 // on finding nothing, which is an early Placement rather than a settled one. A
 // Pod that cannot be placed still counts, because the control plane creates it
 // and reports it Pending (edge case 1).
+//
+// A Pod on a Node the observation does not hold is the same kind of early
+// Placement, after a Failure rather than after a Deployment: a Node that stopped
+// responding leaves the Ready Nodes at once, while the Pod it holds is deleted
+// only once the control plane has tainted the Node and the Pod has stopped
+// tolerating that taint. Two observations inside that window agree without the
+// Placement having stopped changing.
 func hasSettled(previous, current scenario.Placement, workload scenario.Workload) bool {
-	return len(current.Pods()) >= workload.Pods() && current.Equal(previous)
+	return len(current.Pods()) >= workload.Pods() &&
+		len(current.PodsItCannotAccountFor()) == 0 &&
+		current.Equal(previous)
 }
 
 // Close removes the Simulated Cluster this run provisioned. The runner defers it
