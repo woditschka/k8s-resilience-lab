@@ -10,6 +10,13 @@
 ### Python ###
 __pycache__/
 
+### k8s-resilience-lab ###
+# The Timelines a run files, one per Scenario. They outlive the run and the
+# Simulated Cluster they describe, and the lab removes none, so they accumulate
+# until an engineer deletes them
+# (docs/adr/2026-10-05-timeline-from-the-watch-stream.md).
+timelines/
+
 # Handoff ledger (per-session, never committed)
 .scratch/
 

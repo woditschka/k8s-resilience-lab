@@ -71,3 +71,5 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-04 | [Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md) | Accepted |
 | 2026-10-04 | [The gate runs the tests under the race detector](2026-10-04-race-detector-in-the-gate.md) | Accepted |
 | 2026-10-04 | [The module-rule tests share one test-support package](2026-10-04-module-rule-test-support.md) | Accepted |
+| 2026-10-05 | [A Timeline is recorded from the API's watch stream and filed as JSON Lines](2026-10-05-timeline-from-the-watch-stream.md) | Accepted |
+| 2026-10-05 | [A run prints a Timeline summary derived from the record](2026-10-05-timeline-summary-derived-from-the-record.md) | Accepted |

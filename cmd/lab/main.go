@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,20 +21,30 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
+	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
 	"github.com/woditschka/k8s-resilience-lab/scenarios"
 )
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	// The Timelines of a run collect under the directory it was started in, which
+	// is the one place a run resolves from the process rather than from a flag.
+	root, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lab: resolve the directory this run files its Timelines under: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := run(context.Background(), os.Args[1:], root, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintf(os.Stderr, "lab: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-// run is the whole run, with its output and its arguments given rather than
-// taken from the process, so that main is the exit-status boundary alone.
-func run(ctx context.Context, arguments []string, report, warnings io.Writer) error {
-	version, err := resolveVersion(arguments, warnings)
+// run is the whole run, with its output, its arguments and the directory its
+// Timelines are filed under given rather than taken from the process, so that
+// main is the exit-status boundary alone.
+func run(ctx context.Context, arguments []string, timelinesRoot string, report, warnings io.Writer) error {
+	asked, err := resolveSetting(arguments, warnings)
 	if err != nil {
 		return err
 	}
@@ -49,54 +60,139 @@ func run(ctx context.Context, arguments []string, report, warnings io.Writer) er
 	reported := &runReport{to: report}
 	reported.printf("engine socket:      %s\n", engine.Socket())
 	reported.printf("engine version:     %s\n", engine.EngineVersion())
-	reported.printf("Kubernetes version: %s\n", version)
+	reported.printf("Kubernetes version: %s\n", asked.version)
 
 	// The Scenarios the lab holds, in the order the list beside them names: the
 	// command names no Scenario, so adding one touches the Scenarios' place alone.
 	// Selecting one by name is REQ-SIM-003.
-	runner := lab.NewRunner(engine, version)
+	//
+	// What a Scenario found stops the run at that Scenario; a Timeline the lab
+	// could not write does not, so every later Scenario still runs and the run
+	// names each record it lost.
+	runner := lab.NewRunner(engine, asked.version, timeline.NewFolder(timelinesRoot))
+	var failures []error
 	for _, steps := range scenarios.All() {
-		if err := runScenario(ctx, runner, steps, reported); err != nil {
-			return err
+		unfiled, found := runScenario(ctx, runner, steps, reported, asked)
+		failures = append(failures, unfiled)
+		if found != nil {
+			failures = append(failures, found)
+
+			break
 		}
 	}
 
-	return reported.err
+	return errors.Join(append(failures, reported.err)...)
 }
 
-// resolveVersion parses the one flag the lab takes, resolving the Kubernetes
-// version the whole run mirrors. One parse per run, so no later step re-reads it.
-func resolveVersion(arguments []string, warnings io.Writer) (cluster.KubernetesVersion, error) {
+// runSetting is what the lab's arguments resolve to: the Kubernetes version
+// every Simulated Cluster of the run mirrors, and whether a Scenario's whole
+// Timeline is printed under its summary. The run passes it by value, so no step
+// re-reads an argument (docs/architecture-principles.md § Building Blocks).
+type runSetting struct {
+	version       cluster.KubernetesVersion
+	wholeTimeline bool
+}
+
+// resolveSetting parses the two flags the lab takes, resolving what the whole
+// run mirrors and prints. One parse per run, so no later step re-reads it.
+func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) {
 	flags := flag.NewFlagSet("lab", flag.ContinueOnError)
 	flags.SetOutput(warnings)
 	named := flags.String("k8s-version", "", "the Kubernetes version each Simulated Cluster mirrors; the lab's pinned default when absent")
+	whole := flags.Bool("whole-timeline", false, "print every entry of each Scenario's Timeline under its summary")
 	if err := flags.Parse(arguments); err != nil {
-		return cluster.KubernetesVersion{}, fmt.Errorf("read the lab's arguments: %w", err)
+		return runSetting{}, fmt.Errorf("read the lab's arguments: %w", err)
 	}
 
-	if *named == "" {
+	version, err := resolveVersion(*named)
+	if err != nil {
+		return runSetting{}, err
+	}
+
+	return runSetting{version: version, wholeTimeline: *whole}, nil
+}
+
+// resolveVersion is the Kubernetes version the run mirrors: the one its
+// arguments named, or the lab's pinned default when they named none.
+func resolveVersion(named string) (cluster.KubernetesVersion, error) {
+	if named == "" {
 		return cluster.DefaultKubernetesVersion(), nil
 	}
 
-	return cluster.ParseKubernetesVersion(*named)
+	return cluster.ParseKubernetesVersion(named)
 }
 
 // runScenario runs one Scenario through the runner and reports the name it ran
-// under, the Steps it carried out, what it found, and the Placement it settled
-// at. The run name is the runner's to derive, so the command names no Scenario.
-func runScenario(ctx context.Context, runner *lab.Runner, steps func(*lab.Scenario), report *runReport) error {
+// under, the Steps it carried out, what it found, the Placement it settled at and
+// the Timeline its Simulated Cluster left. The run name is the runner's to
+// derive, so the command names no Scenario.
+//
+// It reports two failures apart: the Timeline the lab could not write, which
+// leaves this Scenario's outcome and every later Scenario as they are, and what
+// this Scenario found, which stops the run, per
+// docs/adr/2026-10-05-timeline-from-the-watch-stream.md.
+func runScenario(ctx context.Context, runner *lab.Runner, steps func(*lab.Scenario), report *runReport, asked runSetting) (unfiled, found error) {
 	outcome, err := runner.Run(ctx, steps)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	writeOutcome(report, outcome, asked)
+
+	return notFiled(outcome), didNotHold(outcome)
+}
+
+// writeOutcome reports everything one Scenario left. A Scenario that ended at a
+// Step reached no Settled Placement; its Timeline is reported all the same,
+// because that record is what says how far its cluster got.
+func writeOutcome(report *runReport, outcome lab.Outcome, asked runSetting) {
 	report.printf("\nScenario %s, on %s\n", outcome.Name, outcome.Cluster)
 	writeSteps(report, outcome)
 	if !outcome.Ended() {
 		writePlacement(report, outcome.Placement)
 	}
+	writeTimeline(report, outcome, asked)
+}
 
-	return didNotHold(outcome)
+// writeTimeline reports a Timeline as the summary the record reads down to,
+// under the path it was filed at, and every entry beneath that summary when the
+// run was asked for the whole Timeline. The summary's wording is the record's
+// own (docs/adr/2026-10-05-timeline-summary-derived-from-the-record.md).
+func writeTimeline(report *runReport, outcome lab.Outcome, asked runSetting) {
+	summarised := outcome.Timeline.Summarise()
+	report.printf("  %s\n", timelineFiling(outcome, summarised))
+	for _, line := range summarised.Lines() {
+		report.printf("    %s\n", line)
+	}
+
+	if !asked.wholeTimeline {
+		return
+	}
+
+	for _, entry := range outcome.Timeline.Entries() {
+		report.printf("    %s\n", entry.Line())
+	}
+}
+
+// timelineFiling is the line a Timeline's summary is reported under: how many
+// changes the record holds and where it was filed, or why it could not be filed.
+func timelineFiling(outcome lab.Outcome, summarised scenario.TimelineSummary) string {
+	held := summarised.EntryCount()
+	if outcome.NotFiled != nil {
+		return fmt.Sprintf("Timeline, %d entries, filed nowhere: %v", held, outcome.NotFiled)
+	}
+
+	return fmt.Sprintf("Timeline, %d entries, filed at %s:", held, outcome.FiledAt)
+}
+
+// notFiled names the Timeline the lab could not write, so a run that lost a
+// record exits non-zero while the Scenario's own outcome stands as reported.
+func notFiled(outcome lab.Outcome) error {
+	if outcome.NotFiled == nil {
+		return nil
+	}
+
+	return fmt.Errorf("the Timeline of the Scenario %s was not filed: %w", outcome.Name, outcome.NotFiled)
 }
 
 // writeSteps reports every Step the Scenario carried out, in order, so the run

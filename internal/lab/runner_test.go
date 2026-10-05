@@ -12,6 +12,7 @@ import (
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
+	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
 )
 
 const (
@@ -34,9 +35,12 @@ func aScenarioDefinedBesideThisTest(*Scenario) {}
 
 // aRunnerReachingNoEngine is the Runner a derivation is driven through. A run
 // name that cannot be derived stops the run before anything is provisioned, so
-// the engine this runner holds is never dialed and stands for any.
-func aRunnerReachingNoEngine() *Runner {
-	return NewRunner(cluster.Endpoint{}, cluster.DefaultKubernetesVersion())
+// the engine this runner holds is never dialed and the Timeline folder it files
+// into is never created; both stand for any.
+func aRunnerReachingNoEngine(t *testing.T) *Runner {
+	t.Helper()
+
+	return NewRunner(cluster.Endpoint{}, cluster.DefaultKubernetesVersion(), timeline.NewFolder(t.TempDir()))
 }
 
 func TestAScenarioFile_ShouldGiveARunNameOfItsStemWithHyphens(t *testing.T) {
@@ -79,7 +83,7 @@ func TestAFileThatIsNoScenarioSource_ShouldYieldNoRunNameRatherThanAGuess(t *tes
 }
 
 func TestAFunctionOfNoScenarioFile_ShouldStopTheRunNamingTheFunctionAndTheFile(t *testing.T) {
-	running := aRunnerReachingNoEngine()
+	running := aRunnerReachingNoEngine(t)
 
 	reported, err := running.Run(t.Context(), aScenarioDefinedBesideThisTest)
 

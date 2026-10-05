@@ -1,11 +1,15 @@
 package cluster
 
 import (
+	"strconv"
 	"testing"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -220,6 +224,162 @@ func TestAnObservedNodeWithNoUsableCapacity_ShouldBeRefused(t *testing.T) {
 
 	if err == nil {
 		t.Fatal("a Node reporting no Pod capacity is refused, but it was read")
+	}
+}
+
+// The values the watched objects below carry: how long after the record started
+// the lab received the change, the objects a Timeline reads a change to, how much
+// of the Workload the control plane reports ready, and what it reported about a
+// Pod it placed.
+const (
+	observedAfter     = 2500 * time.Millisecond
+	watchedNodeName   = "zone-b-node-2"
+	watchedPodName    = "web-5d8f9b7c6-2xk4m"
+	watchedReplicaSet = "web-5d8f9b7c6"
+	replicasRunning   = 3
+	scheduledReason   = "Scheduled"
+	scheduledMessage  = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-b-node-2"
+)
+
+// The kind a Kubernetes Event below is about: one a Timeline records, and one
+// this lab watches no stream for, along with the name such an unwatched object
+// carries.
+const (
+	reportedPodKind   = "Pod"
+	someUnwatchedKind = "Service"
+	someUnwatchedName = "web-service"
+)
+
+// aWatchedNode is the Node a Timeline reads a change to, reporting the Ready
+// condition given and room for the capacity this suite provisions with.
+func aWatchedNode(ready corev1.ConditionStatus) *corev1.Node {
+	return &corev1.Node{
+		Name: watchedNodeName,
+		Status: corev1.NodeStatus{
+			Capacity: corev1.ResourceList{
+				corev1.ResourcePods: *resource.NewQuantity(somePodsPerNode, resource.DecimalSI),
+			},
+			Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: ready}},
+		},
+	}
+}
+
+func TestAnObservedChangeToAKindATimelineReads_ShouldBecomeOneEntryOfThatChange(t *testing.T) {
+	declaredReplicas := int32(somePodCount)
+
+	changes := map[string]struct {
+		observed watch.Event
+		recorded scenario.Entry
+	}{
+		"a Node the control plane reports Ready": {
+			observed: watch.Event{Type: watch.Added, Object: aWatchedNode(corev1.ConditionTrue)},
+			recorded: scenario.Entry{
+				Elapsed: observedAfter, Change: scenario.ChangeAdded, Kind: scenario.NodeObject,
+				Name: watchedNodeName, Reason: string(scenario.NodeReady),
+				Detail: strconv.Itoa(somePodsPerNode) + " Pods",
+			},
+		},
+		"a Node the control plane no longer reports Ready": {
+			observed: watch.Event{Type: watch.Modified, Object: aWatchedNode(corev1.ConditionFalse)},
+			recorded: scenario.Entry{
+				Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.NodeObject,
+				Name: watchedNodeName, Reason: string(scenario.NodeNotReady),
+				Detail: strconv.Itoa(somePodsPerNode) + " Pods",
+			},
+		},
+		"a Pod the scheduler placed on a Node": {
+			observed: watch.Event{Type: watch.Modified, Object: &corev1.Pod{
+				Name:   watchedPodName,
+				Spec:   corev1.PodSpec{NodeName: watchedNodeName},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning},
+			}},
+			recorded: scenario.Entry{
+				Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.PodObject,
+				Name: watchedPodName, Reason: string(scenario.PodRunning), Detail: watchedNodeName,
+			},
+		},
+		"a Pod the cluster no longer holds": {
+			observed: watch.Event{Type: watch.Deleted, Object: &corev1.Pod{
+				Name:   watchedPodName,
+				Status: corev1.PodStatus{Phase: corev1.PodRunning},
+			}},
+			recorded: scenario.Entry{
+				Elapsed: observedAfter, Change: scenario.ChangeRemoved, Kind: scenario.PodObject,
+				Name: watchedPodName, Reason: string(scenario.PodRunning),
+			},
+		},
+		"a Deployment declaring how many replicas it wants": {
+			observed: watch.Event{Type: watch.Modified, Object: &appsv1.Deployment{
+				Name:   deployedWorkloadName,
+				Spec:   appsv1.DeploymentSpec{Replicas: &declaredReplicas},
+				Status: appsv1.DeploymentStatus{ReadyReplicas: replicasRunning},
+			}},
+			recorded: scenario.Entry{
+				Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.DeploymentObject,
+				Name:   deployedWorkloadName,
+				Detail: strconv.Itoa(replicasRunning) + " of " + strconv.Itoa(somePodCount) + " Pods ready",
+			},
+		},
+		"a ReplicaSet declaring no replica count": {
+			observed: watch.Event{Type: watch.Added, Object: &appsv1.ReplicaSet{
+				Name:   watchedReplicaSet,
+				Status: appsv1.ReplicaSetStatus{ReadyReplicas: replicasRunning},
+			}},
+			recorded: scenario.Entry{
+				Elapsed: observedAfter, Change: scenario.ChangeAdded, Kind: scenario.ReplicaSetObject,
+				Name: watchedReplicaSet, Detail: strconv.Itoa(replicasRunning) + " Pods ready",
+			},
+		},
+		"an Event the control plane reported about a Pod it placed": {
+			observed: watch.Event{Type: watch.Added, Object: &corev1.Event{
+				InvolvedObject: corev1.ObjectReference{Kind: reportedPodKind, Name: watchedPodName},
+				Reason:         scheduledReason,
+				Message:        scheduledMessage,
+			}},
+			recorded: scenario.Entry{
+				Elapsed: observedAfter, Change: scenario.ChangeReported, Kind: scenario.PodObject,
+				Name: watchedPodName, Reason: scheduledReason, Detail: scheduledMessage,
+			},
+		},
+	}
+
+	for change, observed := range changes {
+		t.Run(change, func(t *testing.T) {
+			entry, recorded := toEntry(observedAfter, observed.observed)
+
+			expect.Expect(t, recorded).To(expect.Equal(true))
+			expect.Expect(t, entry).To(expect.Equal(observed.recorded))
+		})
+	}
+}
+
+func TestAnObservedChangeNoTimelineRecords_ShouldBecomeNoEntry(t *testing.T) {
+	changes := map[string]watch.Event{
+		"a change to an object of a kind no Timeline records": {
+			Type:   watch.Added,
+			Object: &corev1.Service{Name: someUnwatchedName},
+		},
+		"an Event reported about a kind no Timeline records": {
+			Type: watch.Added,
+			Object: &corev1.Event{
+				InvolvedObject: corev1.ObjectReference{Kind: someUnwatchedKind, Name: someUnwatchedName},
+				Reason:         scheduledReason,
+				Message:        scheduledMessage,
+			},
+		},
+		"a bookmark the stream sends about no change": {
+			Type:   watch.Bookmark,
+			Object: &corev1.Pod{Name: watchedPodName},
+		},
+	}
+
+	for change, observed := range changes {
+		t.Run(change, func(t *testing.T) {
+			entry, recorded := toEntry(observedAfter, observed)
+
+			expect.Expect(t, recorded).To(expect.Equal(false))
+			expect.Expect(t, entry).To(expect.Equal(scenario.Entry{}))
+		})
 	}
 }
 

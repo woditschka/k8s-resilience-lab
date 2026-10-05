@@ -2,12 +2,14 @@ package cluster
 
 import (
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
@@ -252,17 +254,126 @@ func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 func fromPods(observed []corev1.Pod) []scenario.Pod {
 	pods := make([]scenario.Pod, 0, len(observed))
 	for _, pod := range observed {
-		phase, named := observedPhases[pod.Status.Phase]
-		if !named {
-			phase = scenario.PodUnknown
-		}
-
 		pods = append(pods, scenario.Pod{
 			Name:  pod.Name,
 			Node:  pod.Spec.NodeName,
-			Phase: phase,
+			Phase: observedPhaseOf(pod),
 		})
 	}
 
 	return pods
+}
+
+// observedPhaseOf is the phase the control plane reports for one Pod, read
+// through the lab's own phases, so a phase it does not name reaches
+// internal/scenario as PodUnknown rather than unread.
+func observedPhaseOf(pod corev1.Pod) scenario.PodPhase {
+	phase, named := observedPhases[pod.Status.Phase]
+	if !named {
+		return scenario.PodUnknown
+	}
+
+	return phase
+}
+
+// recordedChanges maps the watch event types a Timeline records onto the lab's
+// own changes. A type outside this map — a bookmark, or a stream's own error —
+// is no change to an object and becomes no entry.
+var recordedChanges = map[watch.EventType]scenario.Change{
+	watch.Added:    scenario.ChangeAdded,
+	watch.Modified: scenario.ChangeModified,
+	watch.Deleted:  scenario.ChangeRemoved,
+}
+
+// reportedKinds maps the kinds a Kubernetes Event can be about onto the lab's
+// own. An Event about a kind no Timeline records becomes no entry, so no foreign
+// kind reaches internal/scenario.
+var reportedKinds = map[string]scenario.ObjectKind{
+	"Node":       scenario.NodeObject,
+	"Pod":        scenario.PodObject,
+	"Deployment": scenario.DeploymentObject,
+	"ReplicaSet": scenario.ReplicaSetObject,
+}
+
+// toEntry is the one place a watched Kubernetes object becomes an entry of a
+// Timeline: the named fields of that object alone cross into internal/scenario,
+// so no foreign type and no unread field reaches a printed or filed Timeline
+// (docs/security-principles.md § Language Realization).
+func toEntry(elapsed time.Duration, event watch.Event) (scenario.Entry, bool) {
+	if reported, isEvent := event.Object.(*corev1.Event); isEvent {
+		return fromReportedEvent(elapsed, reported)
+	}
+
+	change, recorded := recordedChanges[event.Type]
+	if !recorded {
+		return scenario.Entry{}, false
+	}
+
+	switch object := event.Object.(type) {
+	case *corev1.Node:
+		return scenario.Entry{
+			Elapsed: elapsed, Change: change, Kind: scenario.NodeObject, Name: object.Name,
+			Reason: string(readinessOf(*object)), Detail: capacityOf(*object),
+		}, true
+	case *corev1.Pod:
+		return scenario.Entry{
+			Elapsed: elapsed, Change: change, Kind: scenario.PodObject, Name: object.Name,
+			Reason: string(observedPhaseOf(*object)), Detail: object.Spec.NodeName,
+		}, true
+	case *appsv1.Deployment:
+		return scenario.Entry{
+			Elapsed: elapsed, Change: change, Kind: scenario.DeploymentObject, Name: object.Name,
+			Detail: replicasReady(object.Status.ReadyReplicas, object.Spec.Replicas),
+		}, true
+	case *appsv1.ReplicaSet:
+		return scenario.Entry{
+			Elapsed: elapsed, Change: change, Kind: scenario.ReplicaSetObject, Name: object.Name,
+			Detail: replicasReady(object.Status.ReadyReplicas, object.Spec.Replicas),
+		}, true
+	default:
+		return scenario.Entry{}, false
+	}
+}
+
+// fromReportedEvent is the entry one Kubernetes Event becomes: the control
+// plane's own reason for what it did to the object the Event names, which is
+// where the reason for a Placement comes from. An Event is always read as
+// reported, because an Event is the control plane reporting rather than the
+// object changing.
+func fromReportedEvent(elapsed time.Duration, reported *corev1.Event) (scenario.Entry, bool) {
+	kind, recorded := reportedKinds[reported.InvolvedObject.Kind]
+	if !recorded {
+		return scenario.Entry{}, false
+	}
+
+	return scenario.Entry{
+		Elapsed: elapsed, Change: scenario.ChangeReported, Kind: kind,
+		Name: reported.InvolvedObject.Name, Reason: reported.Reason, Detail: reported.Message,
+	}, true
+}
+
+// readinessOf is the Ready condition the control plane reports for a Node, in
+// the words internal/scenario owns, so neither side of this mapper writes them.
+func readinessOf(node corev1.Node) scenario.NodeReadiness {
+	if isReady(node) {
+		return scenario.NodeReady
+	}
+
+	return scenario.NodeNotReady
+}
+
+// capacityOf is how many Pods a Node reports room for.
+func capacityOf(node corev1.Node) string {
+	return fmt.Sprintf("%d Pods", node.Status.Capacity.Pods().Value())
+}
+
+// replicasReady is how much of a Workload's own object the control plane reports
+// ready, which is how a Deployment and a ReplicaSet change reads. An object
+// declaring no replica count reports only what is ready.
+func replicasReady(ready int32, declared *int32) string {
+	if declared == nil {
+		return fmt.Sprintf("%d Pods ready", ready)
+	}
+
+	return fmt.Sprintf("%d of %d Pods ready", ready, *declared)
 }

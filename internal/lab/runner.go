@@ -12,6 +12,7 @@ import (
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
+	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
 )
 
 // A Scenario source is one Go file and no test file, and a run name writes a
@@ -39,6 +40,14 @@ type Outcome struct {
 	// are empty for a Scenario that carried out every Step it holds.
 	EndedAt Step
 	Cause   error
+	// Timeline is what this Scenario's Simulated Cluster did while it ran, FiledAt
+	// where that Timeline was written, and NotFiled what prevented writing it. A
+	// Timeline the lab could not write is the lab's own failure and leaves the rest
+	// of this Outcome as reported, per
+	// docs/adr/2026-10-05-timeline-from-the-watch-stream.md.
+	Timeline scenario.Timeline
+	FiledAt  string
+	NotFiled error
 }
 
 // Ended reports whether a Step could not be carried out, which is what stopped
@@ -67,26 +76,36 @@ func (s *Scenario) outcome() Outcome {
 // Runner runs the lab's Scenarios one at a time, on the engine a run resolved
 // once and for the Kubernetes version that run mirrors.
 type Runner struct {
-	engine  cluster.Endpoint
-	version cluster.KubernetesVersion
+	engine    cluster.Endpoint
+	version   cluster.KubernetesVersion
+	timelines timeline.Folder
 }
 
 // NewRunner builds the runner of a run: the resolved engine every Scenario's
-// Simulated Cluster is provisioned on, and the Kubernetes version each mirrors.
-func NewRunner(engine cluster.Endpoint, version cluster.KubernetesVersion) *Runner {
-	return &Runner{engine: engine, version: version}
+// Simulated Cluster is provisioned on, the Kubernetes version each mirrors, and
+// the folder every Scenario's Timeline is filed in.
+func NewRunner(engine cluster.Endpoint, version cluster.KubernetesVersion, timelines timeline.Folder) *Runner {
+	return &Runner{engine: engine, version: version, timelines: timelines}
 }
 
 // Run derives the Scenario's run name from the file its function is defined in,
-// provisions a Simulated Cluster under that name, hands the Scenario's lines a
-// Scenario to record their Steps into, and removes that cluster whether the
-// Scenario held, reported a Finding or ended at a Step.
+// provisions a Simulated Cluster under that name, records the Timeline of what
+// that cluster does, hands the Scenario's lines a Scenario to record their Steps
+// into, and removes that cluster whether the Scenario held, reported a Finding or
+// ended at a Step.
+//
+// The record is started before the first Step and stopped after the last one, so
+// a Timeline holds the Topology coming up as well as the Placement settling, and
+// the cluster is still there while it is being recorded. Opening the Timeline
+// file cannot stop the Scenario: a file the lab could not write is reported on
+// the Outcome, per docs/adr/2026-10-05-timeline-from-the-watch-stream.md.
 //
 // The error it returns is the lab's own: a run name it could not derive, a
-// cluster it could not provision, or one it could not remove. A name it cannot
-// derive stops the run before anything is provisioned, so no Simulated Cluster is
-// ever named after nothing. What the Scenario found is the Outcome, which a caller
-// reports whether or not the removal succeeded.
+// cluster it could not provision, one whose changes it could not watch, or one it
+// could not remove. A name it cannot derive stops the run before anything is
+// provisioned, so no Simulated Cluster is ever named after nothing. What the
+// Scenario found is the Outcome, which a caller reports whether or not the
+// removal succeeded.
 func (r *Runner) Run(ctx context.Context, steps func(*Scenario)) (reported Outcome, err error) {
 	name, err := runNameOfScenario(steps)
 	if err != nil {
@@ -109,11 +128,24 @@ func (r *Runner) Run(ctx context.Context, steps func(*Scenario)) (reported Outco
 		}
 	}()
 
+	filed := r.timelines.Open(timeline.Header{
+		Scenario: name, Cluster: provisioned.Name(), Kubernetes: r.version.String(),
+	})
+	defer filed.Close()
+
+	if err := provisioned.Record(ctx, filed); err != nil {
+		return Outcome{}, err
+	}
+
 	running := newScenario(ctx, provisioned)
 	steps(running)
 
+	recorded := provisioned.StopRecording()
+	filed.Close()
+
 	reported = running.outcome()
 	reported.Name, reported.Cluster = name, provisioned.Name()
+	reported.Timeline, reported.FiledAt, reported.NotFiled = recorded, filed.Path(), filed.Err()
 
 	return reported, nil
 }

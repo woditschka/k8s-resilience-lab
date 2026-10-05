@@ -62,6 +62,14 @@
 
 **Step**: One line of a Scenario, either a Given that sets up, a When that injects a Failure, or a Then that asserts an outcome. Relationships: a Scenario is a sequence of Steps; a Given declares a Topology or a Workload, a When injects one Failure, a Then asserts one Placement outcome. Avoid: stage, phase, clause, instruction.
 
+**Scenario name**: The short name an engineer gives one Scenario, which a run reports and which selects that Scenario to run on its own. Relationships: exactly one per Scenario, and not the name of the Scenario's function. Avoid: run name (a run is one invocation of the lab), test name, scenario id.
+
+**Timeline**: The ordered record of what changed in a Scenario's Simulated Cluster while the Scenario ran. Relationships: one Timeline per Scenario of a run, holding that Scenario's Node, Pod and Workload changes together with the control plane's reason for each Placement. A Timeline states what happened; a Finding judges it and a Failure causes it. Avoid: event log, audit log, history, trace, Event (a Kubernetes Event object is one entry of a Timeline).
+
+**Entry**: One change a Timeline records, naming when the lab received it, what changed, and the control plane's reason where it reported one. Relationships: a Timeline is an ordered sequence of Entries, and a Kubernetes Event object is one Entry. Avoid: event, log line, record.
+
+**Timeline summary**: The short report of one Scenario's Timeline that a run prints when the Scenario ends, scannable in one screen. Relationships: one per Timeline, grouping the Timeline's Entries by the Topology, each Workload and each Pod, while every Entry stays in the Timeline's file. Avoid: digest, overview, Timeline report.
+
 **Finding**: An outcome a Then asserts that the Placement does not meet. Relationships: a Finding is a result of the Scenario, unlike a Step that cannot be carried out, which ends it. Avoid: failure (that word is the injected loss), error, bug, violation.
 
 ## Example Dialogue

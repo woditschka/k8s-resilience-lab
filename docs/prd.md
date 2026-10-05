@@ -21,6 +21,7 @@ The lab serves two uses from one body of behavior. Unattended, it runs each Scen
 | G-2 | The behavior each Scenario asserts is also demonstrable live. | An engineer starts the lab, watches the Placement of a running Workload, and injects a Failure without editing code. |
 | G-3 | A Workload's survival of a Failure is judged against a stated threshold. | Each Scenario names the Required Capacity it expects and judges it immediately after the Failure and again after Placement settles. |
 | G-4 | Writing and reading a Scenario takes no knowledge of the lab's machinery. | A Scenario is a sequence of Given, When and Then Steps and nothing else, and an engineer finds every Scenario in one place. |
+| G-5 | What happened inside a Scenario's Simulated Cluster is explainable after the run. | Every Scenario leaves a Timeline naming each Node, Pod and Workload change and the control plane's reason for each Placement. |
 
 ## Non-Goals
 
@@ -48,7 +49,7 @@ Every run reports the Kubernetes version its Simulated Cluster mirrors `[REQ-SIM
 Verifying the lab takes a single invocation with no arguments. That invocation checks the lab's own rules first, then runs every Scenario that needs a Simulated Cluster, one after another `[REQ-SIM-002]`. Each Scenario's name and outcome appears as the run proceeds, and no outcome is ever carried over from an earlier run `[REQ-SIM-002]`. A Scenario needs a container runtime, so a run that reaches none stops and names what is missing `[REQ-SIM-002]`.
 
 <a id="req-sim-003"></a>
-One Scenario also runs on its own, named by the engineer, so a single behavior is re-run without the others `[REQ-SIM-003]`. A name that matches no Scenario stops the run before a Simulated Cluster is provisioned `[REQ-SIM-003]`.
+One Scenario also runs on its own when the engineer names it, so a single behavior is re-run without the others `[REQ-SIM-003]`. A Scenario name that matches no Scenario stops the run before a Simulated Cluster is provisioned `[REQ-SIM-003]`.
 
 <a id="req-sim-004"></a>
 A Scenario's outcome is trusted only when the lab itself is sound, and one command decides that. It checks the lab's own rules, runs the lab's own tests, and builds the lab `[REQ-SIM-004]`. The same command fails when any part of the lab could reach a cluster the lab did not provision itself `[REQ-SIM-004]`. The repository holds exactly one implementation of the lab `[REQ-SIM-004]`.
@@ -92,6 +93,39 @@ The lab also accounts for what it depends on and for what it leaves open. The on
 
 **ADR:** [ADR: Kubernetes version pin](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: The lab provisions the Simulated Cluster it drives](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: Each Scenario provisions its own Simulated Cluster](adr/2026-10-04-cluster-per-scenario.md) · [ADR: A Scenario's Workload declares the spread of its own Pods](adr/2026-10-04-scenario-declared-pod-spread.md)  ·  **Design:** [system-design.md](system-design.md)
 
+### Explaining a Placement after the run
+
+<a id="req-sim-005"></a>
+A reported Placement says where the Pods landed; a Timeline says how they got there. The lab records what changes in a Scenario's Simulated Cluster while the Scenario runs, in the order it happened `[REQ-SIM-005]`. A Timeline holds every change to the Nodes, the Pods and the Workload's own objects `[REQ-SIM-005]`. It also holds the control plane's reason for placing each Pod or for leaving it Pending `[REQ-SIM-005]`.
+
+When a Scenario ends, the run prints a Timeline summary, also when the Scenario fails `[REQ-SIM-005]`. The summary opens with how many entries the Timeline holds and where its file is `[REQ-SIM-005]`. It gives the lab's own setup of the Topology one line, and each Workload a line counting its Pods now Running `[REQ-SIM-005]`. Every Pod of a Workload then gets a line giving its path from Pending to Running and the Node it landed on `[REQ-SIM-005]`. A Pod still Pending carries the control plane's reason for it instead, and the summary says plainly when no Pod is Pending `[REQ-SIM-005]`. A collapsed line changes neither the recording nor the Timeline's file `[REQ-SIM-005]`. An engineer who asks for the whole Timeline gets every entry printed in the order it happened `[REQ-SIM-005]`.
+
+Every Scenario of a run also leaves its Timeline in a file of its own, without an engineer asking for it `[REQ-SIM-005]`. The files collect in one place under the working directory, and the lab removes none of them `[REQ-SIM-005]`. A Timeline therefore outlives both the run and the Simulated Cluster it describes `[REQ-SIM-005]`. Two runs at once leave two sets of files, neither replacing the other's `[REQ-SIM-005]`.
+
+**Done when:**
+
+- `[REQ-SIM-005]` given a Scenario that has run, when it ends, then the summary opens with the Timeline's entry count and the file it was filed at.
+- `[REQ-SIM-005]` given a Timeline whose entries are mostly the lab's own setup, when the summary is printed, then that setup is one line and every entry is still in the file.
+- `[REQ-SIM-005]` given a Pod that reached Running, when the summary is read, then its line gives its path from Pending to Running and the Node it landed on.
+- `[REQ-SIM-005]` given a Pod left Pending, when the summary is read, then its line gives the control plane's reason for it.
+- `[REQ-SIM-005]` given an engineer asks for the whole Timeline, when a Scenario ends, then every entry is printed in the order it happened.
+- `[REQ-SIM-005]` given a Scenario's Topology and Workload are in place, when its Timeline is read, then every change to the Nodes, the Pods and the Workload's own objects is in it.
+- `[REQ-SIM-005]` given one Pod was placed and one stayed Pending, when the Timeline is read, then it carries the control plane's reason for each.
+- `[REQ-SIM-005]` given a run of two Scenarios, when it ends, then each Scenario has left one Timeline file and neither file replaced the other.
+- `[REQ-SIM-005]` given two runs at once on one machine, when both end, then each run has its own Timeline files.
+- `[REQ-SIM-005]` given a Scenario's Simulated Cluster has been removed, when its Timeline file is opened, then the Timeline is still readable.
+
+**Edge cases:**
+
+1. A Scenario fails part-way through its Steps. The run prints its summary and files its Timeline anyway.
+2. The place the Timeline files collect in does not exist when a run starts. The run creates it instead of failing.
+3. A Timeline cannot be written. The run reports the Scenario's outcome and names the Timeline it could not write.
+4. A Scenario ends before any Workload is deployed. The summary gives the Topology and names no Workload.
+5. A Pod is placed, lost to a Failure, and placed again. Its line gives the whole path, not its first Placement alone.
+6. A Scenario deploys more than one Workload. Each Workload gets its own counting line and its own Pod lines.
+
+**Design:** [system-design.md](system-design.md)
+
 ### Writing and finding a Scenario
 
 <a id="req-sim-006"></a>
@@ -122,6 +156,8 @@ An engineer opening the repository finds every Scenario in one place `[REQ-SIM-0
 <!-- Unresolved product questions. Each resolves into a requirement, a non-goal, or an ADR. -->
 
 - Does a Failure stay instantaneous, or does the lab also script a Failure over time — a Pod that dies after a delay, a Node that degrades before it is lost? The timed form is closer to a real outage and costs a second injection surface.
-- What does the live view show, and what can an engineer do from it? Open options: a read-only view of the current Placement, or the same view with Failure injection and Scenario controls in it (G-2).
+- What does the live view show, and what can an engineer do from it? Open options: a read-only view of the current Placement, or the same view with Failure injection and Scenario controls in it (G-2). Does either form show the Timeline as it grows?
+- How long a Timeline file is kept, and whether the lab ever removes one.
+- How an engineer reaches a recorded Timeline beyond opening its file, and whether a Scenario may assert on its own Timeline.
 - Does the lab promise anything about a team's own production manifests, or only about the manifests it declares itself? A run mirrors a chosen Kubernetes version, so the stronger promise needs the Topology and the admission behavior to mirror a named environment as well.
 - Which Failure the Scenario after Even spread injects — Pod, Node, or Zone — and the Required Capacity it asserts (G-3).

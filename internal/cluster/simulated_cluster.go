@@ -70,6 +70,10 @@ func clusterImage(version KubernetesVersion) string {
 type SimulatedCluster struct {
 	container *ClusterContainer
 	client    *kubernetes.Clientset
+	// recording is this cluster's Timeline while it is being recorded, absent
+	// until Record starts one. The runner starts and stops it on one goroutine,
+	// so the field itself is never shared.
+	recording *recording
 }
 
 // Provision starts a Simulated Cluster for one Scenario on a resolved engine, for
@@ -427,6 +431,12 @@ func hasSettled(previous, current scenario.Placement, workload scenario.Workload
 // Close removes the Simulated Cluster this run provisioned. The runner defers it
 // around each Scenario, so a Scenario that fails part-way through its steps still
 // loses its cluster, per docs/adr/2026-10-04-cluster-per-scenario.md.
+//
+// A Timeline still recording is stopped first: the watch streams run against the
+// cluster that is about to be removed, so a record outliving its cluster would
+// only record its own disconnection.
 func (c *SimulatedCluster) Close(ctx context.Context) error {
+	c.StopRecording()
+
 	return c.container.Remove(ctx)
 }

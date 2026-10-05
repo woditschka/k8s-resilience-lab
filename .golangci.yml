@@ -20,15 +20,16 @@ linters:
   settings:
     depguard:
       rules:
-        # The layering rule: a run's description and its observed outcome are
-        # immutable values that name no Kubernetes type, so the mapping between
-        # the two vocabularies stays inside internal/cluster.
-        scenario-stays-kubernetes-free:
+        # The layering rule: a run's description, its observed outcome and where
+        # its Timeline is kept are the lab's own, naming no Kubernetes type, so
+        # the mapping between the two vocabularies stays inside internal/cluster.
+        values-stay-kubernetes-free:
           files:
             - "**/internal/scenario/**"
+            - "**/internal/timeline/**"
           deny:
             - pkg: k8s.io
-              desc: internal/scenario imports no Kubernetes package; Kubernetes types stay inside internal/cluster (docs/system-design.md § Package Structure)
+              desc: internal/scenario and internal/timeline import no Kubernetes package; Kubernetes types stay inside internal/cluster (docs/system-design.md § Package Structure)
 
         # The Scenario rule: a Scenario source is Steps alone, so it reaches the
         # Step surface and nothing else of the lab. It keeps the place an engineer
