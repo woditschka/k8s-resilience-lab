@@ -32,13 +32,14 @@ of space.
 | | |
 |---|---|
 | Given | three Zones of three Nodes |
-| Given | the `Checkout` Workload of nine Pods, declaring Resilient placement |
+| Given | the `Checkout` Workload of nine Pods, declaring Resilient placement, keeping at least six Pods Running |
 | Then | every Pod is Running |
 | Then | three Pods sit in every Zone |
 | When | one Node fails |
 | Then | every Pod is Running |
 | Then | three Pods sit in every Zone |
 | Then | no Pod sits on the Nodes that failed |
+| Then | the Required Capacity held: eight Pods at the moment of the Failure, nine once Settled |
 
 The Resilient placement Scenario's world, and then one Node stops responding. The two Thens before
 the When judge the Placement the Scenario starts from, so the world the Failure is injected into is
@@ -47,11 +48,54 @@ recovery. The When says how many Nodes fail rather than naming one: the lab pick
 declared Topology derives, the same pick on every run, and reports which in the Step's own line. The
 Thens after it judge the Placement the control plane reached next.
 
+The Workload declares the capacity it has to keep through the Failure, and the last Then judges that
+minimum at two moments: the moment the Failure was injected, and the moment the Placement had settled
+again. One Pod sits on every Node here, so eight are left Running at the first and nine at the
+second, both above the six declared. The Step names the minimum and both counts whether they are met
+or not, and a moment that misses is reported as a Finding naming it.
+
 Nothing here moves a Pod. Noticing the Node, tainting it and replacing its Pods on the Nodes still
 responding are the control plane's own doing, which is what makes the judged Placement an observation
 about Kubernetes rather than about the lab. The lab does shorten one wait: a Pod leaves an
 unresponsive Node after seconds rather than the five minutes a default cluster allows, and every run
 reports that setting at its start.
+
+## Zone loss
+
+`zone_loss.go`, running as `zone-loss`
+
+| | |
+|---|---|
+| Given | three Zones of three Nodes |
+| Given | the `Checkout` Workload of nine Pods, declaring Resilient placement, keeping at least six Pods Running |
+| Then | every Pod is Running |
+| Then | three Pods sit in every Zone |
+| When | one Zone fails |
+| Then | every Pod is Running |
+| Then | no Pod sits in the Zones that failed |
+| Then | the Required Capacity held: six Pods at the moment of the Failure, nine once Settled |
+
+The same world, and then every Node of one Zone stops responding at once. The When says how many
+Zones fail rather than naming one: the lab picks the first Zones the declared Topology derives, the
+same pick on every run, and reports which in the Step's own line.
+
+What is judged after the Failure is the capacity and nothing else — nine Pods Running, none of them
+in the Zone that stopped. No count per Zone is judged there, because two Zones take nine Pods: the
+Placement is skewed by one Pod per Zone and two Nodes carry two. That is the impact on reliability a
+lost Zone is accepted to have, and asserting an even spread would assert something Kubernetes cannot
+deliver. Both spread constraints honour the taints the stopped Nodes carry, which is why the Zone
+that failed leaves the spread calculation rather than holding Pods Pending.
+
+The Workload declares the same minimum of six Pods, and a lost Zone is what tests it: the Zone takes
+three Pods with it, so exactly six are left Running at the moment it stops and all nine once the
+Placement has settled. That is the property the lab is for — the capacity survives a lost Zone — and
+the last Then states both counts beside the minimum.
+
+The lab lifts one more control-plane setting for this Scenario. A cluster taints the unresponsive
+Nodes of one Zone at a tenth per second, which would stretch a Zone Failure over half a minute, so
+every cluster the lab provisions runs at ten per second and each run reports that setting at its
+start. What is left to wait for is the period the control plane takes to notice, which is Kubernetes'
+own.
 
 ## Writing one
 
@@ -87,7 +131,9 @@ and to which value. A new specification is one function there, added with the Sc
 A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `lab.NodesPerZone`,
 `lab.Pods`, `lab.WorkloadName` and the specification — so a swapped argument does not compile. An
 optional setting is a further call on the complete declaration,
-`Topology(lab.Zones(3), lab.NodesPerZone(3)).NodeCapacity(lab.Pods(2))`. The lab's Scenarios name the
+`Topology(lab.Zones(3), lab.NodesPerZone(3)).NodeCapacity(lab.Pods(2))` for the Pods a Node holds and
+`Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).RequiredCapacity(lab.Pods(6))` for the
+fewest Pods the Workload has to keep Running through a Failure. The lab's Scenarios name the
 Workload constants of `workloads.go`, which are business capabilities of the domain they model — an
 online shop in the Scenario above, and any domain the next one needs.
 

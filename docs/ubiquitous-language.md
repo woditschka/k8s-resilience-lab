@@ -62,9 +62,11 @@
 
 **Skew**: The difference between the highest and the lowest Pod count across the Zones, or across the Nodes, of one Workload. Avoid: imbalance, spread delta.
 
-**Failure**: A loss injected into the Simulated Cluster on purpose, scoped to one Pod, one Node, or one whole Zone. Relationships: a Scenario injects zero or more Failures. A Node Failure leaves the Node in the cluster and unresponsive, so the control plane moves its Pods away after a waiting time. A Scenario states how many Nodes fail, or points at one by its position in the Topology. Avoid: chaos, fault, outage, incident.
+**Failure**: A loss injected into the Simulated Cluster on purpose, scoped to one Pod, one Node, or one whole Zone. Relationships: a Scenario injects zero or more Failures. A Node Failure leaves the Node in the cluster and unresponsive, so the control plane moves its Pods away after a waiting time. A Zone Failure stops every Node of one Zone responding at once, because a Zone holds the Nodes that are lost together. A Scenario states how many Nodes or how many Zones fail, or points at a Node by its position in the Topology. Avoid: chaos, fault, outage, incident.
 
-**Required Capacity**: The minimum number of Running Pods a Workload needs to count as surviving a Failure. Relationships: judged twice per Failure — once immediately after it, once after Placement settles again. Avoid: quorum, minimum availability, headroom.
+**Required Capacity**: The minimum number of Running Pods a Workload needs to count as surviving a Failure. Relationships: a Workload declares it beside the Pods it runs, and it is judged twice per Failure — once at the moment of the Failure, once after Placement settles again. A Pod on a Node that stopped responding does not count as Running from the moment of the Failure. Avoid: quorum, minimum availability, headroom.
+
+**Failure tolerance**: The property that a Workload goes on serving its Required Capacity through a Failure. Relationships: a Workload declares the Required Capacity its Failure tolerance is judged against, and a Then after the Failure judges both moments and states the Pods it counted at each. Losing a Zone or a Node costs the spread, and a Failure tolerance holds while the Pod count does. Avoid: resilience, availability, redundancy, high availability, SLO.
 
 **Scenario**: A named sequence of Steps run against a Simulated Cluster, ending in an asserted Placement outcome. Relationships: a Scenario provisions one Simulated Cluster with one Topology, deploys one or more Workloads, and injects zero or more Failures. Avoid: test case, experiment, simulation.
 

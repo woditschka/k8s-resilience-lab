@@ -37,6 +37,19 @@ const (
 	// default, so a Topology declared at it differs from one that named none.
 	twoPodsPerNode = 2
 
+	// theMinimumKept is the Required Capacity the Workloads below declare: one Pod
+	// fewer than the Workload runs, so one Node stopping leaves exactly the minimum
+	// and the declaration is one the domain admits.
+	theMinimumKept = podsOverEveryNode - onePodLeftBehind
+
+	// aMinimumNoWorkloadCouldKeep is a Required Capacity above the Pods the Workload
+	// declares, so the Given declaring one is a Step that cannot be carried out.
+	aMinimumNoWorkloadCouldKeep = podsOverEveryNode + 1
+
+	// podsShortOfTheMinimum is a count of Pods Running below the minimum those
+	// Workloads declare, which is what a moment missed is counted at.
+	podsShortOfTheMinimum = theMinimumKept - 1
+
 	// noNodesPerZone and noPods are each a declaration the internal/scenario
 	// constructor refuses, so the Given declaring one is a Step that cannot be
 	// carried out. A specification setting nothing is the third, and it is the
@@ -44,13 +57,24 @@ const (
 	noNodesPerZone = 0
 	noPods         = 0
 
-	// moreNodesThanTheTopologyHolds is a Failure that Topology cannot satisfy, so
-	// the When asking for it is a Step that cannot be carried out.
+	// moreNodesThanTheTopologyHolds and moreZonesThanTheTopologyHolds are Failures
+	// that Topology cannot satisfy, so the When asking for one is a Step that cannot
+	// be carried out.
 	moreNodesThanTheTopologyHolds = twoZones*twoNodesPerZone + 1
+	moreZonesThanTheTopologyHolds = twoZones + 1
 
 	// theWhenThatNeverRan is what a Then reading the Nodes a Failure stopped names
 	// when no When ran before it, which is what a reader has to add.
 	theWhenThatNeverRan = "no When"
+
+	// theMinimumNeverDeclared is what the Then judging a Required Capacity names
+	// when the Workload declared none, which is the other way it has nothing to
+	// judge.
+	theMinimumNeverDeclared = "declares no Required Capacity"
+
+	// noMomentNamed is how a Finding naming neither of the two moments is read, so
+	// one that named none is visible in the comparison rather than missing from it.
+	noMomentNamed = "no moment"
 
 	// noSpecificationAtAll is how a Workload line reads when it declares the zero
 	// specification: it names nothing, which is the Given's own refusal.
@@ -87,6 +111,23 @@ func aScenarioAfterFailing(placed scenario.Placement, stopped ...string) *Scenar
 	return &Scenario{observed: placed, settled: true, failed: stopped}
 }
 
+// aScenarioAfterFailingWhichKept is that Scenario once its When has also derived
+// what the Workload kept Running at the moment the Failure was injected, which is
+// the earlier of the two moments a Required Capacity is judged at.
+func aScenarioAfterFailingWhichKept(placed scenario.Placement, kept int, stopped ...string) *Scenario {
+	failing := aScenarioAfterFailing(placed, stopped...)
+	failing.runningAtTheFailure = kept
+
+	return failing
+}
+
+// aScenarioAfterFailingAZone is a Scenario whose When stopped this Zone whole and
+// which has settled at placed, which is the world a Then reading the Zones that
+// failed judges in.
+func aScenarioAfterFailingAZone(placed scenario.Placement, stopped string) *Scenario {
+	return &Scenario{observed: placed, settled: true, failedZones: []string{stopped}}
+}
+
 // aTopologyOf is the Topology of the stated shape, at the capacity a Given
 // declares when a Scenario names none.
 func aTopologyOf(t *testing.T, zones, nodesPerZone int) scenario.Topology {
@@ -120,6 +161,19 @@ func aWorkloadDeclaringResilientPlacementOf(t *testing.T, pods int) scenario.Wor
 	workload, err := scenario.NewWorkload(string(someWorkloadName), pods, ResilientPlacement().declared)
 	if err != nil {
 		t.Fatalf("build a Workload of %d Pods declaring Resilient placement: %v", pods, err)
+	}
+
+	return workload
+}
+
+// aWorkloadKeepingOf is that Workload once it declares the fewest Pods it must
+// keep Running through a Failure.
+func aWorkloadKeepingOf(t *testing.T, pods, minimum int) scenario.Workload {
+	t.Helper()
+
+	workload, err := aWorkloadDeclaringResilientPlacementOf(t, pods).WithRequiredCapacity(minimum)
+	if err != nil {
+		t.Fatalf("declare a Required Capacity of %d Pods: %v", minimum, err)
 	}
 
 	return workload
@@ -166,6 +220,67 @@ func onePodLeftOnTheFailedNodeOf(topology scenario.Topology, stopped string) sce
 	leftBehind := scenario.Pod{Name: podLeftOnTheFailedNode, Node: stopped, Phase: scenario.PodRunning}
 
 	return scenario.NewPlacement(responding, append(moved, leftBehind))
+}
+
+// podsRunningShortOfTheMinimumOn is the Placement a Failure settled at while the
+// control plane has yet to place every Pod again: fewer Pods Running on the Nodes
+// still responding than the Workload's Required Capacity names.
+func podsRunningShortOfTheMinimumOn(topology scenario.Topology, stopped string) scenario.Placement {
+	responding := theNodesStillRespondingIn(topology, stopped)
+
+	return scenario.NewPlacement(responding, podsRunningOver(responding, podsShortOfTheMinimum))
+}
+
+// theZoneThatStopped is the Zone a When of one Zone stops responding: the first
+// the Topology derives, which is the pick internal/scenario makes.
+func theZoneThatStopped(topology scenario.Topology) string {
+	return topology.Zones()[0]
+}
+
+// everyPodBackOnTheRespondingZonesOf is the Placement a Zone Failure settles at:
+// every Pod the Workload declared Running in a Zone still responding. The stopped
+// Zone's Nodes are no Ready Nodes, so the observation is read against the rest and
+// that Zone is in it no longer.
+func everyPodBackOnTheRespondingZonesOf(topology scenario.Topology, stopped string) scenario.Placement {
+	responding := theNodesOutside(topology, stopped)
+
+	return scenario.NewPlacement(responding, podsRunningOver(responding, podsOverEveryNode))
+}
+
+// onePodLeftInTheFailedZoneOf is the same Placement observed while one Node of the
+// stopped Zone is still Ready and still holds a Pod: a Zone's Nodes stop one after
+// another, so an observation taken between them reads against one of them still.
+func onePodLeftInTheFailedZoneOf(topology scenario.Topology, stopped string) scenario.Placement {
+	responding := theNodesOutside(topology, stopped)
+	moved := podsRunningOver(responding, podsOverEveryNode-onePodLeftBehind)
+	stillReady := theFirstNodeIn(topology, stopped)
+	leftBehind := scenario.Pod{Name: podLeftOnTheFailedNode, Node: stillReady.Name, Phase: scenario.PodRunning}
+
+	return scenario.NewPlacement(append(responding, stillReady), append(moved, leftBehind))
+}
+
+// theNodesOutside are the Nodes of every Zone but this one, and theFirstNodeIn the
+// first Node the Topology derives in it.
+func theNodesOutside(topology scenario.Topology, zone string) []scenario.Node {
+	declared := topology.Nodes()
+	outside := make([]scenario.Node, 0, len(declared))
+	for _, node := range declared {
+		if node.Zone != zone {
+			outside = append(outside, node)
+		}
+	}
+
+	return outside
+}
+
+func theFirstNodeIn(topology scenario.Topology, zone string) scenario.Node {
+	for _, node := range topology.Nodes() {
+		if node.Zone == zone {
+			return node
+		}
+	}
+
+	return scenario.Node{}
 }
 
 // theNodesStillRespondingIn are the Nodes an observation is read against once
@@ -239,6 +354,16 @@ func resilientPlacementWorkloadStepOf(pods int) Step {
 	return workloadStepOf(pods, ResilientPlacement().name())
 }
 
+// workloadStepKeepingOf is that line once it names the fewest Pods the Workload
+// must keep Running, which renames the line rather than adding one.
+func workloadStepKeepingOf(pods, minimum int) Step {
+	return Step{
+		Kind: GivenStep,
+		Name: fmt.Sprintf("%s, keeping at least %d Pods Running",
+			resilientPlacementWorkloadStepOf(pods).Name, minimum),
+	}
+}
+
 func allPodsRunningStep() Step {
 	return Step{Kind: ThenStep, Name: "every Pod Running"}
 }
@@ -251,14 +376,39 @@ func podsPerNodeStepOf(pods int) Step {
 	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pod per Node", pods)}
 }
 
-// nodesFailStepOf is the Step a When records before it resolves the Nodes it
-// stops; once it has them, it renames that line to carry their names.
+// nodesFailStepOf and zonesFailStepOf are the Steps a When records before it
+// resolves what it stops; once it has them, it renames that line to carry their
+// names, which only a run against a cluster reaches.
 func nodesFailStepOf(nodes int) Step {
 	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Nodes fail", nodes)}
 }
 
+func zonesFailStepOf(zones int) Step {
+	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Zones fail", zones)}
+}
+
 func noPodsOnTheFailedNodesStep() Step {
 	return Step{Kind: ThenStep, Name: "no Pod on the Nodes that failed"}
+}
+
+func noPodsInTheFailedZonesStep() Step {
+	return Step{Kind: ThenStep, Name: "no Pod in the Zones that failed"}
+}
+
+// requiredCapacityStep is the Step the Then judging a Required Capacity records
+// before it has the counts, which is the line a Scenario with nothing to judge
+// ends at. requiredCapacityStepOf is that line once it states the minimum and both
+// counts, which it is renamed to before it judges them.
+func requiredCapacityStep() Step {
+	return Step{Kind: ThenStep, Name: "the Required Capacity held"}
+}
+
+func requiredCapacityStepOf(minimum, atTheFailure, onceSettled int) Step {
+	return Step{
+		Kind: ThenStep,
+		Name: fmt.Sprintf("%s: a minimum of %d Pods, %d at the moment of the Failure and %d once Settled",
+			requiredCapacityStep().Name, minimum, atTheFailure, onceSettled),
+	}
 }
 
 // judgedFinding is one Finding as this suite reads it: the Step it names, and
@@ -277,6 +427,28 @@ func asJudged(findings []Finding) []judgedFinding {
 	}
 
 	return judged
+}
+
+// momentsNamedIn is the moment each Finding names, of the two a Required Capacity
+// is judged at: one judgement reports both moments under one Step, so what tells
+// its Findings apart is the moment each of them names.
+func momentsNamedIn(findings []Finding) []string {
+	named := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		named = append(named, momentNamedBy(finding))
+	}
+
+	return named
+}
+
+func momentNamedBy(finding Finding) string {
+	for _, moment := range []string{atTheMomentOfTheFailure, onceThePlacementHadSettled} {
+		if strings.Contains(finding.Mismatch, moment) {
+			return moment
+		}
+	}
+
+	return noMomentNamed
 }
 
 // kindsOf is which of the three kinds each Step recorded was, in Step order.
@@ -315,6 +487,41 @@ func TestAGivenWorkloadCustomizedWithFullAccess_ShouldKeepItBesideTheWorkloadItD
 
 	expect.Expect(t, placesOfTheFullAccesses(declaring.accesses)).
 		To(expect.Equal(placesOfTheFullAccesses(customized.accesses)))
+}
+
+// A Workload line declaring a Required Capacity carries the minimum into the
+// Workload the domain holds, and renames its own line to it (docs/prd.md
+// REQ-SIM-010).
+func TestAGivenWorkloadDeclaringARequiredCapacity_ShouldDeclareThatMinimumBesideItsPods(t *testing.T) {
+	declaring := aScenario()
+
+	declaring.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement()).
+		RequiredCapacity(Pods(theMinimumKept))
+
+	declared := declaring.outcome()
+	expect.Expect(t, declaring.workload).To(expect.Equal(aWorkloadKeepingOf(t, podsOverEveryNode, theMinimumKept)))
+	expect.Expect(t, declared.Steps).
+		To(expect.Equal([]Step{workloadStepKeepingOf(podsOverEveryNode, theMinimumKept)}))
+}
+
+// A minimum above the Pods the Workload runs is refused where it is declared,
+// which is docs/prd.md REQ-SIM-010 edge case 1. The minima the domain refuses are
+// its own suite's, this one being the path through the Given Step.
+func TestARequiredCapacityNoWorkloadCouldKeep_ShouldEndTheScenarioNamingThatGiven(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	ending := aScenarioOver(onePodPerNodeOf(declared))
+	ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement()).
+		RequiredCapacity(Pods(aMinimumNoWorkloadCouldKeep))
+
+	ending.Then().AllPodsRunning()
+
+	ended := ending.outcome()
+	refused := workloadStepKeepingOf(podsOverEveryNode, aMinimumNoWorkloadCouldKeep)
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(refused))
+	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{topologyStepOf(twoZones, twoNodesPerZone), refused}))
+	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+	causeNames(t, ended, fmt.Sprintf("could never keep %d Pods Running", aMinimumNoWorkloadCouldKeep))
 }
 
 func TestAGivenTopologyNamingItsNodeCapacity_ShouldDeclareThatCapacityAndRenameItsLine(t *testing.T) {
@@ -415,6 +622,192 @@ func TestAPlacementStillHoldingAPodOnANodeThatFailed_ShouldReportAFindingAndRunT
 		noPodsOnTheFailedNodesStep(),
 		allPodsRunningStep(),
 	}))
+}
+
+// The Then that reads a Zone Failure is judged the same way over the Zone axis: a
+// Zone whose Nodes have all left the observation holds no Pod, and one still
+// holding a Node of that Zone is where a Pod left behind is still counted.
+func TestAPlacementHoldingNoPodInTheZonesThatFailed_ShouldRecordNoFinding(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stopped := theZoneThatStopped(declared)
+	judging := aScenarioAfterFailingAZone(everyPodBackOnTheRespondingZonesOf(declared, stopped), stopped)
+	judging.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
+
+	judging.Then().NoPodsInTheFailedZones()
+	judging.Then().AllPodsRunning()
+
+	judged := judging.outcome()
+	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{}))
+	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
+		noPodsInTheFailedZonesStep(),
+		allPodsRunningStep(),
+	}))
+}
+
+func TestAPlacementStillHoldingAPodInAZoneThatFailed_ShouldReportAFindingAndRunTheLaterSteps(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stopped := theZoneThatStopped(declared)
+	judging := aScenarioAfterFailingAZone(onePodLeftInTheFailedZoneOf(declared, stopped), stopped)
+	judging.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
+
+	judging.Then().NoPodsInTheFailedZones()
+	judging.Then().AllPodsRunning()
+
+	judged := judging.outcome()
+	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{
+		{Step: noPodsInTheFailedZonesStep(), Mismatching: true},
+	}))
+	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
+		noPodsInTheFailedZonesStep(),
+		allPodsRunningStep(),
+	}))
+}
+
+// The count at the moment of the Failure is a derivation and not an observation,
+// so it is driven here over the Placement the When discards rather than through
+// the When, which stops Nodes responding against a cluster
+// (docs/adr/2026-10-06-required-capacity-judged-at-two-moments.md). Which Pods a
+// Placement reports Running apart from a Node is internal/scenario's own suite's.
+func TestAPodOnANodeThatStoppedResponding_ShouldNotCountAsRunningAtTheMomentOfTheFailure(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stopped := theNodeThatStopped(declared)
+	beforeTheFailure := onePodLeftOnTheFailedNodeOf(declared, stopped)
+	failing := aScenarioAfterFailing(beforeTheFailure, stopped)
+
+	kept := failing.podsKeptRunning(beforeTheFailure)
+
+	expect.Expect(t, kept).To(expect.Equal(podsOverEveryNode - onePodLeftBehind))
+}
+
+// A Required Capacity held through a Failure states what it counted at each
+// moment beside the minimum declared, met or not (docs/prd.md REQ-SIM-010).
+func TestACapacityThatHoldsThroughAFailure_ShouldStateThePodsCountedAtEachMomentAndRecordNoFinding(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stopped := theNodeThatStopped(declared)
+	judging := aScenarioAfterFailingWhichKept(
+		everyPodBackOnTheRespondingNodesOf(declared, stopped), theMinimumKept, stopped)
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement()).
+		RequiredCapacity(Pods(theMinimumKept))
+
+	judging.Then().RequiredCapacityHeld()
+	judging.Then().AllPodsRunning()
+
+	judged := judging.outcome()
+	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{}))
+	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+		workloadStepKeepingOf(podsOverEveryNode, theMinimumKept),
+		requiredCapacityStepOf(theMinimumKept, theMinimumKept, podsOverEveryNode),
+		allPodsRunningStep(),
+	}))
+}
+
+func TestACapacityMissedAtOneMoment_ShouldReportAFindingNamingThatMoment(t *testing.T) {
+	// Each case misses the minimum at one of the two moments and meets it at the
+	// other, so the Finding it reports is the one naming the moment missed.
+	cases := []struct {
+		name             string
+		keptAtTheFailure int
+		settledAt        func(scenario.Topology, string) scenario.Placement
+		keptOnceSettled  int
+		moment           string
+	}{
+		{
+			name:             "the Failure cost more Pods than the minimum leaves",
+			keptAtTheFailure: podsShortOfTheMinimum,
+			settledAt:        everyPodBackOnTheRespondingNodesOf,
+			keptOnceSettled:  podsOverEveryNode,
+			moment:           atTheMomentOfTheFailure,
+		},
+		{
+			name:             "the Placement settled below the minimum",
+			keptAtTheFailure: theMinimumKept,
+			settledAt:        podsRunningShortOfTheMinimumOn,
+			keptOnceSettled:  podsShortOfTheMinimum,
+			moment:           onceThePlacementHadSettled,
+		},
+	}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+			stopped := theNodeThatStopped(declared)
+			judging := aScenarioAfterFailingWhichKept(one.settledAt(declared, stopped), one.keptAtTheFailure, stopped)
+			judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement()).
+				RequiredCapacity(Pods(theMinimumKept))
+
+			judging.Then().RequiredCapacityHeld()
+			judging.Then().NoPodsOnTheFailedNodes()
+
+			judged := judging.outcome()
+			missed := requiredCapacityStepOf(theMinimumKept, one.keptAtTheFailure, one.keptOnceSettled)
+			expect.Expect(t, asJudged(judged.Findings)).
+				To(expect.Equal([]judgedFinding{{Step: missed, Mismatching: true}}))
+			expect.Expect(t, momentsNamedIn(judged.Findings)).To(expect.Equal([]string{one.moment}))
+			expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+				workloadStepKeepingOf(podsOverEveryNode, theMinimumKept),
+				missed,
+				noPodsOnTheFailedNodesStep(),
+			}))
+		})
+	}
+}
+
+func TestAFailureToleranceWithNothingToJudge_ShouldEndTheScenarioNamingThatThen(t *testing.T) {
+	// A Required Capacity is judged through a Failure and against a minimum, so a
+	// Scenario missing either has nothing to judge and ends at the Then, which is
+	// recorded before it states any count.
+	cases := []struct {
+		name     string
+		declare  func(scenario.Topology, string) *Scenario
+		declared Step
+		cause    string
+	}{
+		{
+			name: "a minimum no Failure came before",
+			declare: func(declared scenario.Topology, _ string) *Scenario {
+				ending := aScenarioOver(onePodPerNodeOf(declared))
+				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement()).
+					RequiredCapacity(Pods(theMinimumKept))
+
+				return ending
+			},
+			declared: workloadStepKeepingOf(podsOverEveryNode, theMinimumKept),
+			cause:    theWhenThatNeverRan,
+		},
+		{
+			name: "a Failure the Workload declared no minimum for",
+			declare: func(declared scenario.Topology, stopped string) *Scenario {
+				ending := aScenarioAfterFailing(everyPodBackOnTheRespondingNodesOf(declared, stopped), stopped)
+				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
+
+				return ending
+			},
+			declared: resilientPlacementWorkloadStepOf(podsOverEveryNode),
+			cause:    theMinimumNeverDeclared,
+		},
+	}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+			ending := one.declare(declared, theNodeThatStopped(declared))
+
+			ending.Then().RequiredCapacityHeld()
+			ending.Then().AllPodsRunning()
+
+			ended := ending.outcome()
+			expect.Expect(t, ended.EndedAt).To(expect.Equal(requiredCapacityStep()))
+			expect.Expect(t, ended.Steps).To(expect.Equal([]Step{one.declared, requiredCapacityStep()}))
+			expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+			causeNames(t, ended, one.cause)
+		})
+	}
 }
 
 func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testing.T) {
@@ -553,24 +946,62 @@ func TestAWhenAskingForMoreFailingNodesThanTheTopologyHolds_ShouldEndTheScenario
 	causeNames(t, ended, fmt.Sprintf("a Failure of %d Nodes is refused", moreNodesThanTheTopologyHolds))
 }
 
-func TestAThenReadingAFailureWithNoWhenBeforeIt_ShouldEndTheScenarioNamingThatThen(t *testing.T) {
+func TestAWhenThatFailsMoreZonesThanTheTopologyHolds_ShouldEndTheScenarioAtThatStep(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	ending := aScenarioOver(onePodPerNodeOf(declared))
 	ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
 	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 
-	ending.Then().NoPodsOnTheFailedNodes()
+	ending.When().ZonesFail(Zones(moreZonesThanTheTopologyHolds))
 	ending.Then().AllPodsRunning()
 
 	ended := ending.outcome()
-	expect.Expect(t, ended.EndedAt).To(expect.Equal(noPodsOnTheFailedNodesStep()))
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(zonesFailStepOf(moreZonesThanTheTopologyHolds)))
 	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
 		topologyStepOf(twoZones, twoNodesPerZone),
 		resilientPlacementWorkloadStepOf(podsOverEveryNode),
-		noPodsOnTheFailedNodesStep(),
+		zonesFailStepOf(moreZonesThanTheTopologyHolds),
 	}))
 	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
-	causeNames(t, ended, theWhenThatNeverRan)
+	causeNames(t, ended, fmt.Sprintf("a Failure of %d Zones is refused", moreZonesThanTheTopologyHolds))
+}
+
+func TestAThenReadingAFailureWithNoWhenBeforeIt_ShouldEndTheScenarioNamingThatThen(t *testing.T) {
+	thens := map[string]struct {
+		judge func(*Scenario)
+		step  Step
+	}{
+		"the Nodes that failed": {
+			judge: func(ending *Scenario) { ending.Then().NoPodsOnTheFailedNodes() },
+			step:  noPodsOnTheFailedNodesStep(),
+		},
+		"the Zones that failed": {
+			judge: func(ending *Scenario) { ending.Then().NoPodsInTheFailedZones() },
+			step:  noPodsInTheFailedZonesStep(),
+		},
+	}
+
+	for read, then := range thens {
+		t.Run(read, func(t *testing.T) {
+			declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+			ending := aScenarioOver(onePodPerNodeOf(declared))
+			ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+			ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
+
+			then.judge(ending)
+			ending.Then().AllPodsRunning()
+
+			ended := ending.outcome()
+			expect.Expect(t, ended.EndedAt).To(expect.Equal(then.step))
+			expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+				topologyStepOf(twoZones, twoNodesPerZone),
+				resilientPlacementWorkloadStepOf(podsOverEveryNode),
+				then.step,
+			}))
+			expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+			causeNames(t, ended, theWhenThatNeverRan)
+		})
+	}
 }
 
 // causeOf is why a Scenario ended, as a Scenario that ran to its last Step
@@ -599,22 +1030,12 @@ func TestAnEvenExpectation_ShouldGiveEveryDomainTheSameShare(t *testing.T) {
 	nodes := declared.Nodes()
 	firstZone, lastZone := nodes[0].Zone, nodes[len(nodes)-1].Zone
 
-	expected := evenlyOver(zonesOf(declared), podsPerZoneWhenEven)
+	expected := evenlyOver(declared.Zones(), podsPerZoneWhenEven)
 
 	expect.Expect(t, expected).To(expect.Equal(map[string]int{
 		firstZone: podsPerZoneWhenEven,
 		lastZone:  podsPerZoneWhenEven,
 	}))
-}
-
-func TestEachZoneOfATopology_ShouldBeNamedOnceInZoneOrder(t *testing.T) {
-	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
-	nodes := declared.Nodes()
-	firstZone, lastZone := nodes[0].Zone, nodes[len(nodes)-1].Zone
-
-	named := zonesOf(declared)
-
-	expect.Expect(t, named).To(expect.Equal([]string{firstZone, lastZone}))
 }
 
 func TestEveryNodeOfATopology_ShouldBeNamedInTopologyOrder(t *testing.T) {

@@ -1,6 +1,7 @@
 package scenario_test
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,9 +22,15 @@ const (
 	// Failure it admits.
 	everyNode = twoZones * twoNodesPerZone
 
-	// oneNode and twoNodes are the counts a Failure is asked for below.
+	// everyZone is how many Zones that Topology holds, which is the largest Zone
+	// Failure it admits.
+	everyZone = twoZones
+
+	// oneNode and twoNodes are the counts a Failure is asked for below, and oneZone
+	// the count a Zone Failure is asked for.
 	oneNode  = 1
 	twoNodes = 2
+	oneZone  = 1
 )
 
 // aTopologyOfTwoZones is the Topology every Failure below is resolved against.
@@ -48,6 +55,38 @@ func aFailureOf(t *testing.T, topology scenario.Topology, count int) scenario.No
 	}
 
 	return failure
+}
+
+// aZoneFailureOf is the Failure stopping count Zones of that Topology.
+func aZoneFailureOf(t *testing.T, topology scenario.Topology, count int) scenario.ZoneFailure {
+	t.Helper()
+
+	failure, err := scenario.NewZoneFailure(topology, count)
+	if err != nil {
+		t.Fatalf("build a Failure stopping %d Zones: %v", count, err)
+	}
+
+	return failure
+}
+
+// theFirstZonesOf and theNodesOfTheFirstZonesOf are the Zones a Zone Failure of
+// count stops and the Nodes it stops in them, derived here rather than written
+// out, so the expectation follows the Topology that is asked.
+func theFirstZonesOf(topology scenario.Topology, count int) []string {
+	return topology.Zones()[:count]
+}
+
+func theNodesOfTheFirstZonesOf(topology scenario.Topology, count int) []string {
+	stopping := theFirstZonesOf(topology, count)
+
+	var names []string
+	for _, node := range topology.Nodes() {
+		if slices.Contains(stopping, node.Zone) {
+			names = append(names, node.Name)
+		}
+	}
+
+	return names
 }
 
 // theFirstNamesOf are the names of the first count Nodes the Topology derives,
@@ -79,6 +118,26 @@ func TestTwoFailuresOfTheSameCount_ShouldStopTheSameNodes(t *testing.T) {
 	expect.Expect(t, secondRun.Names()).To(expect.Equal(firstRun.Names()))
 }
 
+// A Zone Failure is the Node Failure over a whole Zone: it names the Zones it
+// stops, and the Nodes it stops are every Node those Zones hold rather than the
+// first the Topology derives, which is what makes a Zone the unit it fails.
+func TestAZoneFailure_ShouldStopEveryNodeOfThatZoneResponding(t *testing.T) {
+	declared := aTopologyOfTwoZones(t)
+
+	failure := aZoneFailureOf(t, declared, oneZone)
+
+	expect.Expect(t, failure.Names()).To(expect.Equal(theFirstZonesOf(declared, oneZone)))
+	expect.Expect(t, failure.NodeNames()).To(expect.Equal(theNodesOfTheFirstZonesOf(declared, oneZone)))
+}
+
+func TestTwoZoneFailuresOfTheSameCount_ShouldStopTheSameZones(t *testing.T) {
+	declared := aTopologyOfTwoZones(t)
+
+	firstRun, secondRun := aZoneFailureOf(t, declared, oneZone), aZoneFailureOf(t, declared, oneZone)
+
+	expect.Expect(t, secondRun.Names()).To(expect.Equal(firstRun.Names()))
+}
+
 func TestANodeFailure_ShouldRefuseACountItsTopologyCannotSatisfy(t *testing.T) {
 	refusals := map[string]struct {
 		count int
@@ -95,6 +154,30 @@ func TestANodeFailure_ShouldRefuseACountItsTopologyCannotSatisfy(t *testing.T) {
 
 			if err == nil {
 				t.Fatalf("a Failure of %d Nodes is refused, but it was admitted", refusal.count)
+			}
+			if !strings.Contains(err.Error(), refusal.named) {
+				t.Errorf("the refusal names %q, but reads: %v", refusal.named, err)
+			}
+		})
+	}
+}
+
+func TestAZoneFailure_ShouldRefuseACountItsTopologyCannotSatisfy(t *testing.T) {
+	refusals := map[string]struct {
+		count int
+		named string
+	}{
+		"one Zone more than the Topology holds": {count: everyZone + 1, named: "zone-2"},
+		"no Zone at all":                        {count: 0, named: strconv.Itoa(0)},
+		"a negative Zone count":                 {count: -1, named: strconv.Itoa(-1)},
+	}
+
+	for refused, refusal := range refusals {
+		t.Run(refused, func(t *testing.T) {
+			_, err := scenario.NewZoneFailure(aTopologyOfTwoZones(t), refusal.count)
+
+			if err == nil {
+				t.Fatalf("a Failure of %d Zones is refused, but it was admitted", refusal.count)
 			}
 			if !strings.Contains(err.Error(), refusal.named) {
 				t.Errorf("the refusal names %q, but reads: %v", refusal.named, err)

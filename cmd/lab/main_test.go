@@ -53,9 +53,21 @@ const (
 	resilientPlacementDeclared = "Given a Workload checkout of 9 Pods declaring Resilient placement"
 )
 
+// The lines both Failure Scenarios share: the Given line above renamed by the
+// fewest Pods their Workload must keep Running through a Failure, and the opening
+// of the Then that judges that minimum. A declaration renames the line it is
+// written on, so the renamed Given is the one such a run reports, and the Then
+// names the minimum before the Pods it counted at each moment.
+const (
+	theRequiredCapacityDeclared = resilientPlacementDeclared + ", keeping at least 6 Pods Running"
+	theCapacityJudged           = "Then the Required Capacity held: a minimum of 6 Pods, "
+)
+
 // The lines a run of the Node loss Scenario is read by: its heading under the run
-// name derived for it, the When Step naming the Node the lab picked, and the Then
-// that judges what the Failure left behind.
+// name derived for it, the When Step naming the Node the lab picked, the Then
+// that judges what the Failure left behind, and the counts its capacity
+// judgement states — eight Pods left Running by a Node holding one, and the ninth
+// placed again once the Placement has settled.
 //
 // theNodePickedToFail is the first Node the Scenario's Topology derives, which is
 // the pick a run has to report and has to repeat on every run.
@@ -64,14 +76,34 @@ const (
 	theNodePickedToFail         = "zone-1-node-1"
 	oneNodeFailsReported        = "When 1 Node fails, " + theNodePickedToFail
 	noPodOnTheFailedNodesJudged = "Then no Pod on the Nodes that failed"
+
+	capacityHeldOnNodeLossJudged = theCapacityJudged + "8 at the moment of the Failure and 9 once Settled"
 )
 
-// The labels a run opens each of its two waiting settings with. What such a line
-// has to carry is the pair the cluster package declares — the value the lab sets
-// and the default it replaces — rather than a wording this suite repeats.
+// The lines a run of the Zone loss Scenario is read by, in the same parts: its
+// heading, the When Step naming the Zone the lab picked, the Then that judges what
+// the Failure left in it, and the counts its capacity judgement states — a lost
+// Zone takes three of the nine Pods, so exactly the minimum is left Running at
+// that moment and all nine once the Placement has settled.
+//
+// theZonePickedToFail is the first Zone the Scenario's Topology derives, which is
+// the pick a run has to report and has to repeat on every run.
+const (
+	zoneLossReported            = aScenarioHeading + "zone-loss"
+	theZonePickedToFail         = "zone-1"
+	oneZoneFailsReported        = "When 1 Zone fails, " + theZonePickedToFail
+	noPodInTheFailedZonesJudged = "Then no Pod in the Zones that failed"
+
+	capacityHeldInZoneLossJudged = theCapacityJudged + "6 at the moment of the Failure and 9 once Settled"
+)
+
+// The labels a run opens each of its control-plane settings with. What such a
+// line has to carry is the pair the declaring package holds — the value the lab
+// sets and the default it replaces — rather than a wording this suite repeats.
 const (
 	unresponsiveNodeSetting = "unresponsive Node:"
 	nodeHeartbeatSetting    = "Node heartbeats:"
+	nodeEvictionSetting     = "Node eviction rate:"
 )
 
 // wholeTimelineAsked is the argument an engineer asks a run for every entry of
@@ -213,13 +245,41 @@ func TestNodeLossWrittenAsSteps_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFaile
 	}
 
 	reportShows(t, reported, nodeLossReported)
+	reportShows(t, reported, theRequiredCapacityDeclared)
 	reportShows(t, reported, oneNodeFailsReported)
 	reportShows(t, reported, noPodOnTheFailedNodesJudged)
 	reportShows(t, reported, threePodsPerZoneJudged)
+	reportShows(t, reported, capacityHeldOnNodeLossJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
-func TestARun_ShouldReportTheShortenedWaitBeforePodsLeaveAnUnresponsiveNode(t *testing.T) {
+// Zone loss runs in the same suite for the same reason, and the Zone the lab
+// picked is read out of its When Step: the Scenario names no Zone, so which one
+// stopped is something only the run can report. The count of Pods per Zone is
+// not read after the Failure — two Zones carry nine Pods, so the Placement is
+// skewed and the Scenario judges the capacity alone, by hand and against the
+// minimum its Workload declares (docs/prd.md REQ-SIM-008, REQ-SIM-010).
+func TestARunOfZoneLoss_ShouldReportTheZoneItPickedToFail(t *testing.T) {
+	requireEngine(t)
+
+	reported, err := aRun(t)
+	if err != nil {
+		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
+	}
+
+	reportShows(t, reported, zoneLossReported)
+	reportShows(t, reported, theRequiredCapacityDeclared)
+	reportShows(t, reported, oneZoneFailsReported)
+	reportShows(t, reported, noPodInTheFailedZonesJudged)
+	reportShows(t, reported, capacityHeldInZoneLossJudged)
+	reportLacks(t, reported, aFindingReported)
+}
+
+// Every control-plane setting the lab makes is reported against the default it
+// replaces, so a reader of a run can tell which of the timings it watched are
+// the lab's doing and which are Kubernetes' own. One run is read for all three,
+// because each of them is set once for the whole run.
+func TestARun_ShouldReportEveryControlPlaneSettingItMakesAgainstTheDefaultItReplaces(t *testing.T) {
 	requireEngine(t)
 
 	reported, err := aRun(t)
@@ -231,6 +291,8 @@ func TestARun_ShouldReportTheShortenedWaitBeforePodsLeaveAnUnresponsiveNode(t *t
 		scenario.UnresponsiveNodeWait.String(), scenario.DefaultUnresponsiveNodeWait.String())
 	reportLineNames(t, reported, nodeHeartbeatSetting,
 		cluster.NodeHeartbeatFactor, cluster.DefaultNodeHeartbeatFactor)
+	reportLineNames(t, reported, nodeEvictionSetting,
+		cluster.NodeEvictionRate, cluster.DefaultNodeEvictionRate)
 }
 
 func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(t *testing.T) {

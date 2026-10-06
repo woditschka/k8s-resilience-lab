@@ -86,6 +86,26 @@ func (p Placement) PodsInPhase(phase PodPhase) []Pod {
 	return inPhase
 }
 
+// PodsRunningApartFrom are the observed Pods the control plane reports Running on
+// a Node other than the ones named, which is what a Workload kept at the moment a
+// Failure stopped those Nodes. A Pod the control plane has placed nowhere is on no
+// such Node and is among none of them.
+func (p Placement) PodsRunningApartFrom(nodes []string) []Pod {
+	stopped := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		stopped[node] = struct{}{}
+	}
+
+	var kept []Pod
+	for _, pod := range p.pods {
+		if _, onAStoppedNode := stopped[pod.Node]; pod.Phase == PodRunning && pod.Placed() && !onAStoppedNode {
+			kept = append(kept, pod)
+		}
+	}
+
+	return kept
+}
+
 // PodsPerNode counts this Workload's Pods on each observed Node, an empty Node
 // included as zero. A Pod on a Node this observation does not hold is counted
 // under that Node's name, because the report states what was observed.

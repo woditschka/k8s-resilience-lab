@@ -476,6 +476,34 @@ func TestANodeThatStopsResponding_ShouldLeaveNinePodsRunningThreePerZoneAndNoneO
 	expect.Expect(t, settled.PodsPerNode()[stopped]).To(expect.Equal(noPodAtAll))
 }
 
+// A whole Zone that stops responding is the Failure the capacity has to survive:
+// the Workload's nine Pods are Running again on the Zones still responding, none
+// of them in the Zone that stopped, and none left on a Node the Placement can no
+// longer account for.
+//
+// How the nine are distributed over the two Zones left is not asserted, and
+// deliberately so. Both spread constraints honour the taints the stopped Nodes
+// carry, so the Zone that failed leaves the spread calculation and two Zones take
+// nine Pods: the Placement is skewed by one Pod per Zone, which is the impact on
+// reliability a Zone Failure is accepted to have (docs/prd.md REQ-SIM-008).
+func TestAZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement())
+	stopped := theFirstZoneOf(topology)
+	settleInto(t, provisioned, topology, workload)
+
+	stopEveryNodeIn(t, provisioned, topology, stopped)
+
+	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	if err != nil {
+		t.Fatalf("await the Placement settling after the Failure: %v", err)
+	}
+	expect.Expect(t, settled.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](ninePods))
+	expect.Expect(t, settled.PodsItCannotAccountFor()).To(expect.HaveLen[scenario.Pod](noPodAtAll))
+	expect.Expect(t, settled.PodsPerZone()[stopped]).To(expect.Equal(noPodAtAll))
+	expect.Expect(t, podsCounted(settled.PodsPerZone())).To(expect.Equal(ninePods))
+}
+
 func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheControlPlanesReason(t *testing.T) {
 	provisioned, _ := aProvisionedCluster(t)
 	topology := aTopologyOfTwoNodesHoldingOnePod(t)
@@ -690,6 +718,27 @@ func settleInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.T
 // follows the Topology that is asked.
 func theFirstNodeOf(topology scenario.Topology) string {
 	return topology.Nodes()[0].Name
+}
+
+// theFirstZoneOf is the Zone a Failure of one Zone stops, named from the Topology
+// the same way theFirstNodeOf names its Node.
+func theFirstZoneOf(topology scenario.Topology) string {
+	return topology.Zones()[0]
+}
+
+// stopEveryNodeIn stops every Node of one Zone responding, which is what a
+// Failure of a whole Zone leaves the control plane to notice.
+func stopEveryNodeIn(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, zone string) {
+	t.Helper()
+
+	for _, node := range topology.Nodes() {
+		if node.Zone != zone {
+			continue
+		}
+		if err := provisioned.FailNode(t.Context(), node.Name); err != nil {
+			t.Fatalf("stop Node %s of Zone %s responding: %v", node.Name, zone, err)
+		}
+	}
 }
 
 // theNodeNamed is the Node the cluster holds under this name, whatever it reports

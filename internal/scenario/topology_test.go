@@ -40,6 +40,17 @@ func TestATopology_ShouldExpandToNodesNamedAfterTheirZoneAndTheirIndexInIt(t *te
 	}))
 }
 
+func TestATopology_ShouldNameEachOfItsZonesOnceInZoneOrder(t *testing.T) {
+	const twoZones, twoNodesPerZone = 2, 2
+
+	topology, err := scenario.NewTopology(twoZones, twoNodesPerZone, aCapacity(t))
+	if err != nil {
+		t.Fatalf("build a Topology of %d Zones of %d Nodes: %v", twoZones, twoNodesPerZone, err)
+	}
+
+	expect.Expect(t, topology.Zones()).To(expect.Equal([]string{"zone-1", "zone-2"}))
+}
+
 func TestTwoRunsOfTheSameTopology_ShouldReportTheSameZoneAndNodeNames(t *testing.T) {
 	const threeZones, threeNodesPerZone = 3, 3
 	capacity := aCapacity(t)

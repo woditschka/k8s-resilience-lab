@@ -125,6 +125,25 @@ func TestAPlacement_ShouldReportThePodsOfOnePhaseAlone(t *testing.T) {
 	expect.Expect(t, placement.PodsInPhase(scenario.PodPending)).To(expect.Equal([]scenario.Pod{pending}))
 }
 
+// What a Workload kept at the moment a Failure stopped a Node is read off the
+// observation taken before it: the Pods Running anywhere but on the Nodes that
+// stopped (docs/prd.md REQ-SIM-010).
+func TestAPlacement_ShouldReportThePodsRunningApartFromTheNodesNamed(t *testing.T) {
+	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), threePlacedPodsOverTwoZones())
+
+	expect.Expect(t, placement.PodsRunningApartFrom([]string{fullestNode})).To(expect.Equal([]scenario.Pod{
+		{Name: podOnTheNextNode, Node: nextNode, Phase: scenario.PodRunning},
+	}))
+}
+
+func TestAPodThatIsNotRunningOnARespondingNode_ShouldBeAmongNoneOfThem(t *testing.T) {
+	pending := scenario.Pod{Name: podOnNoNodeAtAll, Phase: scenario.PodPending}
+	onTheNodeThatStopped := scenario.Pod{Name: firstPodOnTheFullestNode, Node: fullestNode, Phase: scenario.PodRunning}
+	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), []scenario.Pod{pending, onTheNodeThatStopped})
+
+	expect.Expect(t, placement.PodsRunningApartFrom([]string{fullestNode})).To(expect.HaveLen[scenario.Pod](0))
+}
+
 func TestTwoObservationsOfTheSamePodsOnTheSameNodes_ShouldAgree(t *testing.T) {
 	firstObservation := scenario.NewPlacement(twoZonesOfTwoNodes(t), threePlacedPodsOverTwoZones())
 	secondObservation := scenario.NewPlacement(twoZonesOfTwoNodes(t), threePlacedPodsOverTwoZones())

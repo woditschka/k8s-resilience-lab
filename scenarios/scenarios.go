@@ -14,5 +14,6 @@ func All() []func(*lab.Scenario) {
 	return []func(*lab.Scenario){
 		AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode,
 		ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding,
+		AZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding,
 	}
 }

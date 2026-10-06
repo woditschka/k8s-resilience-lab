@@ -93,7 +93,7 @@ Default placement carries no spread, so where its Pods land is the scheduler's c
 
 A setting's constructor returns no error, for either builder. The control plane is the validator, so a Scenario handles no error of its own and the lab keeps no copy of Kubernetes' admission rules.
 
-The Workload-line rule reads that Step's own expression rather than the source line, so it admits a `Customize` call of any length and nothing after it.
+The Workload-line rule reads that Step's own expression rather than the source line, so it admits a `Customize` call of any length and nothing after it. That last part is narrowed by [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md): the rule admits one further call of the Workload's own, and no setting of the Scenario's own.
 
 The specification set grows one entry per Scenario that needs one. Zone spread only, soft spread and affinity between a Workload's Pods are not offered yet, so a Customization today names the spread fields the definitions already name.
 

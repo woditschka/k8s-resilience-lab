@@ -411,6 +411,29 @@ const (
 // Kubernetes itself runs on.
 const heartbeatFactorArgument = "--heartbeat-factor=" + NodeHeartbeatFactor
 
+// NodeEvictionRate is how many unresponsive Nodes of one Zone the cluster taints
+// per second under the lab, and DefaultNodeEvictionRate the rate Kubernetes
+// itself runs at. They are the rates as the controller's argument spells them, so
+// the setting a run reports and the setting its cluster is created with cannot
+// drift.
+//
+// The node lifecycle controller paces this per Zone. At the stock rate a Zone's
+// three Nodes were tainted ten seconds apart and the Placement settled 25s after
+// the Failure, which is not the few seconds a Zone Failure is judged within; at
+// ten per second the first Node was tainted within half a second and the other
+// two at the next monitor pass, and the Placement settled 9s after the Failure
+// (docs/system-design.md § Scale and Load). A single Node takes the limiter's
+// burst token either way, so a Failure of one Node is unchanged.
+const (
+	NodeEvictionRate        = "10"
+	DefaultNodeEvictionRate = "0.1"
+)
+
+// evictionRateArgument lifts the pace the control plane taints an unresponsive
+// Zone's Nodes at, so what a Scenario waits for is the monitor period rather than
+// a rate limiter.
+const evictionRateArgument = "--extra-args=kube-controller-manager=node-eviction-rate=" + NodeEvictionRate
+
 // manageAllNodesArgument and manageMarkedNodesArgument are what make the KWOK
 // controller maintain the Nodes carrying the lab's marking alone. The image
 // starts it managing every Node, which is why switching that off is not
@@ -438,6 +461,7 @@ const (
 // (docs/system-design.md § Threat Model).
 var clusterArguments = []string{
 	heartbeatFactorArgument,
+	evictionRateArgument,
 	manageAllNodesArgument,
 	manageMarkedNodesArgument,
 }

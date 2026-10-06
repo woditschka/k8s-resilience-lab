@@ -100,6 +100,18 @@ func (t Topology) Nodes() []Node {
 	return nodes
 }
 
+// Zones are the Zones the Topology holds, by name and in the order it derives
+// them. A Zone is named once however many Nodes it holds, so it is the Zone axis
+// a spread and a Failure are read over.
+func (t Topology) Zones() []string {
+	zones := make([]string, 0, t.zones)
+	for zone := range t.zones {
+		zones = append(zones, zoneNameAt(zone))
+	}
+
+	return zones
+}
+
 // zoneNameAt is the name of the Zone at index, numbered from one.
 func zoneNameAt(index int) string {
 	return fmt.Sprintf("zone-%d", index+1)

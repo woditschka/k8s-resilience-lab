@@ -19,7 +19,7 @@ The lab serves two uses from one body of behavior. Unattended, it runs each Scen
 |----|------|----------------|
 | G-1 | Placement under a declared Topology is verified automatically, with no real cluster involved. | Every Scenario runs unattended on a developer machine and in a build, needing only a container runtime. |
 | G-2 | The behavior each Scenario asserts is also demonstrable live. | An engineer starts the lab, watches the Placement of a running Workload, and injects a Failure without editing code. |
-| G-3 | A Workload's survival of a Failure is judged against a stated threshold. | Each Scenario names the Required Capacity it expects and judges it immediately after the Failure and again after Placement settles. |
+| G-3 | A Workload's capacity is judged through a Failure, not only once the cluster has recovered. | Each Failure Scenario declares the Required Capacity its Workload must keep serving and judges it at the moment of the Failure and again once the Placement is Settled. |
 | G-4 | A Scenario is written and read in one vocabulary. | Every name in a Scenario is one the lab offers Scenarios, each line is a Step, and every Scenario sits in one place. |
 | G-5 | What happened inside a Scenario's Simulated Cluster is explainable after the run. | Every Scenario leaves a Timeline naming each Node, Pod and Workload change and the control plane's reason for each Placement. |
 
@@ -135,14 +135,16 @@ A Scenario that needs a setting the lab's own vocabulary does not name reaches e
 
 **ADR:** [ADR: A Workload declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md) · [ADR: A Scenario's Workload declares the spread of its own Pods](adr/2026-10-04-scenario-declared-pod-spread.md)  ·  **Design:** [system-design.md](system-design.md)
 
-### Surviving a Node Failure
+### Surviving a Node or Zone Failure
 
 <a id="req-sim-008"></a>
 A Scenario also injects a Failure and judges the Placement on both sides of it. Node loss starts from the Resilient placement Scenario's Topology and Workload, then stops one Node responding, as a machine does when it hangs or loses its network `[REQ-SIM-008]`. That Node stays in the cluster, and the control plane moves its Pods away after a waiting time `[REQ-SIM-008]`. The lab sets that waiting time to a few seconds rather than the Kubernetes default, and every run reports it `[REQ-SIM-008]`. A Scenario therefore states no waiting time of its own `[REQ-SIM-008]`.
 
-Node loss says how many Nodes fail, and the lab picks them the same way on every run and reports which `[REQ-SIM-008]`. The Step that injects the Failure carries no Node name, so the failing Node is readable from the Scenario's own Steps `[REQ-SIM-008]`.
+A Scenario says how many Nodes fail, or how many Zones, and the lab picks them the same way on every run and reports which `[REQ-SIM-008]`. The Step that injects the Failure carries no Node and no Zone name, so what failed is readable from the Scenario's own Steps `[REQ-SIM-008]`.
 
 Node loss judges the Placement twice. Before the Failure it asserts nine Running Pods and three in every Zone `[REQ-SIM-008]`. Once the Placement settles again, it asserts those two outcomes and no Pod on the Node that stopped responding `[REQ-SIM-008]`. One surviving Node then holds two Pods, so Node loss asserts no Placement of one Pod per Node `[REQ-SIM-008]`.
+
+Zone loss starts from the same Topology and Workload, then stops every Node of one Zone responding at once `[REQ-SIM-008]`. A Zone holds the Nodes that are lost together, so one Step takes all of them `[REQ-SIM-008]`. Before the Failure, Zone loss asserts nine Running Pods and three in every Zone `[REQ-SIM-008]`. Once the Placement settles again, it asserts nine Running Pods and no Pod in the Zone that stopped responding `[REQ-SIM-008]`. The capacity the Workload serves is therefore restored by the Zones still standing `[REQ-SIM-008]`. Two Zones then carry what three carried, so Zone loss asserts no count of Pods per Zone and none per Node `[REQ-SIM-008]`. Losing a Zone costs the spread, and the lab accepts that cost while the Pod count holds `[REQ-SIM-008]`.
 
 **Done when:**
 
@@ -152,14 +154,49 @@ Node loss judges the Placement twice. Before the Failure it asserts nine Running
 - `[REQ-SIM-008]` given Node loss says one Node fails, when it runs twice, then the same Node fails in both runs and the run reports which.
 - `[REQ-SIM-008]` given any run, when it starts, then it reports that Pods leave an unresponsive Node sooner than in a default cluster.
 - `[REQ-SIM-008]` given Node loss, when its lines are read, then one When Step injects the Failure, carries no Node name and states no waiting time.
+- `[REQ-SIM-008]` given Resilient placement's Topology and Workload are Settled, when every Node of one Zone stops responding, then those Nodes' Pods are moved away within a few seconds.
+- `[REQ-SIM-008]` given one Zone has stopped responding, when the Placement settles again, then nine Pods are Running and none sits in that Zone.
+- `[REQ-SIM-008]` given Zone loss says one Zone fails, when it runs twice, then the same Zone fails in both runs and the run reports which.
+- `[REQ-SIM-008]` given Zone loss, when its lines are read, then one When Step injects the Failure and carries no Zone name.
 
 **Edge cases:**
 
-1. A Pod of the Node that stopped responding cannot be placed anywhere else. It stays Pending with the control plane's reason.
-2. A When asks for more failing Nodes than the Topology holds. The Scenario ends at that Step and names it.
+1. A Pod of a Node that stopped responding cannot be placed anywhere else. It stays Pending with the control plane's reason.
+2. A When asks for more failing Nodes, or more failing Zones, than the Topology holds. The Scenario ends at that Step and names it.
 3. The Placement does not settle again within the lab's wait. The Scenario reports what it observed, rather than waiting longer.
 
 **ADR:** [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](adr/2026-10-05-node-failure-withholds-the-nodes-status.md)  ·  **Design:** [system-design.md](system-design.md)
+
+### Judging a Workload's Failure tolerance
+
+<a id="req-sim-010"></a>
+A Workload states the capacity it has to serve, and the lab judges whether a Failure leaves that capacity standing. The Workload declares its Required Capacity beside the Pods it runs, as the fewest Pods that must stay Running `[REQ-SIM-010]`. A Workload therefore runs spare Pods, so that a lost Zone still leaves the minimum behind `[REQ-SIM-010]`. A minimum above the Pods the Workload runs, or of no Pod at all, is refused where it is declared `[REQ-SIM-010]`.
+
+A Failure tolerance is judged at two moments, which one Step after the Failure judges together `[REQ-SIM-010]`. The first is the moment the Failure was injected, where a Pod on a Node that stopped responding no longer counts as Running `[REQ-SIM-010]`. The second is the moment the Placement is Settled again, where the Pods the control plane placed elsewhere count `[REQ-SIM-010]`. The first moment says what the Failure cost, the second what the cluster restored `[REQ-SIM-010]`.
+
+Every judgement states the Pods it counted at each moment and the minimum it judged them against, met or not `[REQ-SIM-010]`. An engineer therefore checks the lab's count by hand against the Placement the same run reports `[REQ-SIM-010]`. A minimum missed at either moment is reported as a Finding naming that moment `[REQ-SIM-010]`.
+
+Judging Failure tolerance is one way to judge a Failure and counting Pods by hand is the other, and a Scenario is held to neither `[REQ-SIM-010]`. An engineer writing one takes either way or both `[REQ-SIM-010]`. Both Failure Scenarios declare six Pods of nine and judge that minimum, beside the counts they already assert `[REQ-SIM-010]`. One lost Node leaves eight Pods at the moment of the Failure and one lost Zone leaves six, and nine are Running again once each Placement is Settled `[REQ-SIM-010]`.
+
+**Done when:**
+
+- `[REQ-SIM-010]` given a Workload declaring a Required Capacity, when its Given line is read, then that line names the fewest Pods the Workload must keep Running.
+- `[REQ-SIM-010]` given a nine-Pod Workload declaring a Required Capacity of six, when one Node fails, then the judgement counts eight Pods at that moment and nine once Settled.
+- `[REQ-SIM-010]` given the same Workload, when one whole Zone fails, then the judgement counts six Pods at that moment and nine once Settled, which meets the minimum.
+- `[REQ-SIM-010]` given Pods on the Nodes a Failure stopped, when the capacity is judged at the moment of that Failure, then those Pods are not counted as Running.
+- `[REQ-SIM-010]` given a minimum the Placement misses at one moment, when the Scenario runs, then the run reports a Finding naming that moment and the later Steps still run.
+- `[REQ-SIM-010]` given any judgement of a Failure tolerance, when the run reports it, then it states the Pods counted at each moment and the minimum declared, met or not.
+- `[REQ-SIM-010]` given both Failure Scenarios, when their lines are read, then each declares its Workload's Required Capacity and judges it, beside the counts it states by hand.
+
+**Edge cases:**
+
+1. A Workload declares a Required Capacity above the Pods it runs. The declaration is refused and the Scenario ends at that Given Step, which names it.
+2. A Workload declares a Required Capacity of no Pod. It is refused at that same Step, because such a minimum judges nothing.
+3. A Scenario judges a Failure tolerance with no Failure injected before it. The Scenario ends at that Then Step, which names it.
+4. A Scenario judges the Failure tolerance of a Workload that declared no Required Capacity. The Scenario ends at that Then Step, which names it.
+5. Every Pod of a Workload sits on the Nodes a Failure stopped. The count at the moment of the Failure is no Pod, and the judgement reports a Finding.
+
+**Design:** [system-design.md](system-design.md)
 
 ### Explaining a Placement after the run
 
@@ -229,10 +266,14 @@ Every name a Scenario uses is one the lab offers Scenarios, so one vocabulary ca
 - How long a Timeline file is kept, and whether the lab ever removes one.
 - How an engineer reaches a recorded Timeline beyond opening its file, and whether a Scenario may assert on its own Timeline.
 - Does the lab promise anything about a team's own production manifests, or only about the manifests it declares itself? A run mirrors a chosen Kubernetes version, so the stronger promise needs the Topology and the admission behavior to mirror a named environment as well.
-- The Required Capacity Node loss states, and what counts as a Running Pod at the judging moment right after the Failure, while the unresponsive Node still holds one (G-3). Also open: how a missed minimum is reported, and what a minimum above the Workload's Pod count does. The two judging moments G-3 names are settled; no Scenario states a Required Capacity yet.
-- Which Scenario first points at a Node by its position in the Topology its Given declared, rather than saying how many Nodes fail. Both forms are settled vocabulary; only the count form exists today, and a position the Topology does not hold has no stated outcome.
+- How a Workload declares the Failures its capacity has to survive, and whether a run says which of them the Scenario injected. A declared tolerance no Step exercises promises more than the run proves. Also open: whether such a declaration means those Failures at once or one after another.
+- Whether the lab computes the best achievable spread after a Failure and judges the Placement against it, beside the counts a Scenario states by hand. Kubernetes applies spread rules when it places a Pod and never moves a Running one, so a computed judgement would report a Finding the cluster cannot avoid.
+- How long the capacity takes to be restored, and whether a Scenario judges that time. A Simulated Cluster's start and eviction waits are values the lab sets, so such a judgement reads back a configured delay rather than a cluster's own pace.
+- Whether a Zone's Nodes also sit on racks, as a further failure domain between the Zone and the Node, identified by what a Node is labelled with.
+- Which Scenario first points at a Node by its position in the Topology its Given declared, rather than saying how many Nodes fail. Both forms are settled vocabulary; only the count form exists today, and a position the Topology does not hold has no stated outcome. Also open: whether a Failure says where the failing Nodes sit, in one Zone or in different ones.
+- What a Scenario asserts when every Zone of its Topology fails. The count form permits it, and no Node is then left to place a Pod on.
 - What limits how many Zones a Topology may name. The lab refuses a count above a limit of its own, and a numbered Zone name puts no bound on the count.
-- Which Failure the Scenario after Node loss injects — a Pod, a whole Zone, or a Node removed from the cluster rather than left unresponsive.
+- Which Failure the Scenario after Zone loss injects — a Pod, or a Node removed from the cluster rather than left unresponsive.
 - Whether a Scenario of the lab demonstrates a Customization or full access, and which intent it would show. No Scenario names either today, and each arrives with the Scenario that needs it.
 - Whether a Scenario changes a Workload's specification after that Workload is deployed. Today a Customization applies before deployment only, and a later change is a rollout the control plane carries out under its update strategy.
 - Whether the lab says anything when full access leaves out a setting the lab depends on. Today that setting holds and the run stays silent about it, so a Scenario's own line is where an engineer reads what it asked for.

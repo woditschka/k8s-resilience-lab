@@ -14,6 +14,12 @@ import "github.com/woditschka/k8s-resilience-lab/internal/lab"
 // Nodes the declared Topology derives — the same pick on every run — and renames
 // the Step to the Nodes it resolved, so the run reports which one stopped.
 //
+// The Workload declares the capacity it has to keep through a Failure: six of
+// its nine Pods Running. Every Node here holds one Pod, so eight are left
+// Running at the moment the Failure is injected and the ninth is placed again
+// once the control plane has settled — both above the minimum, which the last
+// Then states beside it and judges at each moment.
+//
 // Nothing here moves a Pod. The lab stops a Node responding; noticing it,
 // tainting it and replacing its Pods elsewhere are the control plane's own, which
 // is what makes the judged Placement an observation about Kubernetes.
@@ -21,7 +27,7 @@ import "github.com/woditschka/k8s-resilience-lab/internal/lab"
 // It runs as node-loss, the stem of this file.
 func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab.Scenario) {
 	s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3))
-	s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())
+	s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).RequiredCapacity(lab.Pods(6))
 
 	s.Then().AllPodsRunning()
 	s.Then().PodsPerZone(3)
@@ -31,4 +37,5 @@ func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab
 	s.Then().AllPodsRunning()
 	s.Then().PodsPerZone(3)
 	s.Then().NoPodsOnTheFailedNodes()
+	s.Then().RequiredCapacityHeld()
 }

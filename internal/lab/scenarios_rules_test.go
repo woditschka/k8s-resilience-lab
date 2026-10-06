@@ -131,7 +131,7 @@ var theStepKinds = []StepKind{GivenStep, WhenStep, ThenStep}
 // line takes three arguments — the Workload name, the Pod count and one of the
 // lab's predefined Pod specifications — and the specification is that one call,
 // optionally customized once. A setting of the Scenario's own would be a further
-// argument or a further call, and neither is admitted, per
+// argument or a call of its own, and neither is admitted, per
 // docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
 //
 // The shape is read off the syntax tree rather than the text of the line,
@@ -143,6 +143,12 @@ const (
 	theWorkloadLineArguments = 3
 	theSpecificationArgument = 2
 )
+
+// theWorkloadsOwnCalls is the closed set a Workload line may end at one call of,
+// written on the Workload Step itself: the Required Capacity the Workload
+// declares, per docs/adr/2026-10-06-required-capacity-judged-at-two-moments.md. A
+// second of them, and any other call written there, stays refused.
+var theWorkloadsOwnCalls = []string{"RequiredCapacity"}
 
 func TestEveryScenarioSource_ShouldHoldOnlyGivenWhenAndThenSteps(t *testing.T) {
 	place := theScenariosPlace(t)
@@ -204,6 +210,19 @@ func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnyth
 		},
 		"a second Customize written on the first": {
 			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement().Customize().Customize())`,
+			admitted: false,
+		},
+		"a Required Capacity written after the Workload Step": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).RequiredCapacity(lab.Pods(6))`,
+			admitted: true,
+		},
+		"a second Required Capacity written on the first": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).` +
+				`RequiredCapacity(lab.Pods(6)).RequiredCapacity(lab.Pods(3))`,
+			admitted: false,
+		},
+		"a Customize written after the Workload Step": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).Customize()`,
 			admitted: false,
 		},
 		"a call written after the Workload Step": {
@@ -608,21 +627,36 @@ func namesTheWorkloadStep(line modulerules.Statement) bool {
 }
 
 // declaresOnePredefinedSpecification reports whether a Workload line declares one
-// of the lab's predefined Pod specifications and nothing besides: the line ends
-// at the Workload Step, which takes the Workload name, the Pod count and that
-// specification, itself one predefined call that zero or one Customize is written
-// on.
+// of the lab's predefined Pod specifications and nothing besides: the line ends at
+// the Workload Step, or at one call of the Workload's own closed set written on
+// it, and that Step takes the Workload name, the Pod count and that specification,
+// itself one predefined call that zero or one Customize is written on.
 func declaresOnePredefinedSpecification(line modulerules.Statement) bool {
-	if line.Name != theWorkloadStep || len(line.Arguments) != theWorkloadLineArguments {
+	deploying, ends := theWorkloadStepTheLineEndsAt(line)
+	if !ends || len(deploying.Arguments) != theWorkloadLineArguments {
 		return false
 	}
 
-	declared := line.Arguments[theSpecificationArgument]
+	declared := deploying.Arguments[theSpecificationArgument]
 	if declared.Call && declared.Name == theCustomize && declared.On != nil {
 		declared = *declared.On
 	}
 
 	return isAPredefinedSpecification(declared)
+}
+
+// theWorkloadStepTheLineEndsAt is the Workload Step a line ends at, directly or
+// through one call of the Workload's own closed set written on it, and reports
+// whether the line ends at that Step at all.
+func theWorkloadStepTheLineEndsAt(line modulerules.Statement) (modulerules.Statement, bool) {
+	if line.Name == theWorkloadStep {
+		return line, true
+	}
+	if slices.Contains(theWorkloadsOwnCalls, line.Name) && line.On != nil && line.On.Name == theWorkloadStep {
+		return *line.On, true
+	}
+
+	return modulerules.Statement{}, false
 }
 
 // isAPredefinedSpecification reports whether an expression declares one of the
