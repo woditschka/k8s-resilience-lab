@@ -12,7 +12,7 @@ import "github.com/woditschka/k8s-resilience-lab/internal/lab"
 // process-wide state.
 func All() []func(*lab.Scenario) {
 	return []func(*lab.Scenario){
-		AnEvenlySpreadWorkload_ShouldPlaceThreePodsPerZoneAndOnePerNode,
+		AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode,
 		ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding,
 	}
 }

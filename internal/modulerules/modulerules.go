@@ -79,13 +79,49 @@ type Parameter struct {
 	Type string
 }
 
+// Statement is one top-level statement of a function body, or one expression
+// inside one, as a rule over it reads it: the source as written, the name it
+// names, the expression a method is called on, and the arguments a call takes.
+//
+// A rule reads the shape the parser saw rather than the text of a line, so the
+// layout gofmt gives a long call cannot defeat it.
+type Statement struct {
+	// Written is the statement or the expression as the source writes it.
+	Written string
+
+	// Name is the name this expression names: the identifier it is, or the one a
+	// selector or a call names last. A statement naming none, such as an
+	// assignment, carries the empty name.
+	Name string
+
+	// On is the expression the name is selected from, where the source writes one:
+	// the package or value before the dot.
+	On *Statement
+
+	// Arguments are the arguments of a call, in the order written.
+	Arguments []Statement
+
+	// Call reports whether this expression is a call, which is what tells a call
+	// taking no argument from the name it calls.
+	Call bool
+}
+
+// UsedName is one name a declaration uses: the name itself, and what the source
+// writes before the dot where it writes anything — the package a qualified name
+// reaches through, or the expression a field or method is selected from.
+type UsedName struct {
+	Qualifier string
+	Name      string
+}
+
 // Declaration is one top-level declaration of a Go file: what kind it is, the
 // name it declares, the type a constant or variable names, the parameters of a
-// function, and the top-level statements of that function's body.
+// function, the top-level statements of that function's body, and every name the
+// declaration uses.
 //
-// The type, the parameters and the statements are printed back from the syntax
-// tree, so a rule over them reads the way the source does and a layout change
-// cannot defeat it.
+// The type and the parameters are printed back from the syntax tree, and the
+// statements carry the shape the parser saw, so a rule over them reads the way
+// the source does and a layout change cannot defeat it.
 type Declaration struct {
 	Kind     DeclarationKind
 	Name     string
@@ -95,7 +131,12 @@ type Declaration struct {
 	// reads an untyped one as naming no type rather than as naming the right one.
 	Type       string
 	Parameters []Parameter
-	Statements []string
+	Statements []Statement
+	// Names is every name this declaration uses, each once and in the order it
+	// first writes them: the types it names, the values it reads and the functions
+	// it calls. Neither the name it declares itself nor a name a function literal
+	// inside it declares for itself is one of them.
+	Names []UsedName
 }
 
 // GoFile is one Go source file as scanned: the package it declares, the paths it
@@ -303,6 +344,7 @@ func declarationsOf(positions *token.FileSet, parsed *ast.File) []Declaration {
 				Exported:   shape.Name.IsExported(),
 				Parameters: parametersOf(positions, shape),
 				Statements: statementsOf(positions, shape),
+				Names:      namesUsedIn(positions, shape.Type, shape.Body),
 			})
 		case *ast.GenDecl:
 			if shape.Tok == token.IMPORT {
@@ -323,14 +365,17 @@ func namesOf(positions *token.FileSet, declaration *ast.GenDecl) []Declaration {
 	for _, spec := range declaration.Specs {
 		var names []*ast.Ident
 		var named string
+		var used []UsedName
 		switch shape := spec.(type) {
 		case *ast.TypeSpec:
 			names = []*ast.Ident{shape.Name}
+			used = namesUsedIn(positions, shape.Type)
 		case *ast.ValueSpec:
 			names = shape.Names
 			if shape.Type != nil {
 				named = printed(positions, shape.Type)
 			}
+			used = namesUsedIn(positions, typeAndValuesOf(shape)...)
 		}
 
 		for _, name := range names {
@@ -339,6 +384,7 @@ func namesOf(positions *token.FileSet, declaration *ast.GenDecl) []Declaration {
 				Name:     name.Name,
 				Exported: name.IsExported(),
 				Type:     named,
+				Names:    used,
 			})
 		}
 	}
@@ -366,19 +412,156 @@ func parametersOf(positions *token.FileSet, declared *ast.FuncDecl) []Parameter 
 	return parameters
 }
 
-// statementsOf are the top-level statements of the body declared holds, each as
-// the source writes it.
-func statementsOf(positions *token.FileSet, declared *ast.FuncDecl) []string {
+// statementsOf are the top-level statements of the body declared holds, each the
+// shape the parser saw: the expression a statement makes where it makes one, and
+// the source as written otherwise.
+func statementsOf(positions *token.FileSet, declared *ast.FuncDecl) []Statement {
 	if declared.Body == nil {
 		return nil
 	}
 
-	statements := make([]string, 0, len(declared.Body.List))
+	statements := make([]Statement, 0, len(declared.Body.List))
 	for _, statement := range declared.Body.List {
-		statements = append(statements, printed(positions, statement))
+		expression, isExpression := statement.(*ast.ExprStmt)
+		if !isExpression {
+			statements = append(statements, Statement{Written: printed(positions, statement)})
+
+			continue
+		}
+		statements = append(statements, expressionOf(positions, expression.X))
 	}
 
 	return statements
+}
+
+// expressionOf is one expression as a rule reads it: the name it names, the
+// expression that name is selected from, and the arguments of a call, each read
+// the same way. An expression of a shape no rule here reads, such as a literal or
+// a composite, carries the source it was written as and no name, which a rule
+// reads as naming nothing rather than as naming the wrong thing.
+func expressionOf(positions *token.FileSet, expression ast.Expr) Statement {
+	read := Statement{Written: printed(positions, expression)}
+	switch shape := expression.(type) {
+	case *ast.Ident:
+		read.Name = shape.Name
+	case *ast.SelectorExpr:
+		selected := expressionOf(positions, shape.X)
+		read.Name, read.On = shape.Sel.Name, &selected
+	case *ast.CallExpr:
+		called := expressionOf(positions, shape.Fun)
+		read.Name, read.On, read.Call = called.Name, called.On, true
+		read.Arguments = argumentsOf(positions, shape.Args)
+	}
+
+	return read
+}
+
+// argumentsOf are the arguments of a call, in the order written.
+func argumentsOf(positions *token.FileSet, written []ast.Expr) []Statement {
+	arguments := make([]Statement, 0, len(written))
+	for _, argument := range written {
+		arguments = append(arguments, expressionOf(positions, argument))
+	}
+
+	return arguments
+}
+
+// namesUsedIn is every name the nodes use, each once and in the order they are
+// first written: a qualified name under the qualifier its source writes, and an
+// unqualified one on its own. The name a selector selects is not reported a
+// second time on its own, so a rule over an unqualified name reads the names
+// written unqualified alone. A function literal brings the names it declares for
+// itself with it, its parameters and its results, so those are no names the nodes
+// use either.
+func namesUsedIn(positions *token.FileSet, nodes ...ast.Node) []UsedName {
+	var used []UsedName
+	broughtAlong := make(map[*ast.Ident]bool)
+
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		ast.Inspect(node, func(visited ast.Node) bool {
+			switch shape := visited.(type) {
+			case *ast.SelectorExpr:
+				broughtAlong[shape.Sel] = true
+				if qualifier, isName := shape.X.(*ast.Ident); isName {
+					broughtAlong[qualifier] = true
+					used = appendOnce(used, UsedName{Qualifier: qualifier.Name, Name: shape.Sel.Name})
+
+					return true
+				}
+				used = appendOnce(used, UsedName{Qualifier: printed(positions, shape.X), Name: shape.Sel.Name})
+			case *ast.FuncLit:
+				for _, declared := range namesDeclaredBy(shape.Type) {
+					broughtAlong[declared] = true
+				}
+			case *ast.Ident:
+				if !broughtAlong[shape] && shape.Name != theBlankIdentifier {
+					used = appendOnce(used, UsedName{Name: shape.Name})
+				}
+			}
+
+			return true
+		})
+	}
+
+	return used
+}
+
+// namesDeclaredBy are the names a function type declares for itself: those of
+// its parameters and those of its results, a result the source leaves unnamed
+// contributing none. It is read off the literal that writes them rather than off
+// every function type, so the parameters a declaration of its own takes stay
+// names it writes.
+func namesDeclaredBy(written *ast.FuncType) []*ast.Ident {
+	declared := namesDeclaredIn(written.Params)
+	// A function type naming no result holds no list for one, which is why the
+	// results are read through the field rather than beside the parameters.
+	if written.Results != nil {
+		declared = append(declared, namesDeclaredIn(written.Results)...)
+	}
+
+	return declared
+}
+
+// namesDeclaredIn are the names one such list declares, a field the source leaves
+// unnamed contributing none.
+func namesDeclaredIn(fields *ast.FieldList) []*ast.Ident {
+	var declared []*ast.Ident
+	for _, field := range fields.List {
+		declared = append(declared, field.Names...)
+	}
+
+	return declared
+}
+
+// theBlankIdentifier is the name an assignment discards a value under, which is
+// no name a rule reads.
+const theBlankIdentifier = "_"
+
+// appendOnce is used with name appended, where it does not already hold it, so a
+// name written twice is reported once.
+func appendOnce(used []UsedName, name UsedName) []UsedName {
+	if slices.Contains(used, name) {
+		return used
+	}
+
+	return append(used, name)
+}
+
+// typeAndValuesOf are the parts of a constant or variable declaration that use
+// names: the type it writes, where it writes one, and the values it is set to.
+func typeAndValuesOf(spec *ast.ValueSpec) []ast.Node {
+	written := make([]ast.Node, 0, len(spec.Values)+1)
+	if spec.Type != nil {
+		written = append(written, spec.Type)
+	}
+	for _, value := range spec.Values {
+		written = append(written, value)
+	}
+
+	return written
 }
 
 // printed is node as the source writes it. A node that cannot be printed is

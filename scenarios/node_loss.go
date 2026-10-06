@@ -3,10 +3,12 @@ package scenarios
 import "github.com/woditschka/k8s-resilience-lab/internal/lab"
 
 // ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding is the
-// lab's first Failure experiment. It declares Even spread's world, waits for that
-// Placement to settle, then stops one Node responding and judges the Placement
-// the control plane reaches next: the Workload whole again, still three Pods in
-// every Zone, and none left on the Node that stopped.
+// lab's first Failure experiment. It declares the Resilient placement Scenario's
+// world and judges the Placement it settles at — the Workload whole, three Pods
+// in every Zone — so the world the Failure is injected into is judged rather than
+// assumed. Then it stops one Node responding and judges the Placement the
+// control plane reaches next: the Workload whole again, still three Pods in every
+// Zone, and none left on the Node that stopped.
 //
 // The When names no Node. It says how many fail, and the lab picks the first
 // Nodes the declared Topology derives — the same pick on every run — and renames
@@ -19,7 +21,10 @@ import "github.com/woditschka/k8s-resilience-lab/internal/lab"
 // It runs as node-loss, the stem of this file.
 func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab.Scenario) {
 	s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3))
-	s.Given().Workload(Checkout, lab.Pods(9)).SpreadEvenly(lab.OverZones, lab.OverNodes)
+	s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())
+
+	s.Then().AllPodsRunning()
+	s.Then().PodsPerZone(3)
 
 	s.When().NodesFail(lab.Nodes(1))
 

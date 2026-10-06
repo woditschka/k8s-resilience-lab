@@ -66,7 +66,7 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	// Failure is the control plane's to decide, and these two are only the parts
 	// the lab sets (docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md).
 	reported.printf("unresponsive Node:  its Pods leave after %s, where a default cluster waits %s\n",
-		cluster.UnresponsiveNodeWait, cluster.DefaultUnresponsiveNodeWait)
+		scenario.UnresponsiveNodeWait, scenario.DefaultUnresponsiveNodeWait)
 	reported.printf("Node heartbeats:    at factor %s, where this cluster image runs them at factor %s\n",
 		cluster.NodeHeartbeatFactor, cluster.DefaultNodeHeartbeatFactor)
 

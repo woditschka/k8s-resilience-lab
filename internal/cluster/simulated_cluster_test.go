@@ -14,13 +14,25 @@ import (
 )
 
 const (
-	// evenSpreadScenario names the Scenario whose Topology and Workload the tests
-	// below drive, so each container on the engine says which Scenario it serves.
-	evenSpreadScenario = "even-spread"
+	// resilientPlacementScenario names the Scenario whose Topology and Workload the
+	// tests below drive, so each container on the engine says which Scenario it
+	// serves.
+	resilientPlacementScenario = "resilient-placement"
 
 	threeZones        = 3
 	threeNodesPerZone = 3
 	ninePods          = 9
+
+	// secondWorkloadName is what the second Workload of a Scenario deploying two
+	// is labelled with, so each is spread over the Nodes on its own, and threePods
+	// is what that second Workload declares where its own count does not matter.
+	secondWorkloadName = "basket"
+	threePods          = 3
+
+	// onePodPerNode is the share an even spread over the Nodes gives each of them,
+	// and onePodTooMany the one Pod a Topology has no room left for.
+	onePodPerNode = 1
+	onePodTooMany = 1
 
 	// twoNodesInIt is the one Zone's Node count where a Workload has to fit into
 	// the Nodes still responding, and noPodAtAll what a Node that stopped
@@ -54,21 +66,157 @@ func anEvenSpreadTopology(t *testing.T) scenario.Topology {
 	return topology
 }
 
-// anEvenlySpreadWorkload declares the nine Pods of the main Scenario, spread
-// evenly over the Zones and over the Nodes.
-func anEvenlySpreadWorkload(t *testing.T, pods int) scenario.Workload {
+// resilientPlacement and defaultPlacement are the two specifications the lab
+// defines, as this suite declares them: an even spread over the Zones and over
+// the Nodes above the lab's own tolerations, and those tolerations alone. They
+// are built with internal/scenario's constructors rather than named from
+// internal/lab, which imports this package, so what is deployed here are the
+// settings those definitions hold.
+func resilientPlacement() scenario.PodSpecification {
+	return defaultPlacement().With(
+		anEvenSpreadOver(scenario.ZoneLabel, evenSkew),
+		anEvenSpreadOver(scenario.HostnameLabel, evenSkew),
+	)
+}
+
+func defaultPlacement() scenario.PodSpecification {
+	return aSpecificationOf(
+		aNodeConditionToleration(scenario.TaintNodeNotReady),
+		aNodeConditionToleration(scenario.TaintNodeUnreachable),
+	)
+}
+
+// aWorkloadDeclaring is the Workload the Scenarios below deploy: pods replicas
+// under the one Workload name this suite deploys, declaring the specification
+// named. aSecondWorkloadDeclaring is one deployed beside it under a name of its
+// own, which is what a Scenario deploying two Workloads declares.
+func aWorkloadDeclaring(t *testing.T, pods int, declaring scenario.PodSpecification) scenario.Workload {
 	t.Helper()
 
-	workload, err := scenario.NewWorkload(
-		deployedWorkloadName, pods,
-		spreadRule(t, scenario.SpreadOverZones, evenSkew),
-		spreadRule(t, scenario.SpreadOverNodes, evenSkew),
-	)
+	return aWorkloadNamed(t, deployedWorkloadName, pods, declaring)
+}
+
+func aSecondWorkloadDeclaring(t *testing.T, pods int, declaring scenario.PodSpecification) scenario.Workload {
+	t.Helper()
+
+	return aWorkloadNamed(t, secondWorkloadName, pods, declaring)
+}
+
+func aWorkloadNamed(t *testing.T, name string, pods int, declaring scenario.PodSpecification) scenario.Workload {
+	t.Helper()
+
+	workload, err := scenario.NewWorkload(name, pods, declaring)
 	if err != nil {
-		t.Fatalf("build a Workload of %d evenly spread Pods: %v", pods, err)
+		t.Fatalf("build the Workload %s of %d Pods: %v", name, pods, err)
 	}
 
 	return workload
+}
+
+// aTopologyOfOneZone is the Topology edge case 2 is read on: one Zone of the same
+// Nodes, so a spread over the Zones is satisfied by every Placement and the
+// spread over the Nodes is the only one left to honour. aTopologyOfOneNode is the
+// smallest there is, which a Workload larger than its room cannot fit into.
+func aTopologyOfOneZone(t *testing.T) scenario.Topology {
+	t.Helper()
+
+	topology, err := scenario.NewTopology(theOneZone, threeNodesPerZone, aCapacity(t))
+	if err != nil {
+		t.Fatalf("build a Topology of one Zone of %d Nodes: %v", threeNodesPerZone, err)
+	}
+
+	return topology
+}
+
+func aTopologyOfOneNode(t *testing.T) scenario.Topology {
+	t.Helper()
+
+	topology, err := scenario.NewTopology(theOneZone, theOneNodeInIt, aCapacity(t))
+	if err != nil {
+		t.Fatalf("build a Topology of one Node: %v", err)
+	}
+
+	return topology
+}
+
+// evenlyOverTheNodesOf is the Placement an even spread over the Nodes settles at:
+// one Pod on each Node the Topology derives.
+func evenlyOverTheNodesOf(topology scenario.Topology) map[string]int {
+	counts := make(map[string]int, len(topology.Nodes()))
+	for _, node := range topology.Nodes() {
+		counts[node.Name] = onePodPerNode
+	}
+
+	return counts
+}
+
+// podsCounted is how many Pods a count per domain holds altogether, which is what
+// a Placement promising no count per Zone can still be read for.
+func podsCounted(counts map[string]int) int {
+	counted := 0
+	for _, count := range counts {
+		counted += count
+	}
+
+	return counted
+}
+
+// aDeployedPodOf is the spec of one Pod of this Workload as the cluster holds it.
+// Reading a Pod's own spec is this suite's call: the lab reads a Placement, which
+// names a Pod and the Node it landed on and not the settings it was deployed
+// with.
+func aDeployedPodOf(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) corev1.PodSpec {
+	t.Helper()
+
+	held, err := provisioned.client.CoreV1().Pods(workloadNamespace).List(t.Context(), metav1.ListOptions{
+		LabelSelector: podSelectorOf(workload),
+	})
+	if err != nil {
+		t.Fatalf("read the Pods of the Workload %s: %v", workload.Name(), err)
+	}
+	if len(held.Items) == 0 {
+		t.Fatalf("the cluster holds a Pod of the Workload %s, but it reported none", workload.Name())
+	}
+
+	return held.Items[0].Spec
+}
+
+// theSettingsOf are the settings one deployed Pod carries, read back in the lab's
+// own vocabulary: the fields its specification names and no other, so what the
+// API server defaults beside them is passed over rather than asserted.
+func theSettingsOf(deployed corev1.PodSpec) []scenario.Setting {
+	read := make([]scenario.Setting, 0, len(deployed.Tolerations)+len(deployed.TopologySpreadConstraints))
+	for _, tolerated := range deployed.Tolerations {
+		read = append(read, scenario.NewToleration(tolerated.Key,
+			scenario.TolerationOperator(tolerated.Operator), scenario.TaintEffect(tolerated.Effect),
+			secondsTolerated(tolerated)))
+	}
+	for _, constraint := range deployed.TopologySpreadConstraints {
+		read = append(read, scenario.NewTopologySpread(constraint.TopologyKey, int(constraint.MaxSkew),
+			scenario.UnsatisfiableConstraintAction(constraint.WhenUnsatisfiable), taintsPolicyOf(constraint)))
+	}
+
+	return read
+}
+
+// secondsTolerated and taintsPolicyOf read the two fields the client library
+// carries as pointers. A field the deployed Pod left unset reads as the zero
+// value, so it shows up as a mismatch against the specification rather than as a
+// panic.
+func secondsTolerated(tolerated corev1.Toleration) int64 {
+	if tolerated.TolerationSeconds == nil {
+		return 0
+	}
+
+	return *tolerated.TolerationSeconds
+}
+
+func taintsPolicyOf(constraint corev1.TopologySpreadConstraint) scenario.NodeInclusionPolicy {
+	if constraint.NodeTaintsPolicy == nil {
+		return ""
+	}
+
+	return scenario.NodeInclusionPolicy(*constraint.NodeTaintsPolicy)
 }
 
 // aProvisionedCluster provisions one Simulated Cluster for the test that asks,
@@ -77,7 +225,7 @@ func aProvisionedCluster(t *testing.T) (*SimulatedCluster, Endpoint) {
 	t.Helper()
 
 	engine := requireEngine(t)
-	provisioned, err := Provision(t.Context(), engine, DefaultKubernetesVersion(), evenSpreadScenario)
+	provisioned, err := Provision(t.Context(), engine, DefaultKubernetesVersion(), resilientPlacementScenario)
 	if err != nil {
 		t.Fatalf("provision a Simulated Cluster on the engine at %s: %v", engine.Socket(), err)
 	}
@@ -148,9 +296,13 @@ func TestProvisioning_ShouldLeaveNoProbePodOnTheClusterItHandsBack(t *testing.T)
 	expect.Expect(t, left).To(expect.HaveLen[corev1.Pod](0))
 }
 
-func TestAnEvenlySpreadWorkload_ShouldSettleWithThreePodsPerZoneAndOnePerNode(t *testing.T) {
+// A Workload declaring Resilient placement settles at one Pod on every Node of
+// every Zone, and the Pods it was deployed with carry the settings that
+// specification names — read back off a Pod the cluster holds, which is
+// acceptance criterion three of REQ-SIM-009.
+func TestAWorkloadDeclaringResilientPlacement_ShouldPlaceOnePodOnEveryNodeOfEveryZone(t *testing.T) {
 	provisioned, _ := aProvisionedCluster(t)
-	workload := anEvenlySpreadWorkload(t, ninePods)
+	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement())
 	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
 
 	settled, err := provisioned.AwaitSettled(t.Context(), workload)
@@ -164,12 +316,108 @@ func TestAnEvenlySpreadWorkload_ShouldSettleWithThreePodsPerZoneAndOnePerNode(t 
 		"zone-1": podsPerZone, "zone-2": podsPerZone, "zone-3": podsPerZone,
 	}))
 	expect.Expect(t, settled.Skew(scenario.SpreadOverNodes)).To(expect.Equal(0))
+	expect.Expect(t, theSettingsOf(aDeployedPodOf(t, provisioned, workload))).
+		To(expect.Equal(workload.PodSpecification().Settings()))
+}
+
+// A Workload declaring a specification it customized is deployed with the
+// Customization's settings and with the specification's others standing: the Zone
+// spread at the Skew the Scenario wrote, and the spread over the Nodes and the
+// lab's own tolerations as Resilient placement defines them. Read back off a Pod
+// the cluster holds, which is acceptance criterion two of REQ-SIM-009.
+func TestAWorkloadDeployedFromACustomizedSpecification_ShouldCarryTheCustomizedSettings(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	theZoneSpreadTheScenarioWrote := anEvenSpreadOver(scenario.ZoneLabel, widerSkew)
+	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement().With(theZoneSpreadTheScenarioWrote))
+	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+
+	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	if err != nil {
+		t.Fatalf("await the Placement settling: %v", err)
+	}
+
+	expect.Expect(t, settled.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](ninePods))
+	expect.Expect(t, theSettingsOf(aDeployedPodOf(t, provisioned, workload))).To(expect.Equal([]scenario.Setting{
+		aNodeConditionToleration(scenario.TaintNodeNotReady),
+		aNodeConditionToleration(scenario.TaintNodeUnreachable),
+		theZoneSpreadTheScenarioWrote,
+		anEvenSpreadOver(scenario.HostnameLabel, evenSkew),
+	}))
+}
+
+// Where a Workload declaring Default placement has its Pods put is the scheduler's
+// own choice, so what holds of every such Placement is all this asserts: every
+// Pod Running, and every one of them on a Node the Topology holds.
+func TestAWorkloadDeclaringDefaultPlacement_ShouldPlaceEveryPodWithNoCountPromisedPerZone(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	workload := aWorkloadDeclaring(t, ninePods, defaultPlacement())
+	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+
+	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	if err != nil {
+		t.Fatalf("await the Placement settling: %v", err)
+	}
+
+	expect.Expect(t, settled.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](ninePods))
+	expect.Expect(t, podsCounted(settled.PodsPerZone())).To(expect.Equal(ninePods))
+	expect.Expect(t, settled.PodsItCannotAccountFor()).To(expect.HaveLen[scenario.Pod](noPodAtAll))
+}
+
+// Two Workloads of one Scenario are each placed by the specification they
+// declare: the one declaring Resilient placement is spread one Pod per Node,
+// and the one declaring Default placement is placed wherever the scheduler puts it.
+func TestTwoWorkloadsDeclaringDifferentSpecifications_ShouldEachBePlacedByTheOneItDeclares(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	spreadEvenly := aWorkloadDeclaring(t, ninePods, resilientPlacement())
+	spreadNowhere := aSecondWorkloadDeclaring(t, threePods, defaultPlacement())
+	deployBoth(t, provisioned, anEvenSpreadTopology(t), spreadEvenly, spreadNowhere)
+
+	evenly, nowhere := bothSettled(t, provisioned, spreadEvenly, spreadNowhere)
+
+	expect.Expect(t, evenly.Skew(scenario.SpreadOverNodes)).To(expect.Equal(0))
+	expect.Expect(t, nowhere.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](threePods))
+	expect.Expect(t, nowhere.PodsItCannotAccountFor()).To(expect.HaveLen[scenario.Pod](noPodAtAll))
+}
+
+// Edge case 3: two Workloads declaring the same specification are each spread on
+// their own. A spread constraint selects its Workload's Pods by their Workload
+// label, so the other's Pods are not counted towards the Skew and both reach one
+// Pod per Node.
+func TestTwoWorkloadsDeclaringTheSameSpecification_ShouldEachBeSpreadWithoutCountingTheOthersPods(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	first := aWorkloadDeclaring(t, ninePods, resilientPlacement())
+	second := aSecondWorkloadDeclaring(t, ninePods, resilientPlacement())
+	deployBoth(t, provisioned, anEvenSpreadTopology(t), first, second)
+
+	itsOwn, theOthers := bothSettled(t, provisioned, first, second)
+
+	onePodPerNode := evenlyOverTheNodesOf(anEvenSpreadTopology(t))
+	expect.Expect(t, itsOwn.PodsPerNode()).To(expect.Equal(onePodPerNode))
+	expect.Expect(t, theOthers.PodsPerNode()).To(expect.Equal(onePodPerNode))
+}
+
+// Edge case 2: Resilient placement on a Topology of one Zone still lands its
+// Pods one per Node, and that one Zone holds them all, because a spread over the
+// Zones of a Topology that has one is satisfied by every Placement.
+func TestResilientPlacementOnATopologyOfOneZone_ShouldStillPlaceOnePodPerNode(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	oneZone := aTopologyOfOneZone(t)
+	workload := aWorkloadDeclaring(t, threeNodesPerZone, resilientPlacement())
+	deployInto(t, provisioned, oneZone, workload)
+
+	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	if err != nil {
+		t.Fatalf("await the Placement settling: %v", err)
+	}
+
+	expect.Expect(t, settled.PodsPerNode()).To(expect.Equal(evenlyOverTheNodesOf(oneZone)))
+	expect.Expect(t, settled.PodsPerZone()).To(expect.Equal(map[string]int{"zone-1": threeNodesPerZone}))
 }
 
 func TestARunAfterAnEarlierRun_ShouldReportOnlyItsOwnNodesAndPods(t *testing.T) {
 	provisioned, _ := aProvisionedCluster(t)
 	topology := anEvenSpreadTopology(t)
-	workload := anEvenlySpreadWorkload(t, ninePods)
+	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement())
 	deployInto(t, provisioned, topology, workload)
 
 	settled, err := provisioned.AwaitSettled(t.Context(), workload)
@@ -181,24 +429,20 @@ func TestARunAfterAnEarlierRun_ShouldReportOnlyItsOwnNodesAndPods(t *testing.T) 
 	expect.Expect(t, settled.Pods()).To(expect.HaveLen[scenario.Pod](ninePods))
 }
 
-func TestAWorkloadLargerThanItsTopology_ShouldReportPendingPods(t *testing.T) {
-	provisioned, _ := aProvisionedCluster(t)
-	const oneZoneOfOneNode, oneNodePerZone = 1, 1
-	tooSmall, err := scenario.NewTopology(oneZoneOfOneNode, oneNodePerZone, aCapacity(t))
-	if err != nil {
-		t.Fatalf("build a Topology of one Node: %v", err)
-	}
-	morePodsThanTheTopologyHolds := somePodsPerNode + 1
-	workload := anEvenlySpreadWorkload(t, morePodsThanTheTopologyHolds)
-	deployInto(t, provisioned, tooSmall, workload)
+// Edge case 1: a Workload declaring Default placement on a Topology too small for
+// its Pods has no spread to blame. The Nodes run out of room, so the Pods the
+// scheduler cannot place stay Pending and the control plane's own reason for each
+// is on the Timeline.
+func TestAWorkloadWithoutSpreadRulesOnATooSmallTopology_ShouldLeaveTheUnplaceablePodsPending(t *testing.T) {
+	morePodsThanTheTopologyHolds := somePodsPerNode + onePodTooMany
+	workload := aWorkloadDeclaring(t, morePodsThanTheTopologyHolds, defaultPlacement())
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
-	if err != nil {
-		t.Fatalf("await the Placement settling: %v", err)
-	}
+	recorded, _, settled := aRecordedScenario(t, aTopologyOfOneNode(t), workload)
 
+	pending := settled.PodsInPhase(scenario.PodPending)
 	expect.Expect(t, settled.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](somePodsPerNode))
-	expect.Expect(t, settled.PodsInPhase(scenario.PodPending)).To(expect.HaveLen[scenario.Pod](1))
+	expect.Expect(t, pending).To(expect.HaveLen[scenario.Pod](onePodTooMany))
+	expectReported(t, recorded, pending[0].Name, podSchedulingFailed)
 }
 
 // The Failure tests below are what says whether the control plane does the moving:
@@ -211,7 +455,7 @@ func TestAWorkloadLargerThanItsTopology_ShouldReportPendingPods(t *testing.T) {
 // is the settle wait.
 func TestANodeThatStopsResponding_ShouldLeaveNinePodsRunningThreePerZoneAndNoneOnIt(t *testing.T) {
 	provisioned, _ := aProvisionedCluster(t)
-	topology, workload := anEvenSpreadTopology(t), anEvenlySpreadWorkload(t, ninePods)
+	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement())
 	stopped := theFirstNodeOf(topology)
 	settleInto(t, provisioned, topology, workload)
 
@@ -235,7 +479,7 @@ func TestANodeThatStopsResponding_ShouldLeaveNinePodsRunningThreePerZoneAndNoneO
 func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheControlPlanesReason(t *testing.T) {
 	provisioned, _ := aProvisionedCluster(t)
 	topology := aTopologyOfTwoNodesHoldingOnePod(t)
-	workload := anEvenlySpreadWorkload(t, twoPods)
+	workload := aWorkloadDeclaring(t, twoPods, resilientPlacement())
 	stopped := theFirstNodeOf(topology)
 	delivered := &entriesDelivered{}
 	if err := provisioned.Record(t.Context(), delivered); err != nil {
@@ -266,7 +510,7 @@ func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheCont
 func TestAPlacementThatDoesNotSettleAfterTheFailure_ShouldReportTheObservedPlacement(t *testing.T) {
 	observed := aPlacementStillHoldingAPodOnTheFailedNode(t)
 
-	reported := didNotSettle(anEvenlySpreadWorkload(t, ninePods), observed)
+	reported := didNotSettle(aWorkloadDeclaring(t, ninePods, resilientPlacement()), observed)
 
 	expect.Expect(t, reported.Error()).To(expect.Equal(fmt.Sprintf(
 		"the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold",
@@ -303,7 +547,7 @@ func TestAnObservedPlacement_ShouldCountAsSettledOnlyWhenItAccountsForEveryDecla
 
 	for observation, taken := range observations {
 		t.Run(observation, func(t *testing.T) {
-			settled := hasSettled(taken.previous, taken.current, anEvenlySpreadWorkload(t, ninePods))
+			settled := hasSettled(taken.previous, taken.current, aWorkloadDeclaring(t, ninePods, resilientPlacement()))
 
 			expect.Expect(t, settled).To(expect.Equal(taken.settled))
 		})
@@ -366,7 +610,7 @@ func TestAScenarioThatEnds_ShouldLeaveNoSimulatedClusterBehind(t *testing.T) {
 	endings := map[string]func(*testing.T, *SimulatedCluster){
 		"a Scenario whose steps all passed": func(t *testing.T, provisioned *SimulatedCluster) {
 			t.Helper()
-			deployInto(t, provisioned, anEvenSpreadTopology(t), anEvenlySpreadWorkload(t, ninePods))
+			deployInto(t, provisioned, anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement()))
 		},
 		"a Scenario that failed part-way through its steps": func(t *testing.T, provisioned *SimulatedCluster) {
 			t.Helper()
@@ -383,7 +627,7 @@ func TestAScenarioThatEnds_ShouldLeaveNoSimulatedClusterBehind(t *testing.T) {
 	for ending, steps := range endings {
 		t.Run(ending, func(t *testing.T) {
 			engine := requireEngine(t)
-			provisioned, err := Provision(t.Context(), engine, DefaultKubernetesVersion(), evenSpreadScenario)
+			provisioned, err := Provision(t.Context(), engine, DefaultKubernetesVersion(), resilientPlacementScenario)
 			if err != nil {
 				t.Fatalf("provision a Simulated Cluster: %v", err)
 			}
@@ -420,7 +664,7 @@ func TestConcurrentRuns_ShouldEachRemoveOnlyTheClusterTheyCreated(t *testing.T) 
 func aClusterOfItsOwnInvocation(t *testing.T, engine Endpoint) *SimulatedCluster {
 	t.Helper()
 
-	provisioned, err := Provision(t.Context(), engine, DefaultKubernetesVersion(), evenSpreadScenario)
+	provisioned, err := Provision(t.Context(), engine, DefaultKubernetesVersion(), resilientPlacementScenario)
 	if err != nil {
 		t.Fatalf("provision a Simulated Cluster beside another: %v", err)
 	}
@@ -478,6 +722,41 @@ func aTopologyOfTwoNodesHoldingOnePod(t *testing.T) scenario.Topology {
 	}
 
 	return topology
+}
+
+// deployBoth applies a Topology once and deploys two Workloads into it, which is
+// the sequence a Scenario deploying two follows: a Topology is applied once per
+// cluster, and each Workload is deployed on its own.
+func deployBoth(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, workloads ...scenario.Workload) {
+	t.Helper()
+
+	if err := provisioned.ApplyTopology(t.Context(), topology); err != nil {
+		t.Fatalf("apply the Scenario's Topology: %v", err)
+	}
+	for _, workload := range workloads {
+		if err := provisioned.Deploy(t.Context(), workload); err != nil {
+			t.Fatalf("deploy the Workload %s: %v", workload.Name(), err)
+		}
+	}
+}
+
+// bothSettled is the Settled Placement of each of two Workloads, each awaited
+// through AwaitSettled and read against its own Pods alone.
+func bothSettled(t *testing.T, provisioned *SimulatedCluster, first, second scenario.Workload) (scenario.Placement, scenario.Placement) {
+	t.Helper()
+
+	return settledPlacementOf(t, provisioned, first), settledPlacementOf(t, provisioned, second)
+}
+
+func settledPlacementOf(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) scenario.Placement {
+	t.Helper()
+
+	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	if err != nil {
+		t.Fatalf("await the Placement of the Workload %s settling: %v", workload.Name(), err)
+	}
+
+	return settled
 }
 
 // deployInto applies a Topology and deploys a Workload into a provisioned

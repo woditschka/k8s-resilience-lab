@@ -5,6 +5,19 @@ import (
 	"slices"
 )
 
+// SpreadDomain is the axis a Placement's Skew is read over: how evenly a
+// Workload's Pods sit over the Zones of its Topology, or over its Nodes. A
+// Workload declares its spread as the settings of its Pod specification, so this
+// is a way of reading an observation and not a declaration.
+type SpreadDomain string
+
+const (
+	// SpreadOverZones reads a Placement over the Zones of its Topology.
+	SpreadOverZones SpreadDomain = "Zones"
+	// SpreadOverNodes reads a Placement over the Nodes of its Topology.
+	SpreadOverNodes SpreadDomain = "Nodes"
+)
+
 // PodPhase is the phase the control plane reports for one observed Pod.
 type PodPhase string
 

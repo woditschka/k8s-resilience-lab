@@ -21,14 +21,18 @@ const (
 	somePodCount         = 9
 	evenSkew             = 1
 	widerSkew            = 2
+
+	// someSpecificationName is the name the specifications below carry into the
+	// Step that declares one, which no test of this suite turns on.
+	someSpecificationName = "a Pod specification"
 )
 
 // aWorkload is the named default for a Workload whose name and Pod count the test
-// does not turn on; the rules it declares are what each test varies.
-func aWorkload(t *testing.T, rules ...scenario.SpreadRule) scenario.Workload {
+// does not turn on; the specification it declares is what each test varies.
+func aWorkload(t *testing.T, declaring scenario.PodSpecification) scenario.Workload {
 	t.Helper()
 
-	workload, err := scenario.NewWorkload(deployedWorkloadName, somePodCount, rules...)
+	workload, err := scenario.NewWorkload(deployedWorkloadName, somePodCount, declaring)
 	if err != nil {
 		t.Fatalf("build a Workload of %d Pods: %v", somePodCount, err)
 	}
@@ -36,15 +40,30 @@ func aWorkload(t *testing.T, rules ...scenario.SpreadRule) scenario.Workload {
 	return workload
 }
 
-func spreadRule(t *testing.T, domain scenario.SpreadDomain, maxSkew int) scenario.SpreadRule {
-	t.Helper()
+// aSpecificationOf is a specification holding the settings named. This suite
+// builds its own with internal/scenario's constructors rather than naming one of
+// the lab's predefined definitions: those are defined in internal/lab, which
+// imports this package, so what is mapped here are settings and not a catalogue.
+func aSpecificationOf(settings ...scenario.Setting) scenario.PodSpecification {
+	return scenario.NewPodSpecification(someSpecificationName, settings...)
+}
 
-	rule, err := scenario.NewSpreadRule(domain, maxSkew)
-	if err != nil {
-		t.Fatalf("build a spread rule over %s at a Skew of %d: %v", domain, maxSkew, err)
-	}
+// anEvenSpreadOver is a spread setting counted over one label, enforced and
+// reading the Nodes' taints, which is the shape every spread the lab defines has.
+func anEvenSpreadOver(topologyKey string, maxSkew int) scenario.TopologySpread {
+	return scenario.NewTopologySpread(topologyKey, maxSkew, scenario.DoNotSchedule, scenario.Honor)
+}
 
-	return rule
+// aNodeConditionToleration is a toleration of one taint a Node that stopped
+// responding carries, for the waiting time the lab sets.
+func aNodeConditionToleration(taint string) scenario.Toleration {
+	return scenario.NewToleration(taint, scenario.Exists, scenario.NoExecute, theLabsWaitInSeconds())
+}
+
+// theLabsWaitInSeconds is the lab's own waiting time as the field Kubernetes
+// holds it in, read from the constant that sets it rather than written out.
+func theLabsWaitInSeconds() int64 {
+	return int64(scenario.UnresponsiveNodeWait.Seconds())
 }
 
 // workloadSelector is the selector every spread constraint carries, so a
@@ -53,35 +72,204 @@ func workloadSelector() *metav1.LabelSelector {
 	return &metav1.LabelSelector{MatchLabels: map[string]string{workloadLabel: deployedWorkloadName}}
 }
 
-func TestEachDeclaredSpreadRule_ShouldBecomeOneEnforcedConstraintAtItsSkew(t *testing.T) {
-	overZones := spreadRule(t, scenario.SpreadOverZones, evenSkew)
-	overNodes := spreadRule(t, scenario.SpreadOverNodes, widerSkew)
+// theConstraintOver and theTolerationOf are the one constraint and the one
+// toleration a setting becomes, written in the client library's own vocabulary so
+// each field is stated independently of the mapper that fills it.
+func theConstraintOver(topologyKey string, maxSkew int) corev1.TopologySpreadConstraint {
 	honourTaints := corev1.NodeInclusionPolicyHonor
 
-	deployed := toDeployment(aWorkload(t, overZones, overNodes))
+	return corev1.TopologySpreadConstraint{
+		MaxSkew:           int32(maxSkew),
+		TopologyKey:       topologyKey,
+		WhenUnsatisfiable: corev1.DoNotSchedule,
+		LabelSelector:     workloadSelector(),
+		NodeTaintsPolicy:  &honourTaints,
+	}
+}
 
-	expect.Expect(t, deployed.Spec.Template.Spec.TopologySpreadConstraints).To(expect.Equal([]corev1.TopologySpreadConstraint{
-		{
-			MaxSkew:           int32(evenSkew),
-			TopologyKey:       zoneLabel,
-			WhenUnsatisfiable: corev1.DoNotSchedule,
-			LabelSelector:     workloadSelector(),
-			NodeTaintsPolicy:  &honourTaints,
+func theTolerationOf(taint string) corev1.Toleration {
+	leavingAfter := theLabsWaitInSeconds()
+
+	return corev1.Toleration{
+		Key:               taint,
+		Operator:          corev1.TolerationOpExists,
+		Effect:            corev1.TaintEffectNoExecute,
+		TolerationSeconds: &leavingAfter,
+	}
+}
+
+// A Pod template is the specification the Workload declared, transcribed field by
+// field: one enforced constraint per spread setting at the Skew that setting
+// names, and one toleration per toleration setting for the time it names, per
+// docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md. A
+// specification setting no spread carries no constraint and still its own
+// tolerations.
+func TestAWorkloadDeclaringAPredefinedSpecification_ShouldBeDeployedWithTheSettingsItsDefinitionNames(t *testing.T) {
+	declared := map[string]struct {
+		specification scenario.PodSpecification
+		constraints   []corev1.TopologySpreadConstraint
+		tolerations   []corev1.Toleration
+	}{
+		"a specification spreading its Pods over the Zones and over the Nodes": {
+			specification: aSpecificationOf(
+				aNodeConditionToleration(scenario.TaintNodeNotReady),
+				aNodeConditionToleration(scenario.TaintNodeUnreachable),
+				anEvenSpreadOver(scenario.ZoneLabel, evenSkew),
+				anEvenSpreadOver(scenario.HostnameLabel, widerSkew),
+			),
+			constraints: []corev1.TopologySpreadConstraint{
+				theConstraintOver(corev1.LabelTopologyZone, evenSkew),
+				theConstraintOver(corev1.LabelHostname, widerSkew),
+			},
+			tolerations: []corev1.Toleration{
+				theTolerationOf(corev1.TaintNodeNotReady),
+				theTolerationOf(corev1.TaintNodeUnreachable),
+			},
 		},
-		{
-			MaxSkew:           int32(widerSkew),
-			TopologyKey:       hostnameLabel,
-			WhenUnsatisfiable: corev1.DoNotSchedule,
-			LabelSelector:     workloadSelector(),
-			NodeTaintsPolicy:  &honourTaints,
+		"a specification setting no spread of its own": {
+			specification: aSpecificationOf(aNodeConditionToleration(scenario.TaintNodeNotReady)),
+			tolerations:   []corev1.Toleration{theTolerationOf(corev1.TaintNodeNotReady)},
 		},
+	}
+
+	for what, mapped := range declared {
+		t.Run(what, func(t *testing.T) {
+			deployed := toDeployment(aWorkload(t, mapped.specification))
+
+			expect.Expect(t, deployed.Spec.Template.Spec.TopologySpreadConstraints).To(expect.Equal(mapped.constraints))
+			expect.Expect(t, deployed.Spec.Template.Spec.Tolerations).To(expect.Equal(mapped.tolerations))
+		})
+	}
+}
+
+// theCriticalPriorityClass is a Pod setting the lab's own vocabulary does not
+// name, which is what a Scenario reaches through full access, and
+// beforeEverySetting is the place a full access written first on a Workload line
+// holds: no setting of the specification is transcribed before it runs.
+const (
+	theCriticalPriorityClass = "critical"
+	beforeEverySetting       = 0
+)
+
+// The changes a full access makes, each one as a Scenario writes it: a setting
+// the lab's own vocabulary does not name, one it does, the lab's own waiting
+// time dropped, and the whole specification left empty.
+func namingThePriorityClass(priorityClass string) PodSpecAccess {
+	return func(pod *corev1.PodSpec) { pod.PriorityClassName = priorityClass }
+}
+
+func droppingTheSpreadConstraints() PodSpecAccess {
+	return func(pod *corev1.PodSpec) { pod.TopologySpreadConstraints = nil }
+}
+
+func droppingTheTolerations() PodSpecAccess {
+	return func(pod *corev1.PodSpec) { pod.Tolerations = nil }
+}
+
+func leavingNothingOfThePodSpecification() PodSpecAccess {
+	return func(pod *corev1.PodSpec) { *pod = corev1.PodSpec{} }
+}
+
+// afterEverySettingOf is the place a full access written last on a Workload line
+// holds: every setting the specification holds is transcribed before it runs.
+func afterEverySettingOf(declared scenario.PodSpecification) int {
+	return len(declared.Settings())
+}
+
+// Full access reaches every Kubernetes Pod setting, the ones the lab's own
+// vocabulary does not name included, so what a Scenario wrote stands on the Pod
+// template its Workload is deployed with.
+func TestASpecificationCustomizedWithFullAccess_ShouldHoldTheSettingsTheScenarioNamed(t *testing.T) {
+	declared := aSpecificationOf(aNodeConditionToleration(scenario.TaintNodeNotReady))
+
+	deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
+		Access:        namingThePriorityClass(theCriticalPriorityClass),
+		AfterSettings: afterEverySettingOf(declared),
+	})
+
+	expect.Expect(t, deployed.Spec.Template.Spec.PriorityClassName).To(expect.Equal(theCriticalPriorityClass))
+	expect.Expect(t, deployed.Spec.Template.Spec.Tolerations).
+		To(expect.Equal([]corev1.Toleration{theTolerationOf(corev1.TaintNodeNotReady)}))
+}
+
+// A full access runs in the place it was written, so where it and a setting of
+// the lab's own name one Kubernetes field, the one written later is what the Pod
+// template carries.
+func TestFullAccessWrittenBesideTheLabsOwnCustomizations_ShouldWinWhereItIsWrittenLater(t *testing.T) {
+	declared := aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
+
+	written := map[string]struct {
+		place       int
+		constraints []corev1.TopologySpreadConstraint
+	}{
+		"full access written before the lab's own spread setting": {
+			place:       beforeEverySetting,
+			constraints: []corev1.TopologySpreadConstraint{theConstraintOver(corev1.LabelTopologyZone, evenSkew)},
+		},
+		"full access written after it": {
+			place: afterEverySettingOf(declared),
+		},
+	}
+
+	for order, taken := range written {
+		t.Run(order, func(t *testing.T) {
+			deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
+				Access: droppingTheSpreadConstraints(), AfterSettings: taken.place,
+			})
+
+			expect.Expect(t, deployed.Spec.Template.Spec.TopologySpreadConstraints).To(expect.Equal(taken.constraints))
+		})
+	}
+}
+
+// Edge case 7: the specification's own tolerations are transcribed after the last
+// full access, so the lab's waiting time before a Pod leaves an unresponsive Node
+// holds whatever full access left out.
+func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHolding(t *testing.T) {
+	declared := aSpecificationOf(
+		aNodeConditionToleration(scenario.TaintNodeNotReady),
+		aNodeConditionToleration(scenario.TaintNodeUnreachable),
+	)
+
+	deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
+		Access: droppingTheTolerations(), AfterSettings: afterEverySettingOf(declared),
+	})
+
+	expect.Expect(t, deployed.Spec.Template.Spec.Tolerations).To(expect.Equal([]corev1.Toleration{
+		theTolerationOf(corev1.TaintNodeNotReady),
+		theTolerationOf(corev1.TaintNodeUnreachable),
 	}))
 }
 
-func TestAWorkloadDeclaringNoRule_ShouldCarryNoSpreadConstraint(t *testing.T) {
-	deployed := toDeployment(aWorkload(t))
+// Full access reaches the Pod specification alone, so the label a Workload's Pods
+// are counted by, the selector reading them and the Deployment's own name and
+// labels stand even where a full access leaves nothing of that specification.
+func TestAWorkloadCustomizedWithFullAccess_ShouldStillHaveItsPodsCountedAsItsOwn(t *testing.T) {
+	declared := aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 
-	expect.Expect(t, deployed.Spec.Template.Spec.TopologySpreadConstraints).To(expect.HaveLen[corev1.TopologySpreadConstraint](0))
+	deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
+		Access: leavingNothingOfThePodSpecification(), AfterSettings: beforeEverySetting,
+	})
+
+	expect.Expect(t, deployed.Name).To(expect.Equal(deployedWorkloadName))
+	expect.Expect(t, deployed.Labels).To(expect.Equal(map[string]string{workloadLabel: deployedWorkloadName}))
+	expect.Expect(t, deployed.Spec.Selector).To(expect.Equal(workloadSelector()))
+	expect.Expect(t, deployed.Spec.Template.Labels).To(expect.Equal(map[string]string{workloadLabel: deployedWorkloadName}))
+}
+
+// Every Kubernetes name internal/scenario spells itself is pinned to the client
+// library's own constant: a mistyped label, taint or value would drop a spread or
+// a toleration silently and produce a Placement nobody asked for
+// (docs/architecture-principles.md § Domain Core).
+func TestEveryKubernetesNameTheLabSpells_ShouldEqualTheClientLibrarysOwnConstant(t *testing.T) {
+	expect.Expect(t, scenario.ZoneLabel).To(expect.Equal(corev1.LabelTopologyZone))
+	expect.Expect(t, scenario.HostnameLabel).To(expect.Equal(corev1.LabelHostname))
+	expect.Expect(t, scenario.TaintNodeNotReady).To(expect.Equal(corev1.TaintNodeNotReady))
+	expect.Expect(t, scenario.TaintNodeUnreachable).To(expect.Equal(corev1.TaintNodeUnreachable))
+	expect.Expect(t, string(scenario.DoNotSchedule)).To(expect.Equal(string(corev1.DoNotSchedule)))
+	expect.Expect(t, string(scenario.Honor)).To(expect.Equal(string(corev1.NodeInclusionPolicyHonor)))
+	expect.Expect(t, string(scenario.Exists)).To(expect.Equal(string(corev1.TolerationOpExists)))
+	expect.Expect(t, string(scenario.NoExecute)).To(expect.Equal(string(corev1.TaintEffectNoExecute)))
 }
 
 // No Pod affinity rule is set: a required anti-affinity caps one Pod per Node
@@ -89,35 +277,20 @@ func TestAWorkloadDeclaringNoRule_ShouldCarryNoSpreadConstraint(t *testing.T) {
 // maximum Skew of one keeps every Pod Running
 // (docs/adr/2026-10-04-scenario-declared-pod-spread.md).
 func TestADeployedPodTemplate_ShouldCarryNoPodAffinityRule(t *testing.T) {
-	overZones := spreadRule(t, scenario.SpreadOverZones, evenSkew)
-
-	deployed := toDeployment(aWorkload(t, overZones))
+	deployed := toDeployment(aWorkload(t, aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
 	expect.Expect(t, deployed.Spec.Template.Spec.Affinity).To(expect.Equal[*corev1.Affinity](nil))
 }
 
-// A Pod template tolerates the two Node-condition taints the control plane adds
-// to a Node that stopped responding, for the waiting time the lab sets rather
-// than the admission default it replaces, per
-// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
-func TestADeployedPodTemplate_ShouldTolerateTheNodeConditionTaintsForTheLabsWaitingTime(t *testing.T) {
-	theLabsWait := int64(UnresponsiveNodeWait.Seconds())
+// The container a Workload's Pods run is the mapper's own, as the Workload label
+// and the selector are: a specification is a package-level value and can name
+// neither, per
+// docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
+func TestADeployedPodTemplate_ShouldCarryTheContainerNoSpecificationCanName(t *testing.T) {
+	deployed := toDeployment(aWorkload(t, aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
-	deployed := toDeployment(aWorkload(t))
-
-	expect.Expect(t, deployed.Spec.Template.Spec.Tolerations).To(expect.Equal([]corev1.Toleration{
-		{
-			Key:               corev1.TaintNodeNotReady,
-			Operator:          corev1.TolerationOpExists,
-			Effect:            corev1.TaintEffectNoExecute,
-			TolerationSeconds: &theLabsWait,
-		},
-		{
-			Key:               corev1.TaintNodeUnreachable,
-			Operator:          corev1.TolerationOpExists,
-			Effect:            corev1.TaintEffectNoExecute,
-			TolerationSeconds: &theLabsWait,
-		},
+	expect.Expect(t, deployed.Spec.Template.Spec.Containers).To(expect.Equal([]corev1.Container{
+		{Name: workloadContainer, Image: workloadImage},
 	}))
 }
 
@@ -208,7 +381,7 @@ func TestANodeTheKWOKControllerNoLongerMaintains_ShouldKeepEveryLabelButTheMarki
 }
 
 func TestADeployedWorkload_ShouldLabelAndSelectItsPodsByItsName(t *testing.T) {
-	deployed := toDeployment(aWorkload(t))
+	deployed := toDeployment(aWorkload(t, aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
 	expect.Expect(t, deployed.Name).To(expect.Equal(deployedWorkloadName))
 	expect.Expect(t, int(*deployed.Spec.Replicas)).To(expect.Equal(somePodCount))

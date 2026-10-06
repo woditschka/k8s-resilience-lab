@@ -48,7 +48,7 @@ func TestAScenarioFile_ShouldGiveARunNameOfItsStemWithHyphens(t *testing.T) {
 		file    string
 		runName string
 	}{
-		"a file of two words": {file: "even_spread.go", runName: "even-spread"},
+		"a file of two words": {file: "resilient_placement.go", runName: "resilient-placement"},
 		"a file of one word":  {file: "eviction.go", runName: "eviction"},
 	}
 
@@ -66,7 +66,7 @@ func TestAScenarioFile_ShouldGiveARunNameOfItsStemWithHyphens(t *testing.T) {
 
 func TestAFileThatIsNoScenarioSource_ShouldYieldNoRunNameRatherThanAGuess(t *testing.T) {
 	filesOfNoScenario := map[string]string{
-		"a test file":             filepath.Join(someScenariosPlace, "even_spread_test.go"),
+		"a test file":             filepath.Join(someScenariosPlace, "resilient_placement_test.go"),
 		"a file that is not Go":   filepath.Join(someScenariosPlace, theReadme),
 		"a directory and no file": someScenariosPlace + string(filepath.Separator),
 	}

@@ -34,7 +34,7 @@ const (
 	placementSettled = "Placement settled"
 )
 
-// The lines a run of the lab's own Scenarios is read by: the Even spread
+// The lines a run of the lab's own Scenarios is read by: the Resilient placement
 // Scenario's heading under the run name derived for it, the two Then Steps its
 // Placement has to meet, and what a Finding is reported under.
 const (
@@ -42,10 +42,15 @@ const (
 	// boundary a Timeline's count and its printed entries are read inside.
 	aScenarioHeading = "Scenario "
 
-	evenSpreadReported     = aScenarioHeading + "even-spread"
-	threePodsPerZoneJudged = "Then 3 Pods per Zone"
-	onePodPerNodeJudged    = "Then 1 Pod per Node"
-	aFindingReported       = "Finding"
+	resilientPlacementReported = aScenarioHeading + "resilient-placement"
+	threePodsPerZoneJudged     = "Then 3 Pods per Zone"
+	onePodPerNodeJudged        = "Then 1 Pod per Node"
+	aFindingReported           = "Finding"
+
+	// resilientPlacementDeclared is the Workload's own Given line, which names the
+	// predefined Pod specification its Pods are deployed with: the Step's name is
+	// derived from that specification's name, so a run is where the two meet.
+	resilientPlacementDeclared = "Given a Workload checkout of 9 Pods declaring Resilient placement"
 )
 
 // The lines a run of the Node loss Scenario is read by: its heading under the run
@@ -179,7 +184,7 @@ func theLineOpeningWith(reported, label string) string {
 // plane's own doing. A Scenario has no test of its own — it is itself the check —
 // so the command's suite is what fails when one reports a Finding or ends at a
 // Step (docs/adr/2026-10-03-scenarios-as-go-functions.md).
-func TestEvenSpreadWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNode(t *testing.T) {
+func TestResilientPlacementWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNode(t *testing.T) {
 	requireEngine(t)
 
 	reported, err := aRun(t)
@@ -187,7 +192,8 @@ func TestEvenSpreadWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNode(t *te
 		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
 	}
 
-	reportShows(t, reported, evenSpreadReported)
+	reportShows(t, reported, resilientPlacementReported)
+	reportShows(t, reported, resilientPlacementDeclared)
 	reportShows(t, reported, threePodsPerZoneJudged)
 	reportShows(t, reported, onePodPerNodeJudged)
 	reportShows(t, reported, placementSettled)
@@ -222,7 +228,7 @@ func TestARun_ShouldReportTheShortenedWaitBeforePodsLeaveAnUnresponsiveNode(t *t
 	}
 
 	reportLineNames(t, reported, unresponsiveNodeSetting,
-		cluster.UnresponsiveNodeWait.String(), cluster.DefaultUnresponsiveNodeWait.String())
+		scenario.UnresponsiveNodeWait.String(), scenario.DefaultUnresponsiveNodeWait.String())
 	reportLineNames(t, reported, nodeHeartbeatSetting,
 		cluster.NodeHeartbeatFactor, cluster.DefaultNodeHeartbeatFactor)
 }
@@ -377,14 +383,14 @@ func TestAValueThatIsNotAVersion_ShouldStopTheRunWithoutReachingTheEngine(t *tes
 // because a Scenario whose Steps fail part-way cannot be written as a Scenario
 // source: the Scenarios' place holds the lab's own experiments, which pass.
 const (
-	theScenarioReported = "even-spread"
-	itsCluster          = "k8s-resilience-lab-even-spread-7f3a9c"
+	theScenarioReported = "resilient-placement"
+	itsCluster          = "k8s-resilience-lab-resilient-placement-7f3a9c"
 	theThenStepName     = "3 Pods per Zone"
 	aTopologyStepName   = "a Topology of 3 Zones of 3 Nodes"
 
 	whatEndedTheScenario      = "apply the Topology: create Node zone-1-node-1: already exists"
 	whyTheTimelineWasNotFiled = "create the Timeline folder /read-only/timelines: permission denied"
-	someTimelinePath          = "/tmp/a-run/timelines/k8s-resilience-lab-even-spread-7f3a9c.jsonl"
+	someTimelinePath          = "/tmp/a-run/timelines/k8s-resilience-lab-resilient-placement-7f3a9c.jsonl"
 )
 
 // The changes the Timelines above hold: a Node the Topology brought up, and the
@@ -413,7 +419,7 @@ const (
 )
 
 // aTopologyStep and aThenStep are the Steps the built Outcomes report, named the
-// way the Even spread Scenario names its own.
+// way the Resilient placement Scenario names its own.
 func aTopologyStep() lab.Step {
 	return lab.Step{Kind: lab.GivenStep, Name: aTopologyStepName}
 }

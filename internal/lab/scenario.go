@@ -20,10 +20,6 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// evenSkew is the maximum Skew that makes a spread even: the fullest and the
-// emptiest domain differ by at most one Pod.
-const evenSkew = 1
-
 // noPod is what a Node that stopped responding holds once the control plane has
 // moved its Pods away.
 const noPod = 0
@@ -52,15 +48,6 @@ type WorkloadName string
 // own: a swapped argument does not compile, and a value a Scenario may not
 // declare is refused by the internal/scenario constructor the Step calls, which
 // stays the one validation home (docs/architecture-principles.md § Go Idioms).
-
-// The domains a Workload's Pods are spread over, named here so a Scenario source
-// imports internal/lab alone.
-const (
-	// OverZones spreads a Workload's Pods over the Zones of its Topology.
-	OverZones = scenario.SpreadOverZones
-	// OverNodes spreads a Workload's Pods over the Nodes of its Topology.
-	OverNodes = scenario.SpreadOverNodes
-)
 
 // StepKind is which of the three a Step is.
 type StepKind string
@@ -107,6 +94,10 @@ type Scenario struct {
 
 	topology scenario.Topology
 	workload scenario.Workload
+	// accesses are the full accesses the Workload line wrote, each in the place it
+	// was written. The Step surface carries them beside the Workload, because the
+	// domain value the Workload holds carries no function value.
+	accesses []cluster.PodSpecAccessInPlace
 
 	steps    []Step
 	findings []Finding
@@ -221,7 +212,7 @@ func (s *Scenario) deploy(at Step) bool {
 
 		return false
 	}
-	if err := s.provisioned.Deploy(s.ctx, s.workload); err != nil {
+	if err := s.provisioned.Deploy(s.ctx, s.workload, s.accesses...); err != nil {
 		s.end(at, fmt.Errorf("deploy the Workload: %w", err))
 
 		return false
@@ -251,16 +242,34 @@ func (g Given) Topology(zones Zones, nodesPerZone NodesPerZone) DeclaredTopology
 	return declared.declare(step, scenario.DefaultNodeCapacity)
 }
 
-// Workload declares the Pod replicas the Scenario deploys, under the name their
-// Pods are labelled with. A further call spreads them.
-func (g Given) Workload(name WorkloadName, pods Pods) DeclaredWorkload {
-	declared := DeclaredWorkload{scenario: g.scenario, name: name, pods: pods}
-	step, open := g.scenario.record(GivenStep, declared.named())
+// Workload declares the Pod replicas the Scenario deploys: how many, under the
+// name their Pods are labelled with, and the predefined Pod specification they
+// are deployed with, customized or not. The line carries no setting of its own,
+// per docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
+//
+// The full accesses that specification was customized with are kept beside the
+// Workload, because what the domain holds of a specification is its settings
+// alone.
+func (g Given) Workload(name WorkloadName, pods Pods, declares PodSpecification) {
+	step, open := g.scenario.record(GivenStep, workloadNamed(name, pods, declares))
 	if !open {
-		return declared
+		return
 	}
 
-	return declared.declare(step)
+	workload, err := scenario.NewWorkload(string(name), int(pods), declares.declared)
+	if err != nil {
+		g.scenario.end(step, err)
+
+		return
+	}
+	g.scenario.workload, g.scenario.accesses = workload, declares.accesses
+}
+
+// workloadNamed is how a Workload's line reads in a report: its Pods, and the
+// intent of the specification it declares.
+func workloadNamed(name WorkloadName, pods Pods, declares PodSpecification) string {
+	return fmt.Sprintf("a Workload %s of %s declaring %s",
+		name, counted(int(pods), "Pod", "Pods"), declares.name())
 }
 
 // DeclaredTopology is the Topology one Given line declared. It is complete as it
@@ -309,69 +318,6 @@ func (d DeclaredTopology) declare(step Step, pods int) DeclaredTopology {
 func (d DeclaredTopology) named() string {
 	return fmt.Sprintf("a Topology of %s of %s",
 		counted(int(d.zones), "Zone", "Zones"), counted(int(d.nodesPerZone), "Node", "Nodes"))
-}
-
-// DeclaredWorkload is the Workload one Given line declared, complete as it
-// stands and declaring no spread. A further call declares the same line again
-// with the spread its Pods follow.
-type DeclaredWorkload struct {
-	scenario *Scenario
-	name     WorkloadName
-	pods     Pods
-	spread   []scenario.SpreadDomain
-}
-
-// SpreadEvenly declares this line's Workload again, with its Pods spread as
-// evenly over each domain named as the control plane can place them: the fullest
-// and the emptiest domain differ by at most one Pod.
-func (d DeclaredWorkload) SpreadEvenly(domains ...scenario.SpreadDomain) DeclaredWorkload {
-	if d.scenario.cause != nil {
-		return d
-	}
-
-	spread := DeclaredWorkload{scenario: d.scenario, name: d.name, pods: d.pods, spread: domains}
-
-	return spread.declare(d.scenario.rename(spread.named()))
-}
-
-// declare constructs the Workload this line names, with one even spread rule per
-// domain it declared, and ends the Scenario at step when a constructor refuses it.
-func (d DeclaredWorkload) declare(step Step) DeclaredWorkload {
-	rules := make([]scenario.SpreadRule, 0, len(d.spread))
-	for _, domain := range d.spread {
-		rule, err := scenario.NewSpreadRule(domain, evenSkew)
-		if err != nil {
-			d.scenario.end(step, err)
-
-			return d
-		}
-		rules = append(rules, rule)
-	}
-
-	workload, err := scenario.NewWorkload(string(d.name), int(d.pods), rules...)
-	if err != nil {
-		d.scenario.end(step, err)
-
-		return d
-	}
-	d.scenario.workload = workload
-
-	return d
-}
-
-// named is how this line reads in a report.
-func (d DeclaredWorkload) named() string {
-	named := fmt.Sprintf("a Workload %s of %s", d.name, counted(int(d.pods), "Pod", "Pods"))
-	if len(d.spread) == 0 {
-		return named
-	}
-
-	over := make([]string, 0, len(d.spread))
-	for _, domain := range d.spread {
-		over = append(over, "over the "+string(domain))
-	}
-
-	return named + " spread evenly " + strings.Join(over, " and ")
 }
 
 // When injects the Failure a Scenario studies. It waits for the world to have

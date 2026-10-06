@@ -44,7 +44,15 @@
 
 **Pod**: One replica of a Workload, either placed on a Node or left unplaced. Avoid: container, replica, task.
 
-**Workload**: One declared group of Pod replicas, deployed to the Simulated Cluster together with the rules that constrain where its Pods may land. Relationships: a Workload owns one or more Pods. Avoid: app, service, deployment.
+**Workload**: One declared group of Pod replicas, deployed to the Simulated Cluster under the one Pod specification it declares. Relationships: a Workload owns one or more Pods. Avoid: app, service, deployment.
+
+**Pod specification**: The complete set of settings a Workload's Pods are deployed with, named for the intent it serves. Relationships: the lab predefines one per intent, a Workload declares one of them with zero or more Customizations, and a specification's definition names every setting it holds, the lab's own included. Resilient placement spreads a Workload's Pods evenly over the Zones and over the Nodes. Default placement leaves where its Pods land to the scheduler. Avoid: preset, profile, Pod template, PodSpec; Maximum availability and No spread rules, the earlier names of those two intents.
+
+**Setting**: One value a Pod specification gives one Kubernetes configuration field, under the name Kubernetes gives that field. Relationships: the lab's own vocabulary names the settings that decide where a Workload's Pods land and when they leave a Node, and Full access reaches every other one. A Customization changes one or more Settings. Avoid: field, option, parameter, knob, property.
+
+**Customization**: One change a Scenario applies to a Pod specification, yielding a changed copy and leaving the specification it was applied to as it was. Relationships: a Scenario applies zero or more Customizations in the order written, before the Workload is deployed, and a later one wins where two touch the same Setting. A Customization names each Setting it changes under the name Kubernetes gives it, either in the lab's own vocabulary or through Full access. Avoid: override, mutation, patch, modifier.
+
+**Full access**: The Customization that reaches every Kubernetes Pod setting, for a Scenario needing one the lab's own vocabulary does not name. Relationships: a Scenario writes it among its Customizations and names each Setting as Kubernetes names it, so that Scenario reads partly in Kubernetes' own vocabulary. What the lab itself depends on holds whatever Full access leaves out. The lab's own waiting time stands over it, whatever it names. Avoid: escape hatch, raw spec, passthrough, override.
 
 **Topology**: The arrangement of Zones and Nodes a Simulated Cluster starts from. Relationships: a Topology names a Zone count, a Node count per Zone, and each Node's capacity. Avoid: layout, cluster shape, setup.
 
@@ -62,7 +70,7 @@
 
 **Step**: One line of a Scenario, either a Given that sets up, a When that injects a Failure, or a Then that asserts an outcome. Relationships: a Scenario is a sequence of Steps; a Given declares a Topology or a Workload, a When injects one Failure, a Then asserts one Placement outcome. Avoid: stage, phase, clause, instruction.
 
-**Scenario name**: The short name an engineer gives one Scenario, which a run reports and which selects that Scenario to run on its own. Relationships: exactly one per Scenario, and not the name of the Scenario's function. Avoid: run name (a run is one invocation of the lab), test name, scenario id.
+**Scenario name**: The short name an engineer gives one Scenario, which a run reports and which selects that Scenario to run on its own. Relationships: exactly one per Scenario, and not the name of the Scenario's function. A Scenario name may repeat the Pod specification its Workload declares, so Resilient placement names both the Scenario and that specification. Avoid: run name (a run is one invocation of the lab), test name, scenario id; Even spread, the earlier name of the Resilient placement Scenario.
 
 **Timeline**: The ordered record of what changed in a Scenario's Simulated Cluster while the Scenario ran. Relationships: one Timeline per Scenario of a run, holding that Scenario's Node, Pod and Workload changes together with the control plane's reason for each Placement. A Timeline states what happened; a Finding judges it and a Failure causes it. Avoid: event log, audit log, history, trace, Event (a Kubernetes Event object is one entry of a Timeline).
 
@@ -80,7 +88,7 @@
 
 **Developer:** And after a Zone Failure?
 
-**Domain expert:** The two surviving Zones hold all nine Pods, or the ones that cannot be placed stay Pending. Which of the two is correct depends on the Workload's rules, not on the Simulated Cluster.
+**Domain expert:** The two surviving Zones hold all nine Pods, or the ones that cannot be placed stay Pending. Which of the two is correct depends on the Pod specification the Workload declares, not on the Simulated Cluster.
 
 **Developer:** So Required Capacity is what tells us whether that outcome is acceptable.
 

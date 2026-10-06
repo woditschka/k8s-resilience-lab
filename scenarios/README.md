@@ -9,21 +9,21 @@ Two files sit beside them. `scenarios.go` holds `All`, the list of the Scenarios
 
 Run them all with `go run ./cmd/lab`.
 
-## Even spread
+## Resilient placement
 
-`even_spread.go`, running as `even-spread`
+`resilient_placement.go`, running as `resilient-placement`
 
 | | |
 |---|---|
 | Given | three Zones of three Nodes |
-| Given | the `Checkout` Workload of nine Pods, spread evenly over the Zones and over the Nodes |
+| Given | the `Checkout` Workload of nine Pods, declaring Resilient placement |
 | Then | every Pod is Running |
 | Then | three Pods sit in every Zone |
 | Then | one Pod sits on every Node |
 
 The Scenario the lab starts from: with room on every Node for more than one Pod, an even Placement
-is the scheduler honouring the Workload's declared spread rather than the Nodes running out of
-space.
+is the scheduler honouring the specification the Workload declares rather than the Nodes running out
+of space.
 
 ## Node loss
 
@@ -32,16 +32,20 @@ space.
 | | |
 |---|---|
 | Given | three Zones of three Nodes |
-| Given | the `Checkout` Workload of nine Pods, spread evenly over the Zones and over the Nodes |
+| Given | the `Checkout` Workload of nine Pods, declaring Resilient placement |
+| Then | every Pod is Running |
+| Then | three Pods sit in every Zone |
 | When | one Node fails |
 | Then | every Pod is Running |
 | Then | three Pods sit in every Zone |
 | Then | no Pod sits on the Nodes that failed |
 
-Even spread's world, and then one Node stops responding. The When says how many Nodes fail rather than
-naming one: the lab picks the first Nodes the declared Topology derives, the same pick on every run,
-and reports which in the Step's own line. The Scenario waits for the Placement to settle before the
-Failure, and the Thens after it judge the Placement the control plane reached next.
+The Resilient placement Scenario's world, and then one Node stops responding. The two Thens before
+the When judge the Placement the Scenario starts from, so the world the Failure is injected into is
+judged rather than assumed and a Finding there points at the starting Placement instead of at the
+recovery. The When says how many Nodes fail rather than naming one: the lab picks the first Nodes the
+declared Topology derives, the same pick on every run, and reports which in the Step's own line. The
+Thens after it judge the Placement the control plane reached next.
 
 Nothing here moves a Pod. Noticing the Node, tainting it and replacing its Pods on the Nodes still
 responding are the control plane's own doing, which is what makes the judged Placement an observation
@@ -56,8 +60,9 @@ Workload and names itself if that declaration is refused. A Then judges the Sett
 one it does not meet is reported as a Finding while the later Steps still run.
 
 ```go
-func AnEvenlySpreadWorkload_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
+func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
 	s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3))
+	s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())
 	s.Then().AllPodsRunning()
 }
 ```
@@ -67,9 +72,21 @@ The function is named for the condition it runs under and the outcome it asserts
 underscores, so renaming the file renames the Scenario. A new Scenario is a file here and one line
 in `scenarios.go`.
 
+A Workload declares one of the lab's predefined Pod specifications and no setting of its own:
+
+| | |
+|---|---|
+| `lab.ResilientPlacement()` | its Pods spread as evenly over the Zones and over the Nodes as the control plane can place them |
+| `lab.DefaultPlacement()` | no spread at all, so where its Pods land is the scheduler's own choice |
+
+Each one is defined in `internal/lab/pod_specification.go` as the settings it sets, under
+Kubernetes' own names, over a base that carries the lab's own — the tolerations that make a Pod leave
+an unresponsive Node after the lab's waiting time. Open a definition to read which setting it sets
+and to which value. A new specification is one function there, added with the Scenario that needs it.
+
 A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `lab.NodesPerZone`,
-`lab.Pods` and `lab.WorkloadName` — so a swapped argument does not compile. An optional setting is a
-further call on the complete declaration,
+`lab.Pods`, `lab.WorkloadName` and the specification — so a swapped argument does not compile. An
+optional setting is a further call on the complete declaration,
 `Topology(lab.Zones(3), lab.NodesPerZone(3)).NodeCapacity(lab.Pods(2))`. The lab's Scenarios name the
 Workload constants of `workloads.go`, which are business capabilities of the domain they model — an
 online shop in the Scenario above, and any domain the next one needs.

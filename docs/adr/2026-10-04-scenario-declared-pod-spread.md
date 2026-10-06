@@ -4,11 +4,11 @@
 
 ## Context
 
-The main Scenario, Even spread, exists to show resilience to Node and Zone loss. Its nine Pods therefore have to sit three in every Zone and one on every Node.
+The simplest Scenario, Resilient placement, exists to show resilience to Node and Zone loss. Its nine Pods therefore have to sit three in every Zone and one on every Node.
 
-Even spread is one Scenario's goal rather than the lab's law. A later Scenario declares different rules, or none, and the lab has to report whatever Placement those rules produce.
+An even spread is one Scenario's goal rather than the lab's law. A later Scenario declares a different specification, or one with no spread, and the lab reports whatever Placement it produces.
 
-The rules also have to survive the loss they are built for. A rule the surviving Nodes cannot satisfy leaves Pods Pending, which is the less resilient outcome of the two the lab can show.
+A spread also has to survive the loss it is built for. One the surviving Nodes cannot satisfy leaves Pods Pending, which is the less resilient outcome of the two the lab can show.
 
 ## Options Considered
 
@@ -19,11 +19,11 @@ The rules also have to survive the loss they are built for. A rule the surviving
 
 ## Decision
 
-Option 4, enforced. A Workload carries zero or more spread rules, each naming a domain — the Zones or the Nodes — and a maximum Skew. The mapper turns each rule into one topology spread constraint on the Deployment's Pod template: the Zone or hostname label as the topology key, the declared Skew, `DoNotSchedule`, taints honoured in the count, and the Workload's own label as the selector. Even spread declares one rule per domain at a maximum Skew of one. Every field used is generally available in the pinned Kubernetes version, per [ADR: Kubernetes version pin](2026-10-03-kubernetes-version-pin.md).
+Option 4, enforced. A Workload's spread comes from the Pod specification it declares, which holds zero or more topology spread settings, per [ADR: A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md). Each setting names its own topology key, maximum Skew, `whenUnsatisfiable` and `nodeTaintsPolicy`, and the mapper transcribes it onto the Deployment's Pod template with the Workload's own label as the selector. Resilient placement sets the Zone and the hostname label each at a maximum Skew of one, `DoNotSchedule`, and taints honoured in the count. The spread setting is the one a Scenario may also name as a Customization, per the same ADR. Every field used is generally available in the pinned Kubernetes version, per [ADR: Kubernetes version pin](2026-10-03-kubernetes-version-pin.md).
 
 `DoNotSchedule` makes an unmet rule visible as a Pending Pod, which is what a Scenario asserts. Option 3 hides the same failure behind a Running Pod in the wrong place.
 
-Option 2 is rejected on the lab's own goal. An absolute one-Pod-per-Node rule leaves the ninth Pod Pending as soon as a Node is lost. A maximum Skew of one lets that Pod double up on a surviving Node, which keeps nine Pods Running — the outcome Even spread is built to demonstrate.
+Option 2 is rejected on the lab's own goal. An absolute one-Pod-per-Node rule leaves the ninth Pod Pending as soon as a Node is lost. A maximum Skew of one lets that Pod double up on a surviving Node, keeping nine Pods Running — the outcome the Resilient placement Scenario is built to demonstrate.
 
 Taints are honoured so a tainted Node leaves the count. A Node a Failure cordons therefore shrinks the domain set instead of making every rule unsatisfiable.
 
@@ -31,17 +31,19 @@ No constraint declares a minimum domain count, for the same reason option 2 is r
 
 ## Consequences
 
-Even spread's assertion is a consequence of its own declaration, so the same reasoning reads from the Scenario rather than from the lab's internals.
+The Resilient placement Scenario's assertion is a consequence of its own declaration, so the same reasoning reads from the Scenario rather than from the lab's internals.
 
 Spread is evaluated when a Pod is scheduled and never after. A Node that returns from a Failure stays empty until Pods are recreated, so no Scenario asserts that a Placement re-balances on its own.
 
-A Workload that declares no rule is legal, and its Pods land wherever the scheduler puts them.
+A specification that holds no spread is legal, and its Pods land wherever the scheduler puts them.
+
+A Customization widening a spread's Skew, or naming another topology key, is the lab's way of showing a weaker spread without a second predefined specification.
 
 A Topology too small for its Workload reports Pending Pods rather than an uneven Placement, which is the PRD's edge case 1.
 
 ## Implementation
 
-**Requirements:** REQ-SIM-001
+**Requirements:** REQ-SIM-001, REQ-SIM-009
 
 ## References
 

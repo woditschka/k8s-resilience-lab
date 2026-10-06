@@ -37,12 +37,12 @@ const (
 	// default, so a Topology declared at it differs from one that named none.
 	twoPodsPerNode = 2
 
-	// noNodesPerZone, noPods and noSuchSpreadDomain are each a declaration the
-	// internal/scenario constructor refuses, so the Given declaring one is a Step
-	// that cannot be carried out.
-	noNodesPerZone                           = 0
-	noPods                                   = 0
-	noSuchSpreadDomain scenario.SpreadDomain = "Racks"
+	// noNodesPerZone and noPods are each a declaration the internal/scenario
+	// constructor refuses, so the Given declaring one is a Step that cannot be
+	// carried out. A specification setting nothing is the third, and it is the
+	// zero value of the type rather than a count.
+	noNodesPerZone = 0
+	noPods         = 0
 
 	// moreNodesThanTheTopologyHolds is a Failure that Topology cannot satisfy, so
 	// the When asking for it is a Step that cannot be carried out.
@@ -51,6 +51,10 @@ const (
 	// theWhenThatNeverRan is what a Then reading the Nodes a Failure stopped names
 	// when no When ran before it, which is what a reader has to add.
 	theWhenThatNeverRan = "no When"
+
+	// noSpecificationAtAll is how a Workload line reads when it declares the zero
+	// specification: it names nothing, which is the Given's own refusal.
+	noSpecificationAtAll = ""
 
 	// onePodLeftBehind is the Pod the control plane has not moved off the Node that
 	// stopped responding, and podLeftOnTheFailedNode what it is called there.
@@ -108,22 +112,14 @@ func aTopologyAt(t *testing.T, zones, nodesPerZone, podsPerNode int) scenario.To
 	return topology
 }
 
-// anEvenlySpreadWorkloadOf is the Workload a Given declares when it spreads pods
-// evenly over the Zones and over the Nodes.
-func anEvenlySpreadWorkloadOf(t *testing.T, pods int) scenario.Workload {
+// aWorkloadDeclaringResilientPlacementOf is the Workload a Given declares when
+// it names that specification for pods Pods.
+func aWorkloadDeclaringResilientPlacementOf(t *testing.T, pods int) scenario.Workload {
 	t.Helper()
 
-	overZones, err := scenario.NewSpreadRule(OverZones, evenSkew)
+	workload, err := scenario.NewWorkload(string(someWorkloadName), pods, ResilientPlacement().declared)
 	if err != nil {
-		t.Fatalf("build a spread rule over the Zones: %v", err)
-	}
-	overNodes, err := scenario.NewSpreadRule(OverNodes, evenSkew)
-	if err != nil {
-		t.Fatalf("build a spread rule over the Nodes: %v", err)
-	}
-	workload, err := scenario.NewWorkload(string(someWorkloadName), pods, overZones, overNodes)
-	if err != nil {
-		t.Fatalf("build a Workload of %d Pods spread evenly: %v", pods, err)
+		t.Fatalf("build a Workload of %d Pods declaring Resilient placement: %v", pods, err)
 	}
 
 	return workload
@@ -229,24 +225,18 @@ func topologyStepHoldingOf(zones, nodesPerZone, podsPerNode int) Step {
 	}
 }
 
-func workloadStepOf(pods int) Step {
-	return Step{Kind: GivenStep, Name: fmt.Sprintf("a Workload %s of %d Pods", someWorkloadName, pods)}
-}
-
-// spreadWorkloadStepOf is the Step a Workload line records once it spreads its
-// Pods over one domain alone.
-func spreadWorkloadStepOf(pods int, domain scenario.SpreadDomain) Step {
+// workloadStepOf is the Step a Workload line records: its Pods, and the intent of
+// the specification it declares. resilientPlacementWorkloadStepOf is that line
+// for the specification the Scenarios in this file declare.
+func workloadStepOf(pods int, declaring string) Step {
 	return Step{
 		Kind: GivenStep,
-		Name: fmt.Sprintf("a Workload %s of %d Pods spread evenly over the %s", someWorkloadName, pods, domain),
+		Name: fmt.Sprintf("a Workload %s of %d Pods declaring %s", someWorkloadName, pods, declaring),
 	}
 }
 
-func evenlySpreadWorkloadStepOf(pods int) Step {
-	return Step{
-		Kind: GivenStep,
-		Name: fmt.Sprintf("a Workload %s of %d Pods spread evenly over the Zones and over the Nodes", someWorkloadName, pods),
-	}
+func resilientPlacementWorkloadStepOf(pods int) Step {
+	return workloadStepOf(pods, ResilientPlacement().name())
 }
 
 func allPodsRunningStep() Step {
@@ -303,15 +293,28 @@ func TestGivenSteps_ShouldDeclareTheTopologyAndTheWorkload(t *testing.T) {
 	declaring := aScenario()
 
 	declaring.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-	declaring.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+	declaring.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 
 	declared := declaring.outcome()
 	expect.Expect(t, declaring.topology.Nodes()).To(expect.Equal(aTopologyOf(t, twoZones, twoNodesPerZone).Nodes()))
-	expect.Expect(t, declaring.workload).To(expect.Equal(anEvenlySpreadWorkloadOf(t, podsOverEveryNode)))
+	expect.Expect(t, declaring.workload).To(expect.Equal(aWorkloadDeclaringResilientPlacementOf(t, podsOverEveryNode)))
 	expect.Expect(t, declared.Steps).To(expect.Equal([]Step{
 		topologyStepOf(twoZones, twoNodesPerZone),
-		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
 	}))
+}
+
+// A Workload line customized with full access leaves the Scenario holding those
+// full accesses, which is how they reach the Simulated Cluster: the Workload the
+// domain constructs holds the specification's settings alone.
+func TestAGivenWorkloadCustomizedWithFullAccess_ShouldKeepItBesideTheWorkloadItDeclared(t *testing.T) {
+	declaring := aScenario()
+	customized := ResilientPlacement().Customize(aFullAccess())
+
+	declaring.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), customized)
+
+	expect.Expect(t, placesOfTheFullAccesses(declaring.accesses)).
+		To(expect.Equal(placesOfTheFullAccesses(customized.accesses)))
 }
 
 func TestAGivenTopologyNamingItsNodeCapacity_ShouldDeclareThatCapacityAndRenameItsLine(t *testing.T) {
@@ -330,7 +333,7 @@ func TestThenSteps_ShouldAssertThePlacementOutcome(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	judging := aScenarioOver(onePodPerNodeOf(declared))
 	judging.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 
 	judging.Then().AllPodsRunning()
 	judging.Then().PodsPerZone(podsPerZoneWhenEven)
@@ -340,7 +343,7 @@ func TestThenSteps_ShouldAssertThePlacementOutcome(t *testing.T) {
 	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{}))
 	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
 		topologyStepOf(twoZones, twoNodesPerZone),
-		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
 		allPodsRunningStep(),
 		podsPerZoneStepOf(podsPerZoneWhenEven),
 		podsPerNodeStepOf(podsPerNodeWhenEven),
@@ -351,7 +354,7 @@ func TestThenThePlacementDoesNotMeet_ShouldReportAFindingAndRunTheLaterSteps(t *
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	judging := aScenarioOver(everyPodOnOneNodeOf(declared))
 	judging.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 
 	judging.Then().PodsPerZone(podsPerZoneWhenEven)
 	judging.Then().AllPodsRunning()
@@ -362,7 +365,7 @@ func TestThenThePlacementDoesNotMeet_ShouldReportAFindingAndRunTheLaterSteps(t *
 	}))
 	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
 		topologyStepOf(twoZones, twoNodesPerZone),
-		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
 		podsPerZoneStepOf(podsPerZoneWhenEven),
 		allPodsRunningStep(),
 	}))
@@ -377,7 +380,7 @@ func TestAPlacementHoldingNoPodOnTheNodesThatFailed_ShouldRecordNoFinding(t *tes
 	stopped := theNodeThatStopped(declared)
 	judging := aScenarioAfterFailing(everyPodBackOnTheRespondingNodesOf(declared, stopped), stopped)
 	judging.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 
 	judging.Then().NoPodsOnTheFailedNodes()
 	judging.Then().AllPodsRunning()
@@ -386,7 +389,7 @@ func TestAPlacementHoldingNoPodOnTheNodesThatFailed_ShouldRecordNoFinding(t *tes
 	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{}))
 	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
 		topologyStepOf(twoZones, twoNodesPerZone),
-		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
 		noPodsOnTheFailedNodesStep(),
 		allPodsRunningStep(),
 	}))
@@ -397,7 +400,7 @@ func TestAPlacementStillHoldingAPodOnANodeThatFailed_ShouldReportAFindingAndRunT
 	stopped := theNodeThatStopped(declared)
 	judging := aScenarioAfterFailing(onePodLeftOnTheFailedNodeOf(declared, stopped), stopped)
 	judging.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 
 	judging.Then().NoPodsOnTheFailedNodes()
 	judging.Then().AllPodsRunning()
@@ -408,7 +411,7 @@ func TestAPlacementStillHoldingAPodOnANodeThatFailed_ShouldReportAFindingAndRunT
 	}))
 	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
 		topologyStepOf(twoZones, twoNodesPerZone),
-		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
 		noPodsOnTheFailedNodesStep(),
 		allPodsRunningStep(),
 	}))
@@ -429,7 +432,7 @@ func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testi
 			name: "a Topology no Zone could be provisioned with",
 			declare: func(ending *Scenario) {
 				ending.Given().Topology(Zones(twoZones), NodesPerZone(noNodesPerZone))
-				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 			},
 			endedAt: topologyStepOf(twoZones, noNodesPerZone),
 			steps:   []Step{topologyStepOf(twoZones, noNodesPerZone)},
@@ -439,7 +442,7 @@ func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testi
 			name: "a Topology whose Nodes hold no Pod",
 			declare: func(ending *Scenario) {
 				ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone)).NodeCapacity(Pods(noPods))
-				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 			},
 			endedAt: topologyStepHoldingOf(twoZones, twoNodesPerZone, noPods),
 			steps:   []Step{topologyStepHoldingOf(twoZones, twoNodesPerZone, noPods)},
@@ -449,25 +452,28 @@ func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testi
 			name: "a Workload of no Pods",
 			declare: func(ending *Scenario) {
 				ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-				ending.Given().Workload(someWorkloadName, Pods(noPods))
+				ending.Given().Workload(someWorkloadName, Pods(noPods), ResilientPlacement())
 			},
-			endedAt: workloadStepOf(noPods),
-			steps:   []Step{topologyStepOf(twoZones, twoNodesPerZone), workloadStepOf(noPods)},
-			cause:   fmt.Sprintf("a Workload declares at least one Pod, so a count of %d Pods is refused", noPods),
-		},
-		{
-			name: "a Workload spread over a domain no rule names",
-			declare: func(ending *Scenario) {
-				ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(noSuchSpreadDomain)
-			},
-			endedAt: spreadWorkloadStepOf(podsOverEveryNode, noSuchSpreadDomain),
+			endedAt: resilientPlacementWorkloadStepOf(noPods),
 			steps: []Step{
 				topologyStepOf(twoZones, twoNodesPerZone),
-				spreadWorkloadStepOf(podsOverEveryNode, noSuchSpreadDomain),
+				resilientPlacementWorkloadStepOf(noPods),
 			},
-			cause: fmt.Sprintf("a spread rule names [%s %s], so the domain %q is refused",
-				OverZones, OverNodes, noSuchSpreadDomain),
+			cause: fmt.Sprintf("a Workload declares at least one Pod, so a count of %d Pods is refused", noPods),
+		},
+		{
+			name: "a Workload declaring a specification that sets nothing",
+			declare: func(ending *Scenario) {
+				ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), PodSpecification{})
+			},
+			endedAt: workloadStepOf(podsOverEveryNode, noSpecificationAtAll),
+			steps: []Step{
+				topologyStepOf(twoZones, twoNodesPerZone),
+				workloadStepOf(podsOverEveryNode, noSpecificationAtAll),
+			},
+			cause: "a Workload's Pods are deployed with the specification it declares, " +
+				"so a specification holding no setting is refused",
 		},
 	}
 
@@ -494,7 +500,7 @@ func TestScenarioWithoutAFailure_ShouldCarryNoWhenStep(t *testing.T) {
 	running := aScenarioOver(settled)
 
 	running.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-	running.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+	running.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 	running.Then().AllPodsRunning()
 
 	reported := running.outcome()
@@ -502,11 +508,36 @@ func TestScenarioWithoutAFailure_ShouldCarryNoWhenStep(t *testing.T) {
 	expect.Expect(t, reported.Placement).To(expect.Equal(settled))
 }
 
+// A Scenario's lines are carried out in the order they stand in, so a Then before
+// a When judges the Placement the Scenario starts from and the When after it
+// injects the Failure into that same settled world. The When here is the
+// refused-count one, which resolves no Node and so reaches no cluster.
+func TestAThenStandingBeforeAWhen_ShouldJudgeThePlacementTheScenarioStartsFrom(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	judging := aScenarioOver(onePodPerNodeOf(declared))
+	judging.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
+
+	judging.Then().AllPodsRunning()
+	judging.Then().PodsPerZone(podsPerZoneWhenEven)
+	judging.When().NodesFail(Nodes(moreNodesThanTheTopologyHolds))
+
+	judged := judging.outcome()
+	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{}))
+	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
+		allPodsRunningStep(),
+		podsPerZoneStepOf(podsPerZoneWhenEven),
+		nodesFailStepOf(moreNodesThanTheTopologyHolds),
+	}))
+}
+
 func TestAWhenAskingForMoreFailingNodesThanTheTopologyHolds_ShouldEndTheScenarioNamingThatStep(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	ending := aScenarioOver(onePodPerNodeOf(declared))
 	ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 
 	ending.When().NodesFail(Nodes(moreNodesThanTheTopologyHolds))
 	ending.Then().AllPodsRunning()
@@ -515,7 +546,7 @@ func TestAWhenAskingForMoreFailingNodesThanTheTopologyHolds_ShouldEndTheScenario
 	expect.Expect(t, ended.EndedAt).To(expect.Equal(nodesFailStepOf(moreNodesThanTheTopologyHolds)))
 	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
 		topologyStepOf(twoZones, twoNodesPerZone),
-		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
 		nodesFailStepOf(moreNodesThanTheTopologyHolds),
 	}))
 	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
@@ -526,7 +557,7 @@ func TestAThenReadingAFailureWithNoWhenBeforeIt_ShouldEndTheScenarioNamingThatTh
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	ending := aScenarioOver(onePodPerNodeOf(declared))
 	ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode)).SpreadEvenly(OverZones, OverNodes)
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 
 	ending.Then().NoPodsOnTheFailedNodes()
 	ending.Then().AllPodsRunning()
@@ -535,7 +566,7 @@ func TestAThenReadingAFailureWithNoWhenBeforeIt_ShouldEndTheScenarioNamingThatTh
 	expect.Expect(t, ended.EndedAt).To(expect.Equal(noPodsOnTheFailedNodesStep()))
 	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
 		topologyStepOf(twoZones, twoNodesPerZone),
-		evenlySpreadWorkloadStepOf(podsOverEveryNode),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
 		noPodsOnTheFailedNodesStep(),
 	}))
 	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))

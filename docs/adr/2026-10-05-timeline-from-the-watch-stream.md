@@ -35,7 +35,7 @@ A Timeline the lab cannot write is the lab's own failure, not the Scenario's: th
 
 Every change the API server pushed before the Scenario ended is in the Timeline. Stopping the record cancels the five watches and drains each stream to its close, so a test reads a complete Timeline without a wait of its own.
 
-The Even spread Scenario records around 150 entries. A run prints a summary of them and the whole record on request, per [ADR: A run prints a Timeline summary derived from the record](2026-10-05-timeline-summary-derived-from-the-record.md).
+The Resilient placement Scenario records around 150 entries. A run prints a summary of them and the whole record on request, per [ADR: A run prints a Timeline summary derived from the record](2026-10-05-timeline-summary-derived-from-the-record.md).
 
 Timeline files accumulate until an engineer deletes them, against the lab's preference for a run that leaves nothing behind. Retention is an open question in the PRD.
 

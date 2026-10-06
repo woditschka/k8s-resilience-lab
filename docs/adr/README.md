@@ -74,3 +74,4 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-05 | [A Timeline is recorded from the API's watch stream and filed as JSON Lines](2026-10-05-timeline-from-the-watch-stream.md) | Accepted |
 | 2026-10-05 | [A run prints a Timeline summary derived from the record](2026-10-05-timeline-summary-derived-from-the-record.md) | Accepted |
 | 2026-10-05 | [A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md) | Accepted |
+| 2026-10-05 | [A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md) | Accepted |

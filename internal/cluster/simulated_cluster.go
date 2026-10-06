@@ -414,9 +414,15 @@ func (c *SimulatedCluster) reportUnresponsive(ctx context.Context, name string) 
 }
 
 // Deploy creates the Workload's Deployment, so the control plane's own
-// controllers produce the Placement.
-func (c *SimulatedCluster) Deploy(ctx context.Context, workload scenario.Workload) error {
-	if _, err := c.client.AppsV1().Deployments(workloadNamespace).Create(ctx, toDeployment(workload), metav1.CreateOptions{}); err != nil {
+// controllers produce the Placement. The accesses are the full accesses the
+// Workload line wrote, each run on the Pod template in the place it was written.
+func (c *SimulatedCluster) Deploy(
+	ctx context.Context,
+	workload scenario.Workload,
+	accesses ...PodSpecAccessInPlace,
+) error {
+	deployed := toDeployment(workload, accesses...)
+	if _, err := c.client.AppsV1().Deployments(workloadNamespace).Create(ctx, deployed, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("deploy the Workload %s: %w", workload.Name(), err)
 	}
 

@@ -17,9 +17,9 @@ import (
 // the same Scenario are what two invocations of the lab produce, and two
 // Scenarios of one run are what the lab's own list holds.
 const (
-	theScenarioName        = "even-spread"
-	itsCluster             = "k8s-resilience-lab-even-spread-7f3a9c"
-	itsClusterInAnotherRun = "k8s-resilience-lab-even-spread-b1d20e"
+	theScenarioName        = "resilient-placement"
+	itsCluster             = "k8s-resilience-lab-resilient-placement-7f3a9c"
+	itsClusterInAnotherRun = "k8s-resilience-lab-resilient-placement-b1d20e"
 	anotherScenarioName    = "a-zone-failure"
 	itsOwnCluster          = "k8s-resilience-lab-a-zone-failure-4c81fa"
 	someKubernetesVersion  = "v1.36.1"
@@ -148,7 +148,7 @@ func TestAFolderTheLabCannotWrite_ShouldLeaveItsPathAndItsReasonAndFileNoEntry(t
 
 func TestAClusterNameThatIsNoPathElement_ShouldBeRefusedRatherThanFiledElsewhere(t *testing.T) {
 	names := map[string]string{
-		"a name holding a path separator":   "even-spread/../../etc/passwd",
+		"a name holding a path separator":   "resilient-placement/../../etc/passwd",
 		"a name that is a parent reference": "..",
 		"no name at all":                    "",
 	}

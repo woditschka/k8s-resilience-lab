@@ -33,8 +33,9 @@ const (
 	callAtLine   = 5
 	callAtColumn = 18
 
-	// declaredType is the type scannedSource writes on the one constant that names
-	// one, which is what a rule over a declaration of a named type reads.
+	// declaredType is the named type the scanned sources write — on the one constant
+	// of scannedSource that names a type, which is what a rule over a declaration of
+	// a named type reads, and on the parameter chainedSource chains its call off.
 	declaredType = "Name"
 )
 
@@ -89,7 +90,50 @@ func Scan(into *Decoded, from string) {
 	_ = from
 }
 `
+
+	// chainedSource holds a method chained onto a call, the shape a Scenario writes
+	// its steps in, so a scan of it reports the expression each name is selected
+	// from where that expression is a call rather than a plain name.
+	chainedSource = `package probed
+
+func Chain(step Name) {
+	step.Given().Workload(limit)
+}
+`
+
+	// literalSource passes a function literal to a call, the shape a Scenario
+	// writes full access in, so a scan of it reports the names that literal uses
+	// and not the parameter it declares for itself.
+	literalSource = `package probed
+
+func Reach(step Name) {
+	step.Customize(func(settings *Decoded) {
+		settings.Field = limit
+	})
+}
+`
+
+	// literalResultSource passes a function literal that names its own result as
+	// well, which is the other list a function type declares names in. No Scenario
+	// writes one today; the rules this package serves read every function literal of
+	// the surface they scan, so both lists are read the same way. The body writes
+	// that result nowhere, so the list the literal declares it in is the one place
+	// the scan can read it from.
+	literalResultSource = `package probed
+
+func Report(step Name) {
+	step.Customize(func(settings *Decoded) (reported error) {
+		settings.Field = limit
+
+		return
+	})
+}
+`
 )
+
+// theLiteralParameter is the name those function literals declare for their
+// parameter, which the declarations holding them write nowhere themselves.
+const theLiteralParameter = "settings"
 
 func TestAPackageImportingADeniedPath_ShouldBeNamedWithThePathItImports(t *testing.T) {
 	probed := aModuleWhoseFilesAre(t, map[string]string{"decode.go": importingSource})
@@ -191,19 +235,152 @@ func TestAScannedGoFile_ShouldReportItsImportsAndEveryDeclarationItHolds(t *test
 		Imports: []string{importedPath},
 		Declarations: []modulerules.Declaration{
 			{Kind: modulerules.TypeDeclaration, Name: "Decoded", Exported: true},
-			{Kind: modulerules.TypeDeclaration, Name: "Name", Exported: true},
+			{
+				Kind:     modulerules.TypeDeclaration,
+				Name:     "Name",
+				Exported: true,
+				Names:    []modulerules.UsedName{{Name: "string"}},
+			},
 			{Kind: modulerules.ConstDeclaration, Name: "limit"},
-			{Kind: modulerules.ConstDeclaration, Name: "Labelled", Exported: true, Type: declaredType},
-			{Kind: modulerules.VarDeclaration, Name: "Decoder", Exported: true},
+			{
+				Kind:     modulerules.ConstDeclaration,
+				Name:     "Labelled",
+				Exported: true,
+				Type:     declaredType,
+				Names:    []modulerules.UsedName{{Name: declaredType}},
+			},
+			{
+				Kind:     modulerules.VarDeclaration,
+				Name:     "Decoder",
+				Exported: true,
+				Names:    []modulerules.UsedName{{Qualifier: "json", Name: "NewDecoder"}},
+			},
 			{
 				Kind:       modulerules.FuncDeclaration,
 				Name:       "Scan",
 				Exported:   true,
 				Parameters: []modulerules.Parameter{{Name: "into", Type: "*Decoded"}, {Name: "from", Type: "string"}},
-				Statements: []string{"Decoder(nil)", "_ = from"},
+				Statements: []modulerules.Statement{
+					{
+						Written:   "Decoder(nil)",
+						Name:      "Decoder",
+						Call:      true,
+						Arguments: []modulerules.Statement{{Written: "nil", Name: "nil"}},
+					},
+					{Written: "_ = from"},
+				},
+				Names: []modulerules.UsedName{
+					{Name: "into"}, {Name: "Decoded"}, {Name: "from"}, {Name: "string"},
+					{Name: "Decoder"}, {Name: "nil"},
+				},
 			},
 		},
 	}}))
+}
+
+func TestAScannedMethodChain_ShouldReportEveryExpressionItsNamesAreSelectedFrom(t *testing.T) {
+	probed := aModuleWhoseFilesAre(t, map[string]string{"chain.go": chainedSource})
+
+	scanned, err := modulerules.ScanGoFiles(probed, modulerules.ProductionGoFilesOnly)
+	if err != nil {
+		t.Fatalf("scan the Go files under %s: %v", probed, err)
+	}
+
+	theStep := modulerules.Statement{Written: "step", Name: "step"}
+	theGivenCall := modulerules.Statement{
+		Written:   "step.Given()",
+		Name:      "Given",
+		On:        &theStep,
+		Arguments: []modulerules.Statement{},
+		Call:      true,
+	}
+	expect.Expect(t, scanned).To(expect.Equal([]modulerules.GoFile{{
+		Path:    filepath.Join(probed, "chain.go"),
+		Package: probedModulePath,
+		Imports: []string{},
+		Declarations: []modulerules.Declaration{{
+			Kind:       modulerules.FuncDeclaration,
+			Name:       "Chain",
+			Exported:   true,
+			Parameters: []modulerules.Parameter{{Name: "step", Type: declaredType}},
+			Statements: []modulerules.Statement{{
+				Written:   "step.Given().Workload(limit)",
+				Name:      "Workload",
+				On:        &theGivenCall,
+				Arguments: []modulerules.Statement{{Written: "limit", Name: "limit"}},
+				Call:      true,
+			}},
+			Names: []modulerules.UsedName{
+				{Name: "step"},
+				{Name: declaredType},
+				{Qualifier: theGivenCall.Written, Name: "Workload"},
+				{Qualifier: theStep.Written, Name: "Given"},
+				{Name: "limit"},
+			},
+		}},
+	}}))
+}
+
+// Neither list a function literal declares names in is a name the declaration
+// holding it writes: the expected names below hold the parameter's own type and
+// the result's, and neither "settings" nor "reported" on its own.
+func TestADeclarationHoldingAFunctionLiteral_ShouldReportTheNamesItUsesAndNotTheOnesThatLiteralDeclares(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		used   []modulerules.UsedName
+	}{
+		{
+			name:   "a function literal declaring a parameter",
+			source: literalSource,
+			used: []modulerules.UsedName{
+				{Name: "step"},
+				{Name: declaredType},
+				{Qualifier: "step", Name: "Customize"},
+				{Name: "Decoded"},
+				{Qualifier: theLiteralParameter, Name: "Field"},
+				{Name: "limit"},
+			},
+		},
+		{
+			name:   "a function literal naming its own result as well",
+			source: literalResultSource,
+			used: []modulerules.UsedName{
+				{Name: "step"},
+				{Name: declaredType},
+				{Qualifier: "step", Name: "Customize"},
+				{Name: "Decoded"},
+				{Name: "error"},
+				{Qualifier: theLiteralParameter, Name: "Field"},
+				{Name: "limit"},
+			},
+		},
+	}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			probed := aModuleWhoseFilesAre(t, map[string]string{"reach.go": one.source})
+
+			scanned, err := modulerules.ScanGoFiles(probed, modulerules.ProductionGoFilesOnly)
+			if err != nil {
+				t.Fatalf("scan the Go files under %s: %v", probed, err)
+			}
+
+			expect.Expect(t, theOneDeclarationOf(t, scanned).Names).To(expect.Equal(one.used))
+		})
+	}
+}
+
+// theOneDeclarationOf is the single declaration of a single scanned file, which a
+// rule read on one declaration alone is asserted over.
+func theOneDeclarationOf(t *testing.T, scanned []modulerules.GoFile) modulerules.Declaration {
+	t.Helper()
+
+	if len(scanned) != 1 || len(scanned[0].Declarations) != 1 {
+		t.Fatalf("one scanned file holding one declaration, but: %+v", scanned)
+	}
+
+	return scanned[0].Declarations[0]
 }
 
 func TestAGoFileOfTestsAlone_ShouldBeScannedAtTheWiderFileSetAlone(t *testing.T) {

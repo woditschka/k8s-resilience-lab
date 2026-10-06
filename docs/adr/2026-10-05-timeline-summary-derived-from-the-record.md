@@ -4,7 +4,7 @@
 
 ## Context
 
-The Even spread Scenario records around 150 entries, and about 60% of them are the lab's own setup: its Nodes registering and the probe Pods provisioning asks the scheduler with. Printing every entry buries the Placement a person came to read (REQ-SIM-005, G-5).
+The Resilient placement Scenario records around 150 entries, and about 60% of them are the lab's own setup: its Nodes registering and the probe Pods provisioning asks the scheduler with. Printing every entry buries the Placement a person came to read (REQ-SIM-005, G-5).
 
 The recording and the Timeline file stay as they are. Two later slices read the same record: the live view (G-2) and a query path over a filed Timeline, per [ADR: A Timeline is recorded from the API's watch stream and filed as JSON Lines](2026-10-05-timeline-from-the-watch-stream.md).
 

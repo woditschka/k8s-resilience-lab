@@ -20,7 +20,7 @@ The lab serves two uses from one body of behavior. Unattended, it runs each Scen
 | G-1 | Placement under a declared Topology is verified automatically, with no real cluster involved. | Every Scenario runs unattended on a developer machine and in a build, needing only a container runtime. |
 | G-2 | The behavior each Scenario asserts is also demonstrable live. | An engineer starts the lab, watches the Placement of a running Workload, and injects a Failure without editing code. |
 | G-3 | A Workload's survival of a Failure is judged against a stated threshold. | Each Scenario names the Required Capacity it expects and judges it immediately after the Failure and again after Placement settles. |
-| G-4 | Writing and reading a Scenario takes no knowledge of the lab's machinery. | A Scenario is a sequence of Given, When and Then Steps and nothing else, and an engineer finds every Scenario in one place. |
+| G-4 | A Scenario is written and read in one vocabulary. | Every name in a Scenario is one the lab offers Scenarios, each line is a Step, and every Scenario sits in one place. |
 | G-5 | What happened inside a Scenario's Simulated Cluster is explainable after the run. | Every Scenario leaves a Timeline naming each Node, Pod and Workload change and the control plane's reason for each Placement. |
 
 ## Non-Goals
@@ -39,9 +39,9 @@ The lab serves two uses from one body of behavior. Unattended, it runs each Scen
 ### Simulated cluster lab
 
 <a id="req-sim-001"></a>
-The lab brings up a Simulated Cluster of its own for every Scenario and provisions that Scenario's Topology into it before any Workload is deployed `[REQ-SIM-001]`. Each Scenario names the Topology it provisions, the Workload it deploys with the rules that constrain where its Pods may land, and the Placement it asserts `[REQ-SIM-001]`. The lab reports that Placement per Zone and per Node, counting the Pods that are Running and the Pods that stay Pending `[REQ-SIM-001]`. Zone and Node names follow from the Topology alone, so every run of the same Topology reports the same names `[REQ-SIM-001]`. Each Zone is numbered from one in the order the Topology declares it, and each Node from one within its Zone `[REQ-SIM-001]`. A reported name therefore states the position its Zone or Node holds `[REQ-SIM-001]`. A Scenario's Simulated Cluster is removed when the Scenario ends, also when it fails `[REQ-SIM-001]`. No Node or Pod of an earlier Scenario can be mistaken for a current one `[REQ-SIM-001]`.
+The lab brings up a Simulated Cluster of its own for every Scenario and provisions that Scenario's Topology into it before any Workload is deployed `[REQ-SIM-001]`. Each Scenario names the Topology it provisions, the Workload it deploys with the Pod specification that Workload declares, and the Placement it asserts `[REQ-SIM-001]`. The lab reports that Placement per Zone and per Node, counting the Pods that are Running and the Pods that stay Pending `[REQ-SIM-001]`. Zone and Node names follow from the Topology alone, so every run of the same Topology reports the same names `[REQ-SIM-001]`. Each Zone is numbered from one in the order the Topology declares it, and each Node from one within its Zone `[REQ-SIM-001]`. A reported name therefore states the position its Zone or Node holds `[REQ-SIM-001]`. A Scenario's Simulated Cluster is removed when the Scenario ends, also when it fails `[REQ-SIM-001]`. No Node or Pod of an earlier Scenario can be mistaken for a current one `[REQ-SIM-001]`.
 
-The lab's main Scenario is Even spread. It provisions three Zones with three Nodes each, which leaves two Nodes in a Zone once one of its Nodes is lost `[REQ-SIM-001]`. Its nine-Pod Workload declares even spread over Zones and over Nodes, and the Scenario asserts three Pods in every Zone and one Pod on every Node `[REQ-SIM-001]`.
+The lab's simplest Scenario is Resilient placement, named for the intent its Workload declares. It provisions three Zones with three Nodes each, which leaves two Nodes in a Zone once one of its Nodes is lost `[REQ-SIM-001]`. Its nine-Pod Workload declares the Resilient placement Pod specification, and the Scenario asserts three Pods in every Zone and one Pod on every Node `[REQ-SIM-001]`.
 
 Every run reports the Kubernetes version its Simulated Cluster mirrors `[REQ-SIM-001]`. An engineer names a version for a single run, and a run that names none mirrors the lab's pinned default `[REQ-SIM-001]`. A run manages only its own Simulated Cluster in the machine's container runtime: nothing else there is pulled, started, stopped or removed `[REQ-SIM-001]`. Two runs at once on one machine are no exception, so neither touches the other's Simulated Cluster `[REQ-SIM-001]`.
 
@@ -59,8 +59,8 @@ The lab also accounts for what it depends on and for what it leaves open. The on
 
 **Done when:**
 
-- `[REQ-SIM-001]` given no Simulated Cluster is up, when Even spread runs, then the lab reports a Topology of three Zones with three Nodes each, every Node Ready.
-- `[REQ-SIM-001]` given Even spread's Topology, when its nine-Pod Workload is deployed, then the reported Placement is Settled at nine Running Pods, three in every Zone and one on every Node.
+- `[REQ-SIM-001]` given no Simulated Cluster is up, when Resilient placement runs, then the lab reports a Topology of three Zones with three Nodes each, every Node Ready.
+- `[REQ-SIM-001]` given Resilient placement's Topology, when its nine-Pod Workload is deployed, then the reported Placement is Settled at nine Running Pods, three in every Zone and one on every Node.
 - `[REQ-SIM-001]` given an earlier run created Nodes and Pods, when a run starts, then the reported Placement names only the Nodes and Pods of the current run.
 - `[REQ-SIM-001]` given the same Topology, when two runs are compared, then both report the same Zone and Node names.
 - `[REQ-SIM-001]` given a Topology of three Zones, when a run reports its Placement, then each Zone and each Node is named by its position, counted from one.
@@ -94,18 +94,60 @@ The lab also accounts for what it depends on and for what it leaves open. The on
 
 **ADR:** [ADR: Kubernetes version pin](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: The lab provisions the Simulated Cluster it drives](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: Each Scenario provisions its own Simulated Cluster](adr/2026-10-04-cluster-per-scenario.md) · [ADR: A Scenario's Workload declares the spread of its own Pods](adr/2026-10-04-scenario-declared-pod-spread.md)  ·  **Design:** [system-design.md](system-design.md)
 
-### Surviving a Node Failure
+### Declaring a Workload's Pods
 
-<a id="req-sim-008"></a>
-A Scenario also injects a Failure and judges the Placement that settles next. Node loss starts from Even spread's Topology and Workload, then stops one Node responding, as a machine does when it hangs or loses its network `[REQ-SIM-008]`. That Node stays in the cluster, and the control plane moves its Pods away after a waiting time `[REQ-SIM-008]`. The lab sets that waiting time to a few seconds rather than the Kubernetes default, and every run reports it `[REQ-SIM-008]`. A Scenario therefore states no waiting time of its own `[REQ-SIM-008]`.
+<a id="req-sim-009"></a>
+A Scenario states the intent behind its Workload rather than the settings that carry it out. It declares one of the lab's predefined Pod specifications, and that specification holds every setting the Workload's Pods are deployed with `[REQ-SIM-009]`. A Workload is configured that one way and no other `[REQ-SIM-009]`. The lab predefines one specification per intent, so a reader sees what a Scenario demonstrates without reading settings `[REQ-SIM-009]`.
 
-Node loss says how many Nodes fail, and the lab picks them the same way on every run and reports which `[REQ-SIM-008]`. The Step that injects the Failure carries no Node name, so the failing Node is readable from the Scenario's own Steps `[REQ-SIM-008]`.
+A predefined specification holds the settings that decide where a Workload's Pods land and when they leave a Node, and no other setting `[REQ-SIM-009]`. An engineer who opens a predefined specification reads which setting it sets and to which value `[REQ-SIM-009]`. Each setting carries the name Kubernetes gives it, so the definition reads as the configuration a manifest would state `[REQ-SIM-009]`. The settings the lab adds itself stand in that definition too, so one place holds the whole of what decides a Placement `[REQ-SIM-009]`.
 
-Once the Placement settles again, Node loss asserts nine Running Pods, three in every Zone, and none on the Node that stopped responding `[REQ-SIM-008]`. One surviving Node then holds two Pods, so Node loss asserts no Placement of one Pod per Node `[REQ-SIM-008]`.
+Resilient placement spreads a Workload's Pods evenly over the Zones and over the Nodes, and both of the lab's Scenarios declare it `[REQ-SIM-009]`. Default placement declares nothing about where Pods may land, so the scheduler alone decides `[REQ-SIM-009]`. Where those Pods land is not predictable before the run, and a Scenario declaring it asserts only what holds for every Placement `[REQ-SIM-009]`. The lab offers it as the deliberately weak counterpart to Resilient placement `[REQ-SIM-009]`.
+
+A Scenario also changes a predefined specification before its Workload is deployed. It names zero or more Customizations with the specification it declares, and each changes the settings it names `[REQ-SIM-009]`. A Customization leaves the specification it was applied to as it was, so no other Workload declaring that specification is affected `[REQ-SIM-009]`. The Customizations apply in the order written, and a later one wins where two name one setting `[REQ-SIM-009]`. A Customization names a setting the way a predefined definition names it, under the name Kubernetes gives it `[REQ-SIM-009]`. The lab's own vocabulary names the settings that decide where a Scenario's Pods land, and the waiting time before Pods leave an unresponsive Node stays the lab's own `[REQ-SIM-009]`.
+
+A Scenario that needs a setting the lab's own vocabulary does not name reaches every Kubernetes Pod setting instead, as one more Customization of the specification it declares `[REQ-SIM-009]`. Full access is a Customization like any other: it yields a changed copy and applies in its turn among the others `[REQ-SIM-009]`. It names each setting as Kubernetes names it, so a Scenario using it reads partly in Kubernetes' own vocabulary `[REQ-SIM-009]`. What the lab itself depends on holds whatever full access leaves out `[REQ-SIM-009]`. A Workload's Pods are still reported as that Workload's, and the waiting time before they leave an unresponsive Node is still the lab's, whatever full access names `[REQ-SIM-009]`. No Scenario of the lab uses full access, which arrives with the Scenario needing a setting the vocabulary lacks `[REQ-SIM-009]`.
 
 **Done when:**
 
-- `[REQ-SIM-008]` given Even spread's Topology and Workload are Settled, when one Node stops responding, then that Node's Pod is moved away within a few seconds.
+- `[REQ-SIM-009]` given any Scenario of the lab, when its Workload line is read, then it declares one predefined Pod specification, with zero or more Customizations of it and nothing else.
+- `[REQ-SIM-009]` given a Workload declaring a specification it customizes, when the settings its Pods were deployed with are read back, then the Customization's settings stand and the others stand unchanged.
+- `[REQ-SIM-009]` given one Workload customized a specification, when a second Workload declares the same specification, then its Pods are deployed with the predefined settings.
+- `[REQ-SIM-009]` given a predefined specification, when its definition is read, then every setting it holds stands there with the value it sets, under the name Kubernetes gives that setting.
+- `[REQ-SIM-009]` given a Workload declaring a predefined specification, when the settings its Pods were deployed with are read back, then they are the ones that specification's definition names.
+- `[REQ-SIM-009]` given the Resilient placement Scenario's Topology and its nine-Pod Workload declaring that specification, when the Placement settles, then three Pods are in every Zone and one on every Node.
+- `[REQ-SIM-009]` given the same Topology and a nine-Pod Workload declaring Default placement, when the Placement settles, then every Pod is Running and no count per Zone is promised.
+- `[REQ-SIM-009]` given two Workloads of one Scenario declaring different specifications, when both are deployed, then each is placed by the specification it declares.
+- `[REQ-SIM-009]` given a Workload customized with full access, when the settings its Pods carry are read back, then every setting full access named stands, apart from the lab's waiting time.
+- `[REQ-SIM-009]` given full access written beside a Customization of the lab's own vocabulary, when both name one setting, then the one written later stands.
+- `[REQ-SIM-009]` given full access that leaves out the waiting time before Pods leave an unresponsive Node, when the Workload is deployed, then that waiting time still holds.
+- `[REQ-SIM-009]` given a Workload customized with full access, when its Placement is reported, then its Pods are counted as that Workload's.
+
+**Edge cases:**
+
+1. A Workload declaring Default placement on a Topology too small for its Pods. The Pods the scheduler cannot place stay Pending with its reason.
+2. A Workload declaring Resilient placement on a Topology of one Zone. Its Pods still land one per Node, and that Zone holds them all.
+3. Two Workloads of one Scenario declare the same specification. Each is spread on its own, without the other's Pods counting towards its Skew.
+4. A specification declares no spread of its own. Its definition still names the settings the lab adds, so no specification is empty.
+5. Two Customizations of one Workload name one setting. The specification deployed holds the value the later one sets.
+6. A Customization names a setting its specification does not hold. The specification gains that setting, rather than the Customization being refused.
+7. Full access leaves out a setting the lab depends on. That setting holds and the Workload is deployed, rather than the Scenario ending at its Step.
+8. Full access names a setting the control plane refuses. The Scenario ends at the Step that deployed its Workload, as a refused value of any Customization does.
+
+**ADR:** [ADR: A Workload declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md) · [ADR: A Scenario's Workload declares the spread of its own Pods](adr/2026-10-04-scenario-declared-pod-spread.md)  ·  **Design:** [system-design.md](system-design.md)
+
+### Surviving a Node Failure
+
+<a id="req-sim-008"></a>
+A Scenario also injects a Failure and judges the Placement on both sides of it. Node loss starts from the Resilient placement Scenario's Topology and Workload, then stops one Node responding, as a machine does when it hangs or loses its network `[REQ-SIM-008]`. That Node stays in the cluster, and the control plane moves its Pods away after a waiting time `[REQ-SIM-008]`. The lab sets that waiting time to a few seconds rather than the Kubernetes default, and every run reports it `[REQ-SIM-008]`. A Scenario therefore states no waiting time of its own `[REQ-SIM-008]`.
+
+Node loss says how many Nodes fail, and the lab picks them the same way on every run and reports which `[REQ-SIM-008]`. The Step that injects the Failure carries no Node name, so the failing Node is readable from the Scenario's own Steps `[REQ-SIM-008]`.
+
+Node loss judges the Placement twice. Before the Failure it asserts nine Running Pods and three in every Zone `[REQ-SIM-008]`. Once the Placement settles again, it asserts those two outcomes and no Pod on the Node that stopped responding `[REQ-SIM-008]`. One surviving Node then holds two Pods, so Node loss asserts no Placement of one Pod per Node `[REQ-SIM-008]`.
+
+**Done when:**
+
+- `[REQ-SIM-008]` given Resilient placement's Topology and Workload are Settled, when the Placement is judged before any Failure, then nine Pods are Running and three sit in every Zone.
+- `[REQ-SIM-008]` given Resilient placement's Topology and Workload are Settled, when one Node stops responding, then that Node's Pod is moved away within a few seconds.
 - `[REQ-SIM-008]` given a Node has stopped responding, when the Placement settles again, then nine Pods are Running, three in every Zone, and none on that Node.
 - `[REQ-SIM-008]` given Node loss says one Node fails, when it runs twice, then the same Node fails in both runs and the run reports which.
 - `[REQ-SIM-008]` given any run, when it starts, then it reports that Pods leave an unresponsive Node sooner than in a default cluster.
@@ -157,15 +199,16 @@ Every Scenario of a run also leaves its Timeline in a file of its own, without a
 <a id="req-sim-006"></a>
 An engineer writes a Scenario as a short sequence of Steps, one per line `[REQ-SIM-006]`. A Given sets up the Topology and the Workload, a When injects a Failure, a Then asserts the Placement outcome `[REQ-SIM-006]`. A Scenario that injects no Failure has no When Step `[REQ-SIM-006]`. A Scenario handles no error of its own `[REQ-SIM-006]`. A Step that cannot be carried out ends the Scenario and names that Step `[REQ-SIM-006]`. A Then the Placement does not meet is reported as a Finding, and the Steps after it still run `[REQ-SIM-006]`.
 
-An engineer opening the repository finds every Scenario in one place `[REQ-SIM-006]`. The machinery that runs them is kept apart from them `[REQ-SIM-006]`. A README beside the Scenarios names each one and the outcome it asserts `[REQ-SIM-006]`.
+Every name a Scenario uses is one the lab offers Scenarios, so one vocabulary carries every Step `[REQ-SIM-006]`. A Scenario reaching every Kubernetes Pod setting names Kubernetes' own settings there, which is the one exception `[REQ-SIM-006]`. An engineer opening the repository finds every Scenario in one place `[REQ-SIM-006]`. The machinery that runs them is kept apart from them `[REQ-SIM-006]`. A README beside the Scenarios names each one and the outcome it asserts `[REQ-SIM-006]`.
 
 **Done when:**
 
 - `[REQ-SIM-006]` given any Scenario of the lab, when its lines are read, then each line is one Given, When or Then Step and no line handles an error.
+- `[REQ-SIM-006]` given any Scenario of the lab, when the names in its lines are read, then each is a name the lab offers, apart from the settings full access names.
 - `[REQ-SIM-006]` given a Scenario that injects no Failure, when it runs, then it carries no When Step and still reports its Placement.
 - `[REQ-SIM-006]` given a Step that cannot be carried out, when the Scenario runs, then it ends, names that Step, and runs no later Step.
 - `[REQ-SIM-006]` given a Then the Placement does not meet, when the Scenario runs, then the run reports the Finding and the later Steps still run.
-- `[REQ-SIM-006]` given Even spread written as Steps, when it runs, then it reports the Placement REQ-SIM-001 asserts.
+- `[REQ-SIM-006]` given Resilient placement written as Steps, when it runs, then it reports the Placement REQ-SIM-001 asserts.
 - `[REQ-SIM-006]` given an engineer opening the repository, when they look for the Scenarios, then one place holds every Scenario and nothing of the machinery.
 - `[REQ-SIM-006]` given that place, when an engineer reads its README, then the README names every Scenario and the outcome each asserts.
 
@@ -190,3 +233,8 @@ An engineer opening the repository finds every Scenario in one place `[REQ-SIM-0
 - Which Scenario first points at a Node by its position in the Topology its Given declared, rather than saying how many Nodes fail. Both forms are settled vocabulary; only the count form exists today, and a position the Topology does not hold has no stated outcome.
 - What limits how many Zones a Topology may name. The lab refuses a count above a limit of its own, and a numbered Zone name puts no bound on the count.
 - Which Failure the Scenario after Node loss injects — a Pod, a whole Zone, or a Node removed from the cluster rather than left unresponsive.
+- Whether a Scenario of the lab demonstrates a Customization or full access, and which intent it would show. No Scenario names either today, and each arrives with the Scenario that needs it.
+- Whether a Scenario changes a Workload's specification after that Workload is deployed. Today a Customization applies before deployment only, and a later change is a rollout the control plane carries out under its update strategy.
+- Whether the lab says anything when full access leaves out a setting the lab depends on. Today that setting holds and the run stays silent about it, so a Scenario's own line is where an engineer reads what it asked for.
+- Whether a run reports the specification each Workload was deployed with, and its settings after Customization.
+- Which further specifications the lab predefines, and which further settings one may hold and a Customization may name. Zone spread only and Soft spread each arrive with the Scenario that uses them, and so does affinity between a Workload's Pods. Also open: what a Scenario asserts when it demonstrates a deliberately weak specification.

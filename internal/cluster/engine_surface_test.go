@@ -505,7 +505,7 @@ func TestARun_ShouldTouchNoContainerBesidesItsOwnSimulatedCluster(t *testing.T) 
 	engine := requireEngine(t)
 	standingBy := containersOnTheEngine(t, engine)
 
-	provisioned, err := Provision(t.Context(), engine, DefaultKubernetesVersion(), evenSpreadScenario)
+	provisioned, err := Provision(t.Context(), engine, DefaultKubernetesVersion(), resilientPlacementScenario)
 	if err != nil {
 		t.Fatalf("provision a Simulated Cluster beside whatever else runs here: %v", err)
 	}

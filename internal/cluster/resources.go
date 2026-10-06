@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	// zoneLabel and hostnameLabel are the well-known labels a spread rule's
-	// domain is expressed as: a Zone is a failure domain, a Node is one host.
-	zoneLabel     = "topology.kubernetes.io/zone"
-	hostnameLabel = "kubernetes.io/hostname"
+	// zoneLabel and hostnameLabel are the well-known labels a Node carries its
+	// Zone and its own name under: a Zone is a failure domain, a Node is one host.
+	// They are spelled in internal/scenario, beside the spread setting that counts
+	// its domains over one of them, so the lab holds one spelling of each.
+	zoneLabel     = scenario.ZoneLabel
+	hostnameLabel = scenario.HostnameLabel
 
 	// workloadLabel carries a Pod's Workload name, so a spread constraint counts
 	// one Workload's Pods and an observation reads one Workload's Pods.
@@ -61,23 +63,6 @@ const (
 	probeLabelValue    = "provisioning"
 	probePodNamePrefix = "provisioning-probe-"
 	probeContainer     = "probe"
-)
-
-// UnresponsiveNodeWait is how long a Pod stays on a Node that stopped
-// responding, and DefaultUnresponsiveNodeWait the admission default the lab's
-// own value replaces.
-//
-// The lab's value is short so a Scenario stays fast: it is above the interval a
-// Placement is polled at and far below the default, which is longer than the whole
-// settle wait. It is only part of what a run waits — the control plane's own
-// period for noticing adds seconds on top, and the lab sets that period too,
-// through the heartbeat factor its cluster container runs with (runtime.go
-// heartbeatFactorArgument) — so every run prints the settings it makes and claims
-// no total, per
-// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
-const (
-	UnresponsiveNodeWait        = 2 * time.Second
-	DefaultUnresponsiveNodeWait = 300 * time.Second
 )
 
 // observedPhases maps the phases the control plane reports onto the lab's own.
@@ -174,18 +159,35 @@ func toNode(node scenario.Node) *corev1.Node {
 	}
 }
 
+// PodSpecAccess is full access: a Scenario's own change to the Kubernetes Pod
+// specification, for a setting the lab's own vocabulary does not name. It is
+// declared here, with the mapper that runs it, so internal/scenario holds no
+// function value and internal/lab names this type rather than Kubernetes' own,
+// per docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
+type PodSpecAccess func(pod *corev1.PodSpec)
+
+// PodSpecAccessInPlace is one full access in the place a Workload line wrote it:
+// the change itself, and how many of the specification's settings the mapper
+// transcribes before running it. The place is what makes the later of two
+// Customizations naming one Kubernetes field the one that stands.
+type PodSpecAccessInPlace struct {
+	Access        PodSpecAccess
+	AfterSettings int
+}
+
 // toDeployment is the Deployment the lab creates for a Workload, so the control
-// plane's own controllers produce the Placement. Each rule the Workload declares
-// becomes one topology spread constraint on the Pod template; a Workload
-// declaring no rule carries none.
-func toDeployment(workload scenario.Workload) *appsv1.Deployment {
+// plane's own controllers produce the Placement. The Pod specification the
+// Workload declared is transcribed onto the Pod template field by field; the
+// container, the Workload label and the selector are the mapper's own, because a
+// specification is a package-level value and can name neither, per
+// docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
+//
+// The accesses are the full accesses the Workload line wrote, which reach the Pod
+// specification alone: the Deployment, its selector and the label the Workload's
+// Pods are counted by stay beyond them.
+func toDeployment(workload scenario.Workload, accesses ...PodSpecAccessInPlace) *appsv1.Deployment {
 	replicas := int32(workload.Pods())
 	selector := workloadLabels(workload.Name())
-
-	var constraints []corev1.TopologySpreadConstraint
-	for _, rule := range workload.SpreadRules() {
-		constraints = append(constraints, toSpreadConstraint(rule, workload.Name()))
-	}
 
 	return &appsv1.Deployment{
 		Name: workload.Name(), Labels: selector,
@@ -194,56 +196,108 @@ func toDeployment(workload scenario.Workload) *appsv1.Deployment {
 			Selector: &metav1.LabelSelector{MatchLabels: selector},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: selector},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{Name: workloadContainer, Image: workloadImage},
-					},
-					TopologySpreadConstraints: constraints,
-					Tolerations:               toNodeConditionTolerations(),
-				},
+				Spec:       toPodSpec(workload, accesses),
 			},
 		},
 	}
 }
 
-// toSpreadConstraint is the one constraint a spread rule becomes. It is enforced
-// rather than preferred, so an unmet rule is visible as a Pending Pod; it counts
-// only the Nodes whose taints these Pods tolerate; and it selects the Pods by
-// their Workload label, per docs/adr/2026-10-04-scenario-declared-pod-spread.md.
-func toSpreadConstraint(rule scenario.SpreadRule, workloadName string) corev1.TopologySpreadConstraint {
-	honourTaints := corev1.NodeInclusionPolicyHonor
+// toPodSpec is the Pod specification a Workload's Pods are deployed with: the
+// container the mapper owns, the declared settings transcribed in the order the
+// specification holds them, and each full access run in the place it was written,
+// so what it reads is what the settings before it wrote.
+//
+// The tolerations the Pod template carries are the specification's own, written
+// once more after the last full access: they are the lab's, and the waiting time
+// before a Pod leaves an unresponsive Node holds whatever a full access left out,
+// per the same ADR. A toleration a full access writes itself therefore does not
+// stand, which is what keeps that waiting time the lab's to decide.
+func toPodSpec(workload scenario.Workload, accesses []PodSpecAccessInPlace) corev1.PodSpec {
+	declared := workload.PodSpecification()
+	settings := declared.Settings()
 
-	return corev1.TopologySpreadConstraint{
-		MaxSkew:           int32(rule.MaxSkew()),
-		TopologyKey:       topologyKeyOf(rule.Domain()),
-		WhenUnsatisfiable: corev1.DoNotSchedule,
-		LabelSelector:     &metav1.LabelSelector{MatchLabels: workloadLabels(workloadName)},
-		NodeTaintsPolicy:  &honourTaints,
+	pod := corev1.PodSpec{
+		Containers: []corev1.Container{
+			{Name: workloadContainer, Image: workloadImage},
+		},
+	}
+	for transcribed, setting := range settings {
+		runAccessesWrittenAfter(&pod, transcribed, accesses)
+		transcribeSetting(&pod, setting, workload.Name())
+	}
+	runAccessesWrittenAfter(&pod, len(settings), accesses)
+	pod.Tolerations = toTolerations(declared.Tolerations())
+
+	return pod
+}
+
+// runAccessesWrittenAfter runs every full access written once that many settings
+// are transcribed, in the order the Workload line wrote them.
+func runAccessesWrittenAfter(pod *corev1.PodSpec, transcribed int, accesses []PodSpecAccessInPlace) {
+	for _, written := range accesses {
+		if written.AfterSettings == transcribed {
+			written.Access(pod)
+		}
 	}
 }
 
-// toNodeConditionTolerations are the tolerations every Workload's Pod template
-// carries: the two taints the control plane adds to a Node it cannot reach,
-// tolerated for the lab's own waiting time rather than the admission default.
-//
-// The effect tolerated is NoExecute alone, so a Pod stays on a Node that stopped
-// responding for that time and no replacement is scheduled onto it, per
-// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
-func toNodeConditionTolerations() []corev1.Toleration {
-	leavingAfter := int64(UnresponsiveNodeWait.Seconds())
-	nodeConditions := []string{corev1.TaintNodeNotReady, corev1.TaintNodeUnreachable}
+// transcribeSetting transcribes one setting of a specification onto the Pod
+// specification: the one constraint or the one toleration it is, appended in the
+// place the specification holds it. The settings are sealed in internal/scenario,
+// so these two are every kind there is.
+func transcribeSetting(pod *corev1.PodSpec, declared scenario.Setting, workloadName string) {
+	switch setting := declared.(type) {
+	case scenario.TopologySpread:
+		pod.TopologySpreadConstraints = append(pod.TopologySpreadConstraints,
+			toSpreadConstraint(setting, workloadName))
+	case scenario.Toleration:
+		pod.Tolerations = append(pod.Tolerations, toToleration(setting))
+	}
+}
 
-	tolerations := make([]corev1.Toleration, 0, len(nodeConditions))
-	for _, condition := range nodeConditions {
-		tolerations = append(tolerations, corev1.Toleration{
-			Key:               condition,
-			Operator:          corev1.TolerationOpExists,
-			Effect:            corev1.TaintEffectNoExecute,
-			TolerationSeconds: &leavingAfter,
-		})
+// toSpreadConstraint is the one constraint a spread setting becomes, each field
+// as that setting names it. The selector is the mapper's own: it selects the Pods
+// by their Workload label, so a constraint counts one Workload's Pods, per
+// docs/adr/2026-10-04-scenario-declared-pod-spread.md.
+func toSpreadConstraint(declared scenario.TopologySpread, workloadName string) corev1.TopologySpreadConstraint {
+	taintsPolicy := corev1.NodeInclusionPolicy(declared.NodeTaintsPolicy())
+
+	return corev1.TopologySpreadConstraint{
+		MaxSkew:           int32(declared.MaxSkew()),
+		TopologyKey:       declared.TopologyKey(),
+		WhenUnsatisfiable: corev1.UnsatisfiableConstraintAction(declared.WhenUnsatisfiable()),
+		LabelSelector:     &metav1.LabelSelector{MatchLabels: workloadLabels(workloadName)},
+		NodeTaintsPolicy:  &taintsPolicy,
+	}
+}
+
+// toTolerations are the tolerations a specification's toleration settings become,
+// one each and in definition order.
+func toTolerations(declared []scenario.Toleration) []corev1.Toleration {
+	tolerations := make([]corev1.Toleration, 0, len(declared))
+	for _, tolerated := range declared {
+		tolerations = append(tolerations, toToleration(tolerated))
+	}
+	if len(tolerations) == 0 {
+		return nil
 	}
 
 	return tolerations
+}
+
+// toToleration is the one toleration a toleration setting becomes, each field as
+// that setting names it: the taint it names, matched the way it says, for the
+// waiting time it sets rather than the admission default, per
+// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
+func toToleration(declared scenario.Toleration) corev1.Toleration {
+	leavingAfter := declared.TolerationSeconds()
+
+	return corev1.Toleration{
+		Key:               declared.Key(),
+		Operator:          corev1.TolerationOperator(declared.Operator()),
+		Effect:            corev1.TaintEffect(declared.Effect()),
+		TolerationSeconds: &leavingAfter,
+	}
 }
 
 // toUnresponsive is the status of a Node that stopped responding: the status it
@@ -285,15 +339,6 @@ func withoutTheKWOKMarking(labelled map[string]string) map[string]string {
 	delete(unmarked, fakeNodeLabel)
 
 	return unmarked
-}
-
-// topologyKeyOf is the label a spread domain is counted over.
-func topologyKeyOf(domain scenario.SpreadDomain) string {
-	if domain == scenario.SpreadOverNodes {
-		return hostnameLabel
-	}
-
-	return zoneLabel
 }
 
 // readyNodesIn are the observed Nodes the control plane reports Ready. Only a

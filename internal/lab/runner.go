@@ -170,8 +170,9 @@ func runNameOfScenario(steps func(*Scenario)) (string, error) {
 }
 
 // runNameOf is the run name a Scenario's file gives: the stem of that file, with
-// hyphens for underscores, so even_spread.go runs as even-spread. A path that is
-// no Scenario source yields no name rather than a guessed or empty one.
+// hyphens for underscores, so resilient_placement.go runs as
+// resilient-placement. A path that is no Scenario source yields no name rather
+// than a guessed or empty one.
 func runNameOf(file string) (string, error) {
 	stem, isGoFile := strings.CutSuffix(filepath.Base(file), goFileSuffix)
 	if !isGoFile || stem == "" || strings.HasSuffix(stem, testFileStem) {
