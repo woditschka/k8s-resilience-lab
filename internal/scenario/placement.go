@@ -43,6 +43,10 @@ type Pod struct {
 	// Node is the Node this Pod is placed on, empty while it is unplaced.
 	Node  string
 	Phase PodPhase
+	// Ready is whether the control plane reports this Pod's Ready condition true,
+	// which is the condition a Wait for every Pod Ready holds until, per
+	// docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md.
+	Ready bool
 }
 
 // Placed reports whether the control plane has put this Pod on a Node.
@@ -84,6 +88,21 @@ func (p Placement) PodsInPhase(phase PodPhase) []Pod {
 	}
 
 	return inPhase
+}
+
+// PodsNotReady are the observed Pods the control plane does not report Ready, in
+// the order they were observed. A Wait for every Pod Ready names them when the
+// lab's waiting time outlasts it, so a reader of an expired Wait sees which Pods
+// held it open.
+func (p Placement) PodsNotReady() []Pod {
+	var notReady []Pod
+	for _, pod := range p.pods {
+		if !pod.Ready {
+			notReady = append(notReady, pod)
+		}
+	}
+
+	return notReady
 }
 
 // PodsRunningApartFrom are the observed Pods the control plane reports Running on

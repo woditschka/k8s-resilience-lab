@@ -1,0 +1,112 @@
+# A Scenario writes its own Wait, with its Given or as a Step of its own
+
+**Status:** Accepted
+
+## Context
+
+[ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) left every wait implicit: its option 14 had the first Then apply the Topology, deploy the Workload and settle, and every When settle before injecting its Failure. Its option 15, a settle Step a Scenario writes, was declined then — "Scenarios stay fast and need no wait setting".
+
+Shown the Zone loss Scenario's opening lines, the owner revised that: "Look at this sequence: after Given and before Then there is something missing. A When(... status has settled ...) would make the timing and the precondition visible (possible with a timeout)." The time a Scenario waits is the lab's own subject — after a Failure it is how long the cluster took to place the Pods again — and no line of a Scenario reported it.
+
+The owner asked for Kubernetes' words rather than the lab's: "Probably a more Kubernetes-native naming? AllPodsLive, AllPodsReady, AllPodsLiveAndReady?", then "Also WhenAllNodesLive?". And for a shorter form beside the Step of its own: "What we could do in addition, if this is possible: chain? `s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3))` . when - AllNodesReady(). Is this possible with Go and this design?"
+
+Seeing the implemented lines, the owner revised the chained spelling: "This does not fully resonate: `s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3)).When().AllNodesReady()`. How about `.WaitFor().AllNodesReady()`?" A Wait spelled `WaitFor()` chained and `When()` standalone would be two spellings of one Step, with `When` still doing double duty for the Failure.
+
+On the printed time: "'Wait for all Nodes Ready, after 3.0s' should be 'within 3.0s'. This means relative to the last change, not the total elapsed time from the start of the Scenario." The time a Wait reports is already relative to the Step before it. `within` states a bound rather than a measurement.
+
+Kubernetes' Ready is a condition it reports for a Pod and for a Node, and `kubectl rollout status` waits on the Pod one. The lab's Settled is wider: it also holds where Pods stay Pending, or sit Terminating on a Node that stopped responding. KWOK runs no probe, so Live names no state the control plane reports.
+
+Writing the Step surface showed an apply at the Given's own call colliding with that grammar. `Topology(lab.Zones(3), lab.NodesPerZone(3)).NodeCapacity(lab.Pods(2))` is one line whose capacity is known only at the second call, and the chained `.WaitFor()` extends the line further. An apply at the first call therefore creates the same Nodes twice, which the control plane refuses. The Step-surface tests drive a Scenario over no cluster, which an apply at the Given's call would need a double for.
+
+The Wait Step left the time a Wait states for a later slice, and the owner opened it: "Should a When have an implicit or explicit timeout? I think yes; a timeout should fail the test." Then: "Let's make this more user-friendly: lab.Within(15 * time.Second) -> lab.WithinSeconds(15), or even constants?" Whole seconds match Kubernetes' own spelling of a wait. A Scenario imports `internal/lab` alone, and the time it states is its own statement rather than a set to pick from.
+
+The owner then moved the time out of the argument: "Maybe we add a second version of AllPodsReady: AllPodsReadyWithinSeconds(15)?" Challenged once — it doubles the names per Wait and per option, and leaves the typed-argument pattern a Step's mandatory values follow — the owner answered: "True for the framework, but simpler for the user, and AllPodsReady() can just delegate to AllPodsReadyWithinSeconds with the default."
+
+The lab waits its own waiting time whatever a Wait states, so a run reports how long recovery really took. A Wait cancelled at its stated time would report the bound instead of the measurement, which is the lab's own subject.
+
+The owner then drew the line at the refusal rather than at the call. The lab's own refusal — a Zone count above the limit, a minimum above the Pod count — is checkable at the call and names its Given. What the control plane refuses may surface at the Step that reaches the cluster, as long as that Step names what was deployed.
+
+## Options Considered
+
+What a Scenario waits for:
+
+1. **The lab's own predicate** — `PlacementSettles`, which names a state only this lab defines.
+2. **Kubernetes' Ready condition** — `AllPodsReady` and `AllNodesReady`, the states `kubectl` waits on.
+3. **Live, or Live and Ready** — no condition behind Live, since no probe runs.
+
+How a Scenario writes a Wait:
+
+4. **A Step of its own** — `s.WaitFor().AllPodsReady()`, one line.
+5. **Chained on the Given before it** — `s.Given().Topology(...).WaitFor().AllNodesReady()`, the Given's own call offering the one Wait fitting what it declared.
+6. **Folded into the Given** — `s.Given().Topology(...).AllNodesReady()`, which the owner declined as noise.
+
+Where the readiness condition is read:
+
+7. **Inside `AwaitSettled`** — a settled Placement then requires every Pod Ready, which leaves no wait for a Scenario expecting Pods to stay Pending.
+8. **A wait beside it over the same polling loop** — `AwaitSettled` keeps the lab's own predicate.
+
+When the declaration reaches the cluster:
+
+9. **At the first Step after the Given's line**, which this grammar makes a Wait — a line's further calls then reach the cluster once. A control-plane refusal names that Wait rather than the Given.
+10. **At the Given's own line** — the Topology creates its Nodes and returns, the Workload deploys and returns.
+11. **At the Given's first call, with `ApplyTopology` create-or-update** — an optional setting re-applies the same Node names. The apply then tolerates `AlreadyExists`, re-reports the capacity through the status subresource and pays the probe-Pod wait twice.
+12. **At the Given's first call, with every setting a mandatory argument** — no further call re-declares a line, at the cost of the Step grammar [the Scenario ADR](2026-10-03-scenarios-as-go-functions.md) fixed.
+
+How a Wait is spelled:
+
+13. **`When()` both ways** — a Wait is a When Step, and `When` names both the state waited for and the Failure.
+14. **`WaitFor()` both ways** — one call for the chained and the standalone form, Wait a Step kind of its own.
+15. **`WaitFor()` chained, `When()` standalone** — two spellings of one Wait, which the owner declined.
+
+What a Wait's line reports:
+
+16. **`after 3.0s`** — read as the time since the Scenario started, which the owner found hard to reason about.
+17. **`within 3.0s`** — the word a bound takes, spent on a measurement.
+18. **`in 3.0s`** — the measured time, leaving `within` for the bound a later Wait states.
+
+How a Wait states its time:
+
+19. **A typed argument** — `AllPodsReady(lab.WithinSeconds(15))`, one name per Wait and one more argument type.
+20. **A second name per Wait** — `AllPodsReadyWithinSeconds(15)`, the plain name delegating to it.
+21. **A constant set** — `lab.FifteenSeconds`, which names no Scenario's own statement.
+
+What a stated time is measured against:
+
+22. **The wait cancelled at the stated time** — the run then reports the bound rather than the time recovery took.
+23. **The lab's own waiting time waited out, the measured time judged against the stated one** — the run reports both.
+
+Where a stated time the lab cannot honour is caught:
+
+24. **Clamped to the lab's own waiting time** — a miss then reads against a time the lab never waited.
+25. **Refused where it is stated, naming that waiting time** — a Scenario states a time the lab can hold it to.
+
+## Decision
+
+Options 2, 4 and 5, 8 and 9, 14 and 18. A Wait is the fourth Step kind: a Given declares, a When changes the cluster, a Wait waits for a state of it, a Then judges. It is written `WaitFor()`, on the Scenario or on the Given before it. A Given's `WaitFor()` returns a type offering the one Wait that fits what it declared. A chain therefore reaches no other Step, and every Wait is written through `WaitFor()`. The Scenario's own `WaitFor()` offers both Waits, and `When()` keeps the Failures alone. Either form reports the same line, after the Given's own, with the time it took: `Wait for all Pods Ready in 6.5s`. That time is measured from the Step before it, so a reader of a restore time reasons about one Wait rather than about the run. The Step carries it as a value of its own rather than inside its name, so what a Step is named stays what its line says. `within` names no measurement: it is reserved for the bound a Wait states itself, a later slice.
+
+`AllPodsReady` holds until every Pod the Workloads declared reports the Ready condition, `AllNodesReady` until every Node the Topology declared reports it. Beneath either the lab observes that the Placement has stopped changing, so the Thens after a Wait judge a Settled Placement. The Pod wait is a second wait over the polling loop `AwaitSettled` already runs. A Wait for a Placement that settles with Pods Pending is a later slice, and so is a waiting time a Wait names itself.
+
+A Given declares, and the first Step after its line applies what it declared, which this grammar makes a Wait. One line's further calls therefore reach the cluster once, and `ApplyTopology` stays create-only. A Failure When applies nothing and waits for nothing beforehand. It reads the Placement the last Wait reached, which is the moment its Required Capacity is judged at, per [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md). A Then, or a Failure, with no Wait since the Given or the Failure before it ends the Scenario at that Step. A Scenario with no Wait after its Givens therefore ends at its first Then, with nothing deployed. A Wait the lab's waiting time outlasts ends it there, naming what was not Ready. Two Waits in a row are admitted, and a Wait for every Pod before any Workload is declared waits for no Pod.
+
+Options 20, 23 and 25. A Wait states the time it must be reached in as a second name per Wait, `AllPodsReadyWithinSeconds` and `AllNodesReadyWithinSeconds`, in whole seconds, on the Scenario's own `WaitFor()` and on a Given's alike. The plain name delegates to it with the lab's own waiting time, so every Wait is held to a time and a Scenario stating none reads as it did. The time belongs to the name rather than to an argument: a Scenario reads one call, and the Step vocabulary takes no further type.
+
+The lab's own waiting time moves to `internal/scenario`, beside the unresponsive-Node wait already there. It is what a stated time is refused against, so that refusal is the domain core's own and the Step surface carries no bound of its own. A time of no seconds, and one above that waiting time, are refused at the Wait, named with the waiting time the lab can hold it to.
+
+A Wait waits the lab's own waiting time whatever it states, and the time it took is judged against the time it stated once reached. A Wait reached later ends the Scenario at that Step, its line stating both times. A Wait the lab's own waiting time outlasts ends it as before, naming what was not Ready: what held the Wait open is more use than the bound it missed. Both Failure Scenarios state thirty seconds on the Wait after their Failure — some three times the slowest restore measured, and a third of the lab's own waiting time — so a loaded machine reports a restore rather than a Finding. Every run reports the lab's own waiting time at its start, beside the control-plane settings it sets.
+
+## Consequences
+
+Nothing waits silently, and the restore time after a Failure is on a line of the Scenario rather than in the lab. A Scenario of the lab reads one line longer per Wait, and `Then().AllPodsRunning()` leaves all three: right after a Wait for every Pod Ready it says nothing new. It stays offered, for a Scenario that waits on something else. A Given the lab itself refuses is the Step named, its constructor running at the call. A declaration the control plane refuses names the Wait that applied it, with what that Wait applied. The Step-surface tests stay over no cluster, because a Scenario whose Placement is already observed applies nothing. The Ready condition enters the observed Pod, so a Placement compares it and a readiness change counts as the Placement still changing. A Scenario that never Waits reaches no Then: the grammar is explicit in both directions. The Scenario-place rules gain the ordering they read off the sources: a Wait before the first Then and after every Failure. The Step kind and the call opening it differ for a Wait alone. The rule reading a line's kind off its opener therefore carries the four openers, rather than matching the kind's own word. The Workload-line rule admits the Wait chained on it. KWOK reporting no Ready condition for a fake Pod would have left every Wait to outlast its budget. The slice's first cluster-backed test found the condition reported on every Pod and Node.
+
+A Scenario states a restore time, so the lab judges recovery rather than only reporting it. The two Waits are four names, and a later Wait option multiplies them again: the next one weighs that against the argument form once more. A miss is known only once the Wait is reached, so a Scenario stating a short time still waits the lab's own waiting time out. The judgement is a pure function of two durations, so the Step-surface tests exercise it over no cluster and no clock of their own. The lab's own waiting time leaving `internal/cluster` renames nothing a Scenario reads, and gives `cmd/lab` a settings line it could not print before. A Wait's Step carries the time it was held to beside the time it took, and states it only where it was missed, so a Scenario that meets its time reads as it always did.
+
+## Implementation
+
+**Requirements:** REQ-SIM-006, REQ-SIM-008
+
+## References
+
+- [system-design.md § Contracts](../system-design.md)
+- [ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md)
+- [ADR: Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md)
+- [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md)

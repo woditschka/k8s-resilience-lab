@@ -71,6 +71,11 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 		cluster.NodeHeartbeatFactor, cluster.DefaultNodeHeartbeatFactor)
 	reported.printf("Node eviction rate: %s unresponsive Nodes of a Zone per second, where a default cluster taints %s\n",
 		cluster.NodeEvictionRate, cluster.DefaultNodeEvictionRate)
+	// The lab's own waiting time is no control-plane setting: it is the longest the
+	// lab itself waits for a state of the cluster, and the longest time a Wait may
+	// state, which is what a Wait stating more is refused against.
+	reported.printf("lab waiting time:   at most %s for a state of the cluster, and the most a Wait may state\n",
+		scenario.WaitingTime)
 
 	// The Scenarios the lab holds, in the order the list beside them names: the
 	// command names no Scenario, so adding one touches the Scenarios' place alone.

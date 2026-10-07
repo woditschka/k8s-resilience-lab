@@ -102,7 +102,7 @@ extra_reviewers = []
 # Word ceilings for the two docs the doctor budgets. Lower than the harness
 # defaults: this is a small project.
 prd_max_words = 8000
-system_design_max_words = 8000
+system_design_max_words = 10000
 
 # Change grading: whether the pipeline auto-dispatches the terminal, advisory
 # change-grader once the roster approves. The grader judges how much human

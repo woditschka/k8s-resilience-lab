@@ -39,17 +39,14 @@ const (
 	defaultServiceAccount = "default"
 )
 
-const (
-	// settleTimeout is the budget AwaitSettled polls within, and pollInterval the
-	// gap between polls.
-	//
-	// The interval is what makes "two consecutive observations agree" mean
-	// settled: a Deployment's Pods are created and then bound over several
-	// control-plane round trips, so two observations a few milliseconds apart can
-	// agree merely by falling inside one of them.
-	settleTimeout = 90 * time.Second
-	pollInterval  = time.Second
-)
+// pollInterval is the gap between the polls of a wait, which runs within the
+// lab's own waiting time, scenario.WaitingTime.
+//
+// The interval is what makes "two consecutive observations agree" mean settled: a
+// Deployment's Pods are created and then bound over several control-plane round
+// trips, so two observations a few milliseconds apart can agree merely by falling
+// inside one of them.
+const pollInterval = time.Second
 
 // DefaultKubernetesVersion is the version a run mirrors when it names none. It is
 // a code constant: the lab looks up no newest version anywhere.
@@ -244,7 +241,7 @@ func (c *SimulatedCluster) awaitProbePodOnEveryNode(ctx context.Context, topolog
 		if err != nil {
 			return err
 		}
-		unheld := nodesWithoutProbe(declared, nodesHoldingRunningProbe(probes))
+		unheld := nodesMissingFrom(declared, nodesHoldingRunningProbe(probes))
 		if len(unheld) == 0 {
 			return nil
 		}
@@ -331,9 +328,10 @@ func (c *SimulatedCluster) probePods(ctx context.Context) ([]corev1.Pod, error) 
 	return listed.Items, nil
 }
 
-// nodesWithoutProbe names the declared Nodes that are absent from holding, in
-// declaration order.
-func nodesWithoutProbe(declared []scenario.Node, holding []string) []string {
+// nodesMissingFrom names the declared Nodes that are absent from holding, in
+// declaration order. Two waits read it: the probe-Pod wait of provisioning, and
+// a Wait for every Node Ready.
+func nodesMissingFrom(declared []scenario.Node, holding []string) []string {
 	unheld := make([]string, 0, len(declared))
 	for _, node := range declared {
 		if !slices.Contains(holding, node.Name) {
@@ -458,35 +456,175 @@ func (c *SimulatedCluster) Observe(ctx context.Context, workload scenario.Worklo
 	return scenario.NewPlacement(nodes, fromPods(listed.Items)), nil
 }
 
-// AwaitSettled is the only wait in the project: it polls one Workload's Placement
-// until it has settled, or the settle timeout expires. The control plane is
-// eventually consistent, so every reported Placement comes from here rather than
-// from a single observation.
+// AwaitSettled polls one Workload's Placement until it has settled, or the lab's
+// waiting time expires. The control plane is eventually consistent, so every
+// reported Placement comes from a wait rather than from a single observation.
+//
+// It is the settle-only wait: a Scenario writes it for nothing yet, and the two
+// Waits beside it hold for one further clause over the same loop, per
+// docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md.
 func (c *SimulatedCluster) AwaitSettled(ctx context.Context, workload scenario.Workload) (scenario.Placement, error) {
-	settling, cancel := context.WithTimeout(ctx, settleTimeout)
+	return c.await(ctx, workload, aSettledPlacement(workload))
+}
+
+// AwaitPodsReady is the Wait a Scenario writes for a Workload: it polls that
+// Workload's Placement until the control plane reports every Pod it declared
+// Ready, which is the condition kubectl rollout status waits on.
+func (c *SimulatedCluster) AwaitPodsReady(ctx context.Context, workload scenario.Workload) (scenario.Placement, error) {
+	return c.await(ctx, workload, everyPodReady(workload))
+}
+
+// AwaitNodesReady is the Wait a Scenario writes for a Topology: it polls until the
+// control plane reports every Node that Topology declared Ready. The Placement it
+// reaches is read against those Nodes, and holds no Pod where the Scenario has
+// declared no Workload yet, which is where this Wait is written.
+func (c *SimulatedCluster) AwaitNodesReady(
+	ctx context.Context,
+	topology scenario.Topology,
+	deployed scenario.Workload,
+) (scenario.Placement, error) {
+	return c.await(ctx, deployed, everyNodeReady(topology, deployed))
+}
+
+// awaited is what one wait holds for: whether an observation is the one it was
+// waiting for, read against the one before it, and what it reports of the last
+// observation it took once the lab's waiting time has expired.
+type awaited struct {
+	reached func(previous, current scenario.Placement) bool
+	expired func(observed scenario.Placement) error
+}
+
+// await polls the Placement of this Workload at the poll interval, within the
+// lab's waiting time, until the wait has what it holds for. An expired wait
+// reports the last observation it took rather than waiting longer.
+func (c *SimulatedCluster) await(
+	ctx context.Context,
+	workload scenario.Workload,
+	holds awaited,
+) (scenario.Placement, error) {
+	waiting, cancel := context.WithTimeout(ctx, scenario.WaitingTime)
 	defer cancel()
 
-	previous, err := c.Observe(settling, workload)
+	previous, err := c.Observe(waiting, workload)
 	if err != nil {
 		return scenario.Placement{}, err
 	}
 
 	for {
 		select {
-		case <-settling.Done():
-			return scenario.Placement{}, didNotSettle(workload, previous)
+		case <-waiting.Done():
+			return scenario.Placement{}, holds.expired(previous)
 		case <-time.After(pollInterval):
 		}
 
-		current, err := c.Observe(settling, workload)
+		current, err := c.Observe(waiting, workload)
 		if err != nil {
 			return scenario.Placement{}, err
 		}
-		if hasSettled(previous, current, workload) {
+		if holds.reached(previous, current) {
 			return current, nil
 		}
 		previous = current
 	}
+}
+
+// aSettledPlacement is what the settle wait holds for, and what the two Waits
+// hold for beneath their own clause, so the Thens after a Wait judge a Placement
+// that has stopped changing.
+func aSettledPlacement(workload scenario.Workload) awaited {
+	return awaited{
+		reached: func(previous, current scenario.Placement) bool {
+			return hasSettled(previous, current, workload)
+		},
+		expired: func(observed scenario.Placement) error {
+			return didNotSettle(workload, observed)
+		},
+	}
+}
+
+// everyPodReady is what a Wait for a Workload holds for: a settled Placement in
+// which the control plane reports every Pod Ready. An expired wait names the
+// clause that held it open, which is the settle one while a Pod is still missing.
+func everyPodReady(workload scenario.Workload) awaited {
+	settled := aSettledPlacement(workload)
+
+	return awaited{
+		reached: func(previous, current scenario.Placement) bool {
+			return settled.reached(previous, current) && len(current.PodsNotReady()) == 0
+		},
+		expired: func(observed scenario.Placement) error {
+			if len(observed.PodsNotReady()) == 0 {
+				return settled.expired(observed)
+			}
+
+			return podsDidNotBecomeReady(workload, observed)
+		},
+	}
+}
+
+// everyNodeReady is what a Wait for a Topology holds for: a settled Placement
+// read against every Node that Topology declared. A Node that is not Ready is in
+// no Placement the lab observes, so this clause reads the Nodes the observation
+// is short of.
+func everyNodeReady(topology scenario.Topology, deployed scenario.Workload) awaited {
+	settled := aSettledPlacement(deployed)
+
+	return awaited{
+		reached: func(previous, current scenario.Placement) bool {
+			return len(nodesNotReadyIn(topology, current)) == 0 && settled.reached(previous, current)
+		},
+		expired: func(observed scenario.Placement) error {
+			if len(nodesNotReadyIn(topology, observed)) == 0 {
+				return settled.expired(observed)
+			}
+
+			return nodesDidNotBecomeReady(topology, observed)
+		},
+	}
+}
+
+// nodesNotReadyIn are the Nodes the Topology declared that this observation was
+// not read against, in declaration order.
+func nodesNotReadyIn(topology scenario.Topology, observed scenario.Placement) []string {
+	return nodesMissingFrom(topology.Nodes(), nodeNamesOf(observed.Nodes()))
+}
+
+// podsDidNotBecomeReady is what an expired Wait for every Pod Ready reports: the
+// Pods the last observation did not hold Ready, by name, so a reader of an
+// expired Wait sees which Pods held it open rather than a count alone.
+func podsDidNotBecomeReady(workload scenario.Workload, observed scenario.Placement) error {
+	notReady := observed.PodsNotReady()
+
+	return fmt.Errorf("the Pods of the Workload %s were not all Ready within %s; it last held %d of %d Pods Ready, and these were not: %s",
+		workload.Name(), scenario.WaitingTime, len(observed.Pods())-len(notReady), workload.Pods(),
+		strings.Join(podNamesOf(notReady), ", "))
+}
+
+// nodesDidNotBecomeReady is what an expired Wait for every Node Ready reports:
+// the declared Nodes the last observation was not read against, by name.
+func nodesDidNotBecomeReady(topology scenario.Topology, observed scenario.Placement) error {
+	return fmt.Errorf("the Nodes of the Topology were not all Ready within %s; these were not: %s",
+		scenario.WaitingTime, strings.Join(nodesNotReadyIn(topology, observed), ", "))
+}
+
+// nodeNamesOf and podNamesOf are the names an observation holds, which is what a
+// wait names rather than the values themselves.
+func nodeNamesOf(nodes []scenario.Node) []string {
+	names := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		names = append(names, node.Name)
+	}
+
+	return names
+}
+
+func podNamesOf(pods []scenario.Pod) []string {
+	names := make([]string, 0, len(pods))
+	for _, pod := range pods {
+		names = append(names, pod.Name)
+	}
+
+	return names
 }
 
 // didNotSettle is what an expired settle wait reports: the Placement last
@@ -496,7 +634,7 @@ func (c *SimulatedCluster) AwaitSettled(ctx context.Context, workload scenario.W
 // reader of an expired wait can tell which clause held it open (PRD edge case 3).
 func didNotSettle(workload scenario.Workload, observed scenario.Placement) error {
 	return fmt.Errorf("the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold",
-		workload.Name(), settleTimeout, len(observed.Pods()), workload.Pods(), len(observed.Nodes()), len(observed.PodsItCannotAccountFor()))
+		workload.Name(), scenario.WaitingTime, len(observed.Pods()), workload.Pods(), len(observed.Nodes()), len(observed.PodsItCannotAccountFor()))
 }
 
 // hasSettled reports whether current can be the Workload's settled Placement:

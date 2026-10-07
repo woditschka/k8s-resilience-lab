@@ -223,8 +223,7 @@ func TestFullAccessWrittenBesideTheLabsOwnCustomizations_ShouldWinWhereItIsWritt
 }
 
 // Edge case 7: the specification's own tolerations are transcribed after the last
-// full access, so the lab's waiting time before a Pod leaves an unresponsive Node
-// holds whatever full access left out.
+// full access, so the unresponsive-Node wait holds whatever full access left out.
 func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHolding(t *testing.T) {
 	declared := aSpecificationOf(
 		aNodeConditionToleration(scenario.TaintNodeNotReady),
@@ -465,6 +464,48 @@ func TestAnObservedPod_ShouldBeReadWithTheNodeItLandedOn(t *testing.T) {
 		{Name: placedPodName, Node: placedOn.Name, Phase: scenario.PodRunning},
 		{Name: pendingPodName, Phase: scenario.PodPending},
 	}))
+}
+
+// A Pod's Ready condition is what a Wait for every Pod Ready holds until, so the
+// mapper reads it off the Pod the way a Node's own Ready condition is read. A Pod
+// the control plane reports no such condition for is not Ready: a Wait holds for
+// it rather than passing it over.
+func TestAnObservedPodsReadyCondition_ShouldBeReadAsThatPodBeingReady(t *testing.T) {
+	const somePodName = "web-abc"
+	reported := map[string]struct {
+		conditions []corev1.PodCondition
+		ready      bool
+	}{
+		"the Ready condition true": {
+			conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+			ready:      true,
+		},
+		"the Ready condition false": {
+			conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}},
+			ready:      false,
+		},
+		"no condition at all": {
+			conditions: nil,
+			ready:      false,
+		},
+		"another condition alone": {
+			conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionTrue}},
+			ready:      false,
+		},
+	}
+
+	for condition, one := range reported {
+		t.Run(condition, func(t *testing.T) {
+			observed := fromPods([]corev1.Pod{{
+				Name:   somePodName,
+				Status: corev1.PodStatus{Phase: corev1.PodRunning, Conditions: one.conditions},
+			}})
+
+			expect.Expect(t, observed).To(expect.Equal([]scenario.Pod{
+				{Name: somePodName, Phase: scenario.PodRunning, Ready: one.ready},
+			}))
+		})
+	}
 }
 
 func TestAPhaseTheLabDoesNotName_ShouldBeReadAsUnknown(t *testing.T) {

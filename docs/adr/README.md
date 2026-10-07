@@ -76,3 +76,5 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-05 | [A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md) | Accepted |
 | 2026-10-05 | [A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md) | Accepted |
 | 2026-10-06 | [A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md) | Accepted |
+| 2026-10-07 | [A Scenario writes its own Wait, with its Given or as a Step of its own](2026-10-07-a-scenario-writes-its-own-wait.md) | Accepted |
+| 2026-10-07 | [The lab's Scenarios write one Step per line](2026-10-07-the-labs-scenarios-write-one-step-per-line.md) | Accepted |

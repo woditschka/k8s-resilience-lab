@@ -51,6 +51,10 @@ const (
 	// onePodNotYetCreated is the Pod a Deployment's last replica is short by in the
 	// moment after the Deployment, which is the other observation no await stops at.
 	onePodNotYetCreated = 1
+
+	// onePodNotReadyYet is the Pod the control plane has placed and not yet
+	// reported Ready, which is what an expired Wait for every Pod Ready names.
+	onePodNotReadyYet = 1
 )
 
 // anEvenSpreadTopology is the Topology the main Scenario provisions: three Zones
@@ -85,6 +89,11 @@ func defaultPlacement() scenario.PodSpecification {
 		aNodeConditionToleration(scenario.TaintNodeUnreachable),
 	)
 }
+
+// noWorkloadDeclaredYet is the Workload a Scenario holds before its Workload
+// Given has run, which is what a Wait for every Node Ready reads its Placement
+// against.
+var noWorkloadDeclaredYet scenario.Workload
 
 // aWorkloadDeclaring is the Workload the Scenarios below deploy: pods replicas
 // under the one Workload name this suite deploys, declaring the specification
@@ -277,7 +286,7 @@ func TestADeclaredNodeHoldingNoRunningProbePod_ShouldBeNamedAsStillUnheld(t *tes
 	declared := topology.Nodes()
 	theOneNodeTheSchedulerHolds := declared[1].Name
 
-	unheld := nodesWithoutProbe(declared, []string{theOneNodeTheSchedulerHolds})
+	unheld := nodesMissingFrom(declared, []string{theOneNodeTheSchedulerHolds})
 
 	expect.Expect(t, unheld).To(expect.Equal([]string{declared[0].Name}))
 }
@@ -530,6 +539,67 @@ func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheCont
 	expectReported(t, recorded, pending[0].Name, podSchedulingFailed)
 }
 
+// A Wait for every Pod Ready holds until the control plane reports the Ready
+// condition on every Pod the Workload declares, which is the condition kubectl
+// rollout status waits on (docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md).
+func TestAWaitForEveryPodOfADeployedWorkload_ShouldReachThePlacementWithEveryPodReady(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement())
+	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+
+	ready, err := provisioned.AwaitPodsReady(t.Context(), workload)
+	if err != nil {
+		t.Fatalf("await every Pod of the Workload reporting Ready: %v", err)
+	}
+
+	expect.Expect(t, ready.PodsNotReady()).To(expect.HaveLen[scenario.Pod](0))
+	expect.Expect(t, ready.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](ninePods))
+}
+
+// A Wait for every Node Ready is written with the Topology Given, before any
+// Workload is declared, so the Placement it reaches holds the Nodes the Topology
+// declared and no Pod at all.
+func TestAWaitForEveryNodeBeforeAWorkloadIsDeployed_ShouldReachThePlacementOfThoseNodesAndNoPod(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	topology := anEvenSpreadTopology(t)
+	if err := provisioned.ApplyTopology(t.Context(), topology); err != nil {
+		t.Fatalf("apply the Scenario's Topology: %v", err)
+	}
+
+	ready, err := provisioned.AwaitNodesReady(t.Context(), topology, noWorkloadDeclaredYet)
+	if err != nil {
+		t.Fatalf("await every Node of the Topology reporting Ready: %v", err)
+	}
+
+	expect.Expect(t, ready.Nodes()).To(expect.Equal(topology.Nodes()))
+	expect.Expect(t, ready.Pods()).To(expect.HaveLen[scenario.Pod](0))
+}
+
+// What each expired Wait reports is read from the last observation alone, so it
+// is asserted here rather than by provoking a Wait that runs its whole budget
+// out, the way the expired settle wait below is (REQ-SIM-006 edge case: a Wait
+// the lab's waiting time outlasts names what was not Ready).
+func TestAWaitForEveryPodTheWaitingTimeOutlasts_ShouldNameThePodsThatWereNotReady(t *testing.T) {
+	observed := aPlacementWithOnePodNotReadyYet(t)
+
+	reported := podsDidNotBecomeReady(aWorkloadDeclaring(t, ninePods, resilientPlacement()), observed)
+
+	expect.Expect(t, reported.Error()).To(expect.Equal(fmt.Sprintf(
+		"the Pods of the Workload %s were not all Ready within %s; it last held %d of %d Pods Ready, and these were not: %s",
+		deployedWorkloadName, scenario.WaitingTime, ninePods-onePodNotReadyYet, ninePods, observed.PodsNotReady()[0].Name)))
+}
+
+func TestAWaitForEveryNodeTheWaitingTimeOutlasts_ShouldNameTheNodesThatWereNotReady(t *testing.T) {
+	topology := anEvenSpreadTopology(t)
+	observed := aPlacementShortOfOneReadyNode(t)
+
+	reported := nodesDidNotBecomeReady(topology, observed)
+
+	expect.Expect(t, reported.Error()).To(expect.Equal(fmt.Sprintf(
+		"the Nodes of the Topology were not all Ready within %s; these were not: %s",
+		scenario.WaitingTime, theFirstNodeOf(topology))))
+}
+
 // An expired settle wait is the one place the lab hands back a Placement it is
 // not satisfied with, and what it reports is read from the observation alone. So
 // the report is asserted here rather than by provoking a wait that runs its whole
@@ -542,7 +612,7 @@ func TestAPlacementThatDoesNotSettleAfterTheFailure_ShouldReportTheObservedPlace
 
 	expect.Expect(t, reported.Error()).To(expect.Equal(fmt.Sprintf(
 		"the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold",
-		deployedWorkloadName, settleTimeout, ninePods, ninePods, nodesStillResponding, onePodLeftBehind)))
+		deployedWorkloadName, scenario.WaitingTime, ninePods, ninePods, nodesStillResponding, onePodLeftBehind)))
 }
 
 // The rule an await stops at, asserted a clause at a time: an observation can be
@@ -603,6 +673,32 @@ func aPlacementShortOfOnePod(t *testing.T) scenario.Placement {
 	return scenario.NewPlacement(nodes, created[:len(created)-onePodNotYetCreated])
 }
 
+// aPlacementWithOnePodNotReadyYet is the observation taken while every Pod the
+// Workload declares is placed and the control plane has yet to report one of them
+// Ready, which is the clause a Wait for every Pod Ready holds open.
+func aPlacementWithOnePodNotReadyYet(t *testing.T) scenario.Placement {
+	t.Helper()
+
+	nodes := anEvenSpreadTopology(t).Nodes()
+	placed := onePodOnEachOf(nodes)
+	placed[0].Ready = false
+
+	return scenario.NewPlacement(nodes, placed)
+}
+
+// aPlacementShortOfOneReadyNode is the observation taken while one Node the
+// Topology declares has yet to report Ready, which is the clause a Wait for every
+// Node Ready holds open: a Node that is not Ready is in no Placement the lab
+// observes.
+func aPlacementShortOfOneReadyNode(t *testing.T) scenario.Placement {
+	t.Helper()
+
+	nodes := anEvenSpreadTopology(t).Nodes()
+	stillResponding := nodes[1:]
+
+	return scenario.NewPlacement(stillResponding, onePodOnEachOf(stillResponding))
+}
+
 // aPlacementStillHoldingAPodOnTheFailedNode is the observation taken inside the
 // window a Failure opens: every Pod the Workload declares exists, the Node that
 // stopped responding has left the Ready Nodes, and the Pod it held is still on it
@@ -628,6 +724,7 @@ func onePodOnEachOf(nodes []scenario.Node) []scenario.Pod {
 			Name:  fmt.Sprintf("%s-%d", deployedWorkloadName, at),
 			Node:  node.Name,
 			Phase: scenario.PodRunning,
+			Ready: true,
 		})
 	}
 

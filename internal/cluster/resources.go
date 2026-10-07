@@ -365,6 +365,20 @@ func isReady(node corev1.Node) bool {
 	return false
 }
 
+// isPodReady reports whether a Pod carries a Ready condition that is true, which
+// is the condition kubectl rollout status waits on and the one a Wait for every
+// Pod Ready holds until. A Pod reporting no such condition is not Ready, the way
+// a Node reporting none is no Ready Node.
+func isPodReady(pod corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+
+	return false
+}
+
 // fromNodes reads the Nodes of one observation. A Node's Zone comes from its Zone
 // label rather than from its name, so an observation reports what the control
 // plane holds and not what the Topology asked for.
@@ -402,6 +416,7 @@ func fromPods(observed []corev1.Pod) []scenario.Pod {
 			Name:  pod.Name,
 			Node:  pod.Spec.NodeName,
 			Phase: observedPhaseOf(pod),
+			Ready: isPodReady(pod),
 		})
 	}
 

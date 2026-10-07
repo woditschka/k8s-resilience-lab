@@ -195,7 +195,7 @@ All documentation, comments, and PRDs must follow the writing standards of the `
 - **No mocks**: All tests use real values and real I/O. No mock libraries.
 - **Own `Expect` assertions**: Tests run on the standard `testing` package and assert with the lab's own `Expect(t, got).To(matcher)` helper. No assertion library: no Gomega, no testify. Keep it to a handful of general matchers plus domain matchers.
 - **Struct comparison**: Use `github.com/google/go-cmp/cmp` for diff output.
-- **Waiting in a helper**: A test waits on the Simulated Cluster only through the `AwaitSettled` helper, never with a sleep or its own polling loop.
+- **Waiting in a helper**: A test waits on the Simulated Cluster only through the lab's own waits in `internal/cluster` (`AwaitSettled`, `AwaitPodsReady`, `AwaitNodesReady`), never with a sleep or its own polling loop.
 - **Table-driven tests**: Use explicit field names and `t.Run()` for subtests.
 - **Test helpers**: Mark with `t.Helper()`, use `t.Cleanup()` for teardown.
 - **Testing principles**: See [`docs/testing-principles.md`](docs/testing-principles.md) for the test pyramid, coverage target, BDD naming conventions, mocking policy, assertion patterns, data naming, and the agent decision checklist.

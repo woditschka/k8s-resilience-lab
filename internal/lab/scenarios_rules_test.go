@@ -123,8 +123,8 @@ const (
 	theOutcomePrefix     = "Should"
 )
 
-// theStepKinds are the three kinds a line of a Scenario may be.
-var theStepKinds = []StepKind{GivenStep, WhenStep, ThenStep}
+// theStepKinds are the four kinds a line of a Scenario may be.
+var theStepKinds = []StepKind{GivenStep, WhenStep, WaitStep, ThenStep}
 
 // theWorkloadStep is how a Workload's Given line names itself and theCustomize
 // call the one call a Scenario may write on the specification it declares. The
@@ -150,13 +150,28 @@ const (
 // second of them, and any other call written there, stays refused.
 var theWorkloadsOwnCalls = []string{"RequiredCapacity"}
 
-func TestEveryScenarioSource_ShouldHoldOnlyGivenWhenAndThenSteps(t *testing.T) {
+// theWaits are the Waits a Scenario writes, under the names the Step surface
+// offers them: every Node of the declared Topology Ready, and every Pod of the
+// declared Workload Ready, each written with the time it must be reached in or
+// without one. theWaitsStatingATime are the two that state it. theWaitOpener is
+// the call every way of writing a Wait is written through — on the Scenario
+// itself, and on the Given whose declaration the Wait fits — and it is the one
+// opener that is not its kind's own word, per
+// docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md.
+var (
+	theWaitsStatingATime = []string{"AllNodesReadyWithinSeconds", "AllPodsReadyWithinSeconds"}
+	theWaits             = slices.Concat([]string{"AllNodesReady", "AllPodsReady"}, theWaitsStatingATime)
+)
+
+const theWaitOpener = "WaitFor"
+
+func TestEveryScenarioSource_ShouldHoldOnlyGivenWhenWaitAndThenSteps(t *testing.T) {
 	place := theScenariosPlace(t)
 
 	offenders := declarationsThatDoNotBelong(filesOfThePlace(t, place))
 
 	if len(offenders) > 0 {
-		t.Errorf("a Scenario source holds one exported Scenario function named %s whose every line is a Given, When or Then Step, and the two files beside them declare the Workload names and the list alone, but:\n%s",
+		t.Errorf("a Scenario source holds one exported Scenario function named %s whose every line is a Given, When, Wait or Then Step, and the two files beside them declare the Workload names and the list alone, but:\n%s",
 			theScenarioNameShape,
 			strings.Join(offenders, "\n"))
 	}
@@ -219,6 +234,19 @@ func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnyth
 		"a second Required Capacity written on the first": {
 			line: `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).` +
 				`RequiredCapacity(lab.Pods(6)).RequiredCapacity(lab.Pods(3))`,
+			admitted: false,
+		},
+		"a Wait chained onto the Workload Step": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).WaitFor().AllPodsReady()`,
+			admitted: true,
+		},
+		"a Wait chained onto the Required Capacity": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).` +
+				`RequiredCapacity(lab.Pods(6)).WaitFor().AllPodsReady()`,
+			admitted: true,
+		},
+		"a Wait written on the Workload Step with no WaitFor opening it": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).AllPodsReady()`,
 			admitted: false,
 		},
 		"a Customize written after the Workload Step": {
@@ -305,6 +333,391 @@ func anImportBlockOf(imported []string) string {
 	}
 
 	return block.String()
+}
+
+func TestEveryScenarioOfTheLab_ShouldWaitBeforeItsFirstThenAndAfterEveryFailure(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := stepsReadingAPlacementNoWaitReached(filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("every Then and every Failure of a Scenario has a Wait between it and the Given or the Failure before it, but:\n%s",
+			strings.Join(offenders, "\n"))
+	}
+}
+
+// The Wait after a Failure is where the lab's own subject is measured — how long
+// the control plane took to place the Pods again — so each Failure Scenario
+// states the time that Wait must be reached in and a run judges the restore
+// rather than only reporting it. The Waits above the first Failure wait for the
+// world the Failure is injected into and state none (docs/prd.md REQ-SIM-006).
+func TestBothFailureScenarios_ShouldStateATimeOnTheWaitAfterTheirFailure(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := waitsStatingATimeTheirPlaceDoesNotAskFor(filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("the Wait after a Failure states the time it must be reached in, and a Wait above the first Failure states none, but:\n%s",
+			strings.Join(offenders, "\n"))
+	}
+}
+
+// Every line of a Scenario is one Step, so a reader scans the Step kinds in one
+// column and inserts, removes or reorders a line on its own. A Wait written on the
+// Given before it reads as an expression instead and takes that line's Step kind
+// off the column, which is why the lab's own Scenarios write none
+// (docs/adr/2026-10-07-the-labs-scenarios-write-one-step-per-line.md).
+func TestEveryScenarioOfTheLab_ShouldWriteEachWaitAsAStepOfItsOwn(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := waitsWrittenOnTheGivenBeforeThem(filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("every Wait of a Scenario is a Step of its own, opened on the Scenario, but:\n%s",
+			strings.Join(offenders, "\n"))
+	}
+}
+
+// The rule's own decisions are read here because every Scenario of the lab states
+// the time its restore Wait must be reached in, so the place holds no Wait for the
+// rule to report.
+func TestTheStatedTimeRule_ShouldReportEveryWaitStatingATimeItsPlaceDoesNotAskFor(t *testing.T) {
+	written := map[string]struct {
+		steps    []string
+		admitted bool
+	}{
+		"a Wait stating a time after the Failure": {
+			steps: aWorldDeclaredAndAwaited(
+				theThenLine, theFailureLine, theWaitForEveryPodLineStatingATime, theThenLine,
+			),
+			admitted: true,
+		},
+		"a Wait stating no time after the Failure": {
+			steps: aWorldDeclaredAndAwaited(
+				theThenLine, theFailureLine, theWaitForEveryPodLine, theThenLine,
+			),
+			admitted: false,
+		},
+		"a Wait stating a time before any Failure": {
+			steps: []string{
+				theTopologyLine, theWaitForEveryNodeLine,
+				theWorkloadLine, theWaitForEveryPodLineStatingATime, theThenLine,
+			},
+			admitted: false,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			offenders := waitsStatingATimeTheirPlaceDoesNotAskFor(aScenarioWhoseStepsAre(t, taken.steps...))
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// waitsStatingATimeTheirPlaceDoesNotAskFor names every Wait of the place standing
+// after a Failure that states no time it must be reached in, and every Wait above
+// the first Failure that states one.
+func waitsStatingATimeTheirPlaceDoesNotAskFor(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, source := range files {
+		for _, declared := range source.Declarations {
+			if !isAScenario(declared) {
+				continue
+			}
+			offenders = append(offenders, waitsOfScenarioStatingTheWrongTime(source.Path, declared)...)
+		}
+	}
+
+	return offenders
+}
+
+// waitsOfScenarioStatingTheWrongTime walks one Scenario in the order it is
+// written: every Wait below the first Failure is a restore the lab judges against
+// a time, and every Wait above it provisions the world that Failure is injected
+// into.
+func waitsOfScenarioStatingTheWrongTime(path string, declared modulerules.Declaration) []string {
+	parameter := declared.Parameters[0].Name
+
+	var offenders []string
+	restoring := false
+	for _, line := range declared.Statements {
+		switch {
+		case isAFailure(line, parameter):
+			restoring = true
+		case isAWait(line):
+			offenders = append(offenders, whereAWaitStatesTheWrongTime(restoring, path, declared, line)...)
+		}
+	}
+
+	return offenders
+}
+
+// whereAWaitStatesTheWrongTime is the one offender such a Wait names, and nothing
+// where what it states is what its place in the Scenario asks for.
+func whereAWaitStatesTheWrongTime(
+	restoring bool,
+	path string,
+	declared modulerules.Declaration,
+	line modulerules.Statement,
+) []string {
+	if statesATime(line) == restoring {
+		return nil
+	}
+
+	named := "stands before any Failure and states a time it must be reached in"
+	if restoring {
+		named = "stands after a Failure and states no time it must be reached in"
+	}
+
+	return []string{fmt.Sprintf("  %s, in %s: %s %s", path, declared.Name, line.Written, named)}
+}
+
+// statesATime reports whether a Wait line states the time it must be reached in,
+// which is the name that Wait is written under.
+func statesATime(line modulerules.Statement) bool {
+	return slices.Contains(theWaitsStatingATime, line.Name)
+}
+
+// The Steps a Scenario is read as writing its Waits in order, each form of a Wait
+// and each Step that reads what one reached. The rule's own decisions are read
+// here because every Scenario of the lab Waits everywhere, so the place holds no
+// Step for the rule to report.
+func TestTheWaitOrderingRule_ShouldReportEveryThenAndFailureNoWaitStandsBefore(t *testing.T) {
+	written := map[string]struct {
+		steps    []string
+		admitted bool
+	}{
+		"a Wait chained onto each Given": {
+			steps:    []string{theTopologyWaitingLine, theWorkloadWaitingLine, theThenLine},
+			admitted: true,
+		},
+		"a Wait of its own before the first Then": {
+			steps:    []string{theTopologyLine, theWorkloadLine, theWaitForEveryPodLine, theThenLine},
+			admitted: true,
+		},
+		"no Wait before the first Then": {
+			steps:    []string{theTopologyLine, theWorkloadLine, theThenLine},
+			admitted: false,
+		},
+		"two Waits in a row": {
+			steps: []string{
+				theTopologyLine, theWorkloadLine,
+				theWaitForEveryNodeLine, theWaitForEveryPodLine, theThenLine,
+			},
+			admitted: true,
+		},
+		"a Wait between the Failure and the Then after it": {
+			steps: aWorldDeclaredAndAwaited(
+				theThenLine, theFailureLine, theWaitForEveryPodLine, theThenLine,
+			),
+			admitted: true,
+		},
+		"no Wait between the Failure and the Then after it": {
+			steps:    aWorldDeclaredAndAwaited(theThenLine, theFailureLine, theThenLine),
+			admitted: false,
+		},
+		"no Wait before the Failure": {
+			steps:    []string{theTopologyLine, theWorkloadLine, theFailureLine, theWaitForEveryPodLine, theThenLine},
+			admitted: false,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			offenders := stepsReadingAPlacementNoWaitReached(aScenarioWhoseStepsAre(t, taken.steps...))
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// The Step lines the rules above are read on: each Given on its own and with the
+// Wait that fits it chained onto its line, each Wait written as a Step of its own,
+// the Failure that discards the Placement, and a Then that judges one.
+const (
+	theTopologyLine         = `s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3))`
+	theTopologyWaitingLine  = theTopologyLine + `.WaitFor().AllNodesReady()`
+	theWorkloadWaitingLine  = theWorkloadLine + `.WaitFor().AllPodsReady()`
+	theWaitForEveryNodeLine = `s.WaitFor().AllNodesReady()`
+	theWaitForEveryPodLine  = `s.WaitFor().AllPodsReady()`
+
+	// The Wait for every Pod stating the time it must be reached in, which is how a
+	// Wait after a Failure is written.
+	theWaitForEveryPodLineStatingATime = `s.WaitFor().AllPodsReadyWithinSeconds(30)`
+	theFailureLine                     = `s.When().NodesFail(lab.Nodes(1))`
+	theThenLine                        = `s.Then().PodsPerZone(3)`
+)
+
+// aWorldDeclaredAndAwaited are the Steps a Scenario of the lab opens with, one
+// Step per line: each Given with the Wait that applies it standing under it,
+// followed by the Steps the rule under test is read on.
+func aWorldDeclaredAndAwaited(followedBy ...string) []string {
+	opened := []string{theTopologyLine, theWaitForEveryNodeLine, theWorkloadLine, theWaitForEveryPodLine}
+
+	return append(opened, followedBy...)
+}
+
+// aScenarioWhoseStepsAre is a Scenario source holding these Steps, one per line
+// as a Scenario writes them, importing the Step surface alone.
+func aScenarioWhoseStepsAre(t *testing.T, steps ...string) []modulerules.GoFile {
+	t.Helper()
+
+	return aScenarioSourceThatImports(t, []string{theStepSurfaceImport}, strings.Join(steps, "\n\t"))
+}
+
+// stepsReadingAPlacementNoWaitReached names every Step of the place that reads the
+// Placement a Wait reached where none stands before it: a Then, or a Failure When,
+// with no Wait since the Givens or since the Failure before it. Such a Step ends
+// the Scenario when it runs, so the rule reads the order off the source instead of
+// leaving it to a run (docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md).
+func stepsReadingAPlacementNoWaitReached(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, source := range files {
+		for _, declared := range source.Declarations {
+			if !isAScenario(declared) {
+				continue
+			}
+			offenders = append(offenders, stepsOfScenarioNoWaitStandsBefore(source.Path, declared)...)
+		}
+	}
+
+	return offenders
+}
+
+// stepsOfScenarioNoWaitStandsBefore walks one Scenario in the order it is written:
+// a Wait reaches a Placement, a Then judges the one reached last, and a Failure
+// reads it to count the Pods kept Running and then discards it, so what a Wait
+// reached holds for the Thens after it and no further.
+func stepsOfScenarioNoWaitStandsBefore(path string, declared modulerules.Declaration) []string {
+	parameter := declared.Parameters[0].Name
+
+	var offenders []string
+	waited := false
+	for _, line := range declared.Statements {
+		switch {
+		case isAWait(line):
+			waited = true
+		case isAFailure(line, parameter):
+			offenders = append(offenders, whereNoWaitStands(waited, path, declared, line)...)
+			waited = false
+		case isAThen(line, parameter):
+			offenders = append(offenders, whereNoWaitStands(waited, path, declared, line)...)
+		}
+	}
+
+	return offenders
+}
+
+// whereNoWaitStands is the one offender a Step reading a Placement names where no
+// Wait stands before it, and nothing where one does.
+func whereNoWaitStands(
+	waited bool,
+	path string,
+	declared modulerules.Declaration,
+	line modulerules.Statement,
+) []string {
+	if waited {
+		return nil
+	}
+
+	return []string{fmt.Sprintf("  %s, in %s: %s reads the Placement a Wait reached, and %s",
+		path, declared.Name, line.Written, theWaitThatNeverStood)}
+}
+
+// isAWait reports whether a line of a Scenario is a Wait: a line whose outermost
+// call is one of the two Waits, which both ways of writing one end at — the
+// WaitFor of a Given's own line, and a Wait Step of the Scenario's.
+func isAWait(line modulerules.Statement) bool {
+	return line.Call && slices.Contains(theWaits, line.Name)
+}
+
+// isAFailure reports whether a line is a Failure: a When Step, which is the one
+// thing a When does to the cluster now that a Wait opens on its own call.
+func isAFailure(line modulerules.Statement, scenarioParameter string) bool {
+	kind, opened := theStepKindOf(line, scenarioParameter)
+
+	return opened && kind == WhenStep
+}
+
+func isAThen(line modulerules.Statement, scenarioParameter string) bool {
+	kind, opened := theStepKindOf(line, scenarioParameter)
+
+	return opened && kind == ThenStep
+}
+
+// The two forms of writing a Wait the layout rule is read on: a Wait opened on the
+// Scenario, and the same Wait written on the Given whose declaration it fits. The
+// chained form stays offered to an engineer writing a Scenario, so what the rule
+// reports is read here rather than on the lab's own place, which writes it nowhere.
+func TestTheWaitLayoutRule_ShouldReportEveryWaitWrittenOnTheGivenBeforeIt(t *testing.T) {
+	written := map[string]struct {
+		steps    []string
+		admitted bool
+	}{
+		"each Wait a Step of its own": {
+			steps:    aWorldDeclaredAndAwaited(theThenLine),
+			admitted: true,
+		},
+		"a Wait written on the Topology it waits for": {
+			steps: []string{theTopologyWaitingLine, theWorkloadLine, theWaitForEveryPodLine, theThenLine},
+		},
+		"a Wait written on the Workload it waits for": {
+			steps: []string{theTopologyLine, theWaitForEveryNodeLine, theWorkloadWaitingLine, theThenLine},
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			offenders := waitsWrittenOnTheGivenBeforeThem(aScenarioWhoseStepsAre(t, taken.steps...))
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// waitsWrittenOnTheGivenBeforeThem names every Wait of the place that is no Step of
+// its own: one opened on the Given whose declaration it fits rather than on the
+// Scenario.
+func waitsWrittenOnTheGivenBeforeThem(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, source := range files {
+		for _, declared := range source.Declarations {
+			if !isAScenario(declared) {
+				continue
+			}
+			offenders = append(offenders, waitsOfScenarioRidingTheirGiven(source.Path, declared)...)
+		}
+	}
+
+	return offenders
+}
+
+// waitsOfScenarioRidingTheirGiven names every Wait of one Scenario whose line is of
+// another kind, which is a Wait riding the Given it was written on: that line is
+// the Given's Step, and the Wait is no Step of the Scenario's own.
+func waitsOfScenarioRidingTheirGiven(path string, declared modulerules.Declaration) []string {
+	parameter := declared.Parameters[0].Name
+
+	var offenders []string
+	for _, line := range declared.Statements {
+		if !isAWait(line) || isAWaitStep(line, parameter) {
+			continue
+		}
+		offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s is written on the Given before it rather than as a Step of its own",
+			path, declared.Name, line.Written))
+	}
+
+	return offenders
+}
+
+// isAWaitStep reports whether a line is a Wait Step: a Wait opened on the Scenario
+// itself, which is the kind the line is then read as.
+func isAWaitStep(line modulerules.Statement, scenarioParameter string) bool {
+	kind, opened := theStepKindOf(line, scenarioParameter)
+
+	return opened && kind == WaitStep
 }
 
 func TestEveryScenarioSource_ShouldNameOnlyWhatTheLabOffersScenarios(t *testing.T) {
@@ -647,8 +1060,12 @@ func declaresOnePredefinedSpecification(line modulerules.Statement) bool {
 
 // theWorkloadStepTheLineEndsAt is the Workload Step a line ends at, directly or
 // through one call of the Workload's own closed set written on it, and reports
-// whether the line ends at that Step at all.
+// whether the line ends at that Step at all. The Wait a Scenario chains onto the
+// line is read past first: it is a Step of its own and no part of what the Workload
+// declares, so the shape below is read on the declaration it was written after.
 func theWorkloadStepTheLineEndsAt(line modulerules.Statement) (modulerules.Statement, bool) {
+	line = whatTheChainedWaitWasWrittenOn(line)
+
 	if line.Name == theWorkloadStep {
 		return line, true
 	}
@@ -657,6 +1074,19 @@ func theWorkloadStepTheLineEndsAt(line modulerules.Statement) (modulerules.State
 	}
 
 	return modulerules.Statement{}, false
+}
+
+// whatTheChainedWaitWasWrittenOn is the declaration a line ends at once the Wait
+// chained onto it through its WaitFor is read past, and the line itself where it
+// ends at no such Wait. A Wait named directly on a declaration is not one: the
+// WaitFor is what opens it, so such a line keeps the shape it was written in and is
+// reported.
+func whatTheChainedWaitWasWrittenOn(line modulerules.Statement) modulerules.Statement {
+	if !isAWait(line) || line.On == nil || !line.On.Call || line.On.Name != theWaitOpener || line.On.On == nil {
+		return line
+	}
+
+	return *line.On.On
 }
 
 // isAPredefinedSpecification reports whether an expression declares one of the
@@ -686,12 +1116,12 @@ func isNamedAsAScenario(name string) bool {
 }
 
 // linesOfScenarioThatAreNotSteps names every line of a Scenario that is not a
-// Given, When or Then Step called on the Scenario the function took.
+// Given, When, Wait or Then Step called on the Scenario the function took.
 func linesOfScenarioThatAreNotSteps(path string, declared modulerules.Declaration) []string {
 	var offenders []string
 	for _, line := range declared.Statements {
 		if !isAStep(line, declared.Parameters[0].Name) {
-			offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s is not a Given, When or Then Step",
+			offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s is not a Given, When, Wait or Then Step",
 				path, declared.Name, line.Written))
 		}
 	}
@@ -700,22 +1130,55 @@ func linesOfScenarioThatAreNotSteps(path string, declared modulerules.Declaratio
 }
 
 // isAStep reports whether a line of a Scenario is one Step: a call on a Given,
-// When or Then taken from the Scenario the function was handed.
+// When, WaitFor or Then taken from the Scenario the function was handed.
 func isAStep(line modulerules.Statement, scenarioParameter string) bool {
+	_, opened := theStepKindOf(line, scenarioParameter)
+
+	return opened
+}
+
+// theStepKindOf is the kind of Step a line of a Scenario is, read off the opener it
+// was written through, and reports whether the line is a Step at all. The Wait a
+// Given's own line chains is opened on that declaration and not on the Scenario, so
+// it is the Given the kind is read off here and the Wait's own Step the Scenario
+// records — which is why the ordering rule reads a Wait off its outermost call
+// instead.
+func theStepKindOf(line modulerules.Statement, scenarioParameter string) (StepKind, bool) {
 	for called := &line; called != nil; called = called.On {
-		if opensTheStep(called, scenarioParameter) {
-			return true
+		if kind, opened := opensTheStep(called, scenarioParameter); opened {
+			return kind, true
 		}
 	}
 
-	return false
+	return "", false
 }
 
-func opensTheStep(called *modulerules.Statement, scenarioParameter string) bool {
-	return called.Call && called.On != nil && called.On.Name == scenarioParameter &&
-		slices.ContainsFunc(theStepKinds, func(kind StepKind) bool {
-			return called.Name == string(kind)
-		})
+// opensTheStep is the kind of Step a call written on the Scenario opens, and
+// reports whether it opens one at all.
+func opensTheStep(called *modulerules.Statement, scenarioParameter string) (StepKind, bool) {
+	if !called.Call || called.On == nil || called.On.Name != scenarioParameter {
+		return "", false
+	}
+
+	opened := slices.IndexFunc(theStepKinds, func(kind StepKind) bool {
+		return called.Name == theOpenerOf(kind)
+	})
+	if opened < 0 {
+		return "", false
+	}
+
+	return theStepKinds[opened], true
+}
+
+// theOpenerOf is the call on the Scenario a Step of this kind is written through:
+// the kind's own word for three of the four, and WaitFor for a Wait, so that one
+// call carries both ways of writing a Wait.
+func theOpenerOf(kind StepKind) string {
+	if kind == WaitStep {
+		return theWaitOpener
+	}
+
+	return string(kind)
 }
 
 // declarationsThatAreNotTheList names every declaration of the list file that is

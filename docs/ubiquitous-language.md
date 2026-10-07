@@ -52,13 +52,17 @@
 
 **Customization**: One change a Scenario applies to a Pod specification, yielding a changed copy and leaving the specification it was applied to as it was. Relationships: a Scenario applies zero or more Customizations in the order written, before the Workload is deployed, and a later one wins where two touch the same Setting. A Customization names each Setting it changes under the name Kubernetes gives it, either in the lab's own vocabulary or through Full access. Avoid: override, mutation, patch, modifier.
 
-**Full access**: The Customization that reaches every Kubernetes Pod setting, for a Scenario needing one the lab's own vocabulary does not name. Relationships: a Scenario writes it among its Customizations and names each Setting as Kubernetes names it, so that Scenario reads partly in Kubernetes' own vocabulary. What the lab itself depends on holds whatever Full access leaves out. The lab's own waiting time stands over it, whatever it names. Avoid: escape hatch, raw spec, passthrough, override.
+**Full access**: The Customization that reaches every Kubernetes Pod setting, for a Scenario needing one the lab's own vocabulary does not name. Relationships: a Scenario writes it among its Customizations and names each Setting as Kubernetes names it, so that Scenario reads partly in Kubernetes' own vocabulary. What the lab itself depends on holds whatever Full access leaves out. The waiting time before Pods leave an unresponsive Node stands over it, whatever it names. Avoid: escape hatch, raw spec, passthrough, override.
 
 **Topology**: The arrangement of Zones and Nodes a Simulated Cluster starts from. Relationships: a Topology names a Zone count, a Node count per Zone, and each Node's capacity. Avoid: layout, cluster shape, setup.
 
 **Placement**: The mapping from each Pod of a Workload to the Node and Zone it occupies at one moment. Avoid: scheduling result, assignment, distribution.
 
-**Settled**: The state a Placement reaches when it stops changing, so a later observation of the same Workload reports the same Pods on the same Nodes. Relationships: Required Capacity is judged once immediately after a Failure and again once the Placement is Settled. Avoid: stable, converged, quiesced, final.
+**Settled**: The state a Placement reaches when it stops changing, so a later observation of the same Workload reports the same Pods on the same Nodes. Relationships: the lab observes it beneath a Scenario's Wait, so the Thens after that Wait judge a Settled Placement. Required Capacity is judged once immediately after a Failure and again once the Placement is Settled. Avoid: stable, converged, quiesced, final.
+
+**Ready**: The condition Kubernetes reports for a Pod able to serve, and for a Node able to take Pods. Relationships: a Scenario Waits for every Pod of a Workload it declared, or for every Node of its Topology, to be Ready. Avoid: live, healthy, up, started, available.
+
+**Wait**: The Step of a Scenario where it waits for a state of the cluster before going on. Relationships: an engineer writes a Wait with the Given before it or as a Step of its own. Either way it reports a line of its own with how long it waited. A Wait applies what the Givens before it declared, then waits. A Wait may state the time it must be reached in, and the lab judges the time it waited against that. A Wait stating none is held to the lab's own waiting time. Every Then judges the Placement a Wait reached. Avoid: barrier, settle step, synchronization point; timeout or deadline for the time a Wait states.
 
 **Skew**: The difference between the highest and the lowest Pod count across the Zones, or across the Nodes, of one Workload. Avoid: imbalance, spread delta.
 
@@ -70,7 +74,7 @@
 
 **Scenario**: A named sequence of Steps run against a Simulated Cluster, ending in an asserted Placement outcome. Relationships: a Scenario provisions one Simulated Cluster with one Topology, deploys one or more Workloads, and injects zero or more Failures. Avoid: test case, experiment, simulation.
 
-**Step**: One line of a Scenario, either a Given that sets up, a When that injects a Failure, or a Then that asserts an outcome. Relationships: a Scenario is a sequence of Steps; a Given declares a Topology or a Workload, a When injects one Failure, a Then asserts one Placement outcome. Avoid: stage, phase, clause, instruction.
+**Step**: One line of a Scenario, in one of four kinds: a Given that declares, a When that changes the cluster, a Wait, or a Then that asserts an outcome. Relationships: a Scenario is a sequence of Steps. A Given declares a Topology or a Workload and Waits only where the Scenario asks it to. A When injects one Failure. A Wait waits for a state of the cluster, and an engineer may write it with the Given before it. A Then asserts one Placement outcome. Avoid: stage, phase, clause, instruction.
 
 **Scenario name**: The short name an engineer gives one Scenario, which a run reports and which selects that Scenario to run on its own. Relationships: exactly one per Scenario, and not the name of the Scenario's function. A Scenario name may repeat the Pod specification its Workload declares, so Resilient placement names both the Scenario and that specification. Avoid: run name (a run is one invocation of the lab), test name, scenario id; Even spread, the earlier name of the Resilient placement Scenario.
 

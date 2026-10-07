@@ -53,6 +53,14 @@ const (
 	resilientPlacementDeclared = "Given a Workload checkout of 9 Pods declaring Resilient placement"
 )
 
+// The two Wait lines every Scenario of the lab reports, read by the prefix each
+// opens with: a Wait's line names how long it held, and how long that is belongs
+// to the run rather than to what a Scenario asserts.
+const (
+	allNodesReadyAwaited = "Wait for all Nodes Ready in "
+	allPodsReadyAwaited  = "Wait for all Pods Ready in "
+)
+
 // The lines both Failure Scenarios share: the Given line above renamed by the
 // fewest Pods their Workload must keep Running through a Failure, and the opening
 // of the Then that judges that minimum. A declaration renames the line it is
@@ -63,38 +71,39 @@ const (
 	theCapacityJudged           = "Then the Required Capacity held: a minimum of 6 Pods, "
 )
 
-// The lines a run of the Node loss Scenario is read by: its heading under the run
-// name derived for it, the When Step naming the Node the lab picked, the Then
-// that judges what the Failure left behind, and the counts its capacity
-// judgement states — eight Pods left Running by a Node holding one, and the ninth
-// placed again once the Placement has settled.
+// The lines a run of the Node stops responding Scenario is read by: its heading
+// under the run name derived for it, the When Step naming the Node the lab
+// picked, the Then that judges what the Failure left behind, and the counts its
+// capacity judgement states — eight Pods left Running by a Node holding one,
+// and the ninth placed again once the Placement has settled.
 //
 // theNodePickedToFail is the first Node the Scenario's Topology derives, which is
 // the pick a run has to report and has to repeat on every run.
 const (
-	nodeLossReported            = aScenarioHeading + "node-loss"
+	nodeStopsRespondingReported = aScenarioHeading + "node-stops-responding"
 	theNodePickedToFail         = "zone-1-node-1"
 	oneNodeFailsReported        = "When 1 Node fails, " + theNodePickedToFail
 	noPodOnTheFailedNodesJudged = "Then no Pod on the Nodes that failed"
 
-	capacityHeldOnNodeLossJudged = theCapacityJudged + "8 at the moment of the Failure and 9 once Settled"
+	capacityHeldWhenTheNodeStoppedJudged = theCapacityJudged + "8 at the moment of the Failure and 9 once Settled"
 )
 
-// The lines a run of the Zone loss Scenario is read by, in the same parts: its
-// heading, the When Step naming the Zone the lab picked, the Then that judges what
-// the Failure left in it, and the counts its capacity judgement states — a lost
-// Zone takes three of the nine Pods, so exactly the minimum is left Running at
-// that moment and all nine once the Placement has settled.
+// The lines a run of the Zone stops responding Scenario is read by, in the same
+// parts: its heading, the When Step naming the Zone the lab picked, the Then
+// that judges what the Failure left in it, and the counts its capacity
+// judgement states — a lost Zone takes three of the nine Pods, so exactly the
+// minimum is left Running at that moment and all nine once the Placement has
+// settled.
 //
 // theZonePickedToFail is the first Zone the Scenario's Topology derives, which is
 // the pick a run has to report and has to repeat on every run.
 const (
-	zoneLossReported            = aScenarioHeading + "zone-loss"
+	zoneStopsRespondingReported = aScenarioHeading + "zone-stops-responding"
 	theZonePickedToFail         = "zone-1"
 	oneZoneFailsReported        = "When 1 Zone fails, " + theZonePickedToFail
 	noPodInTheFailedZonesJudged = "Then no Pod in the Zones that failed"
 
-	capacityHeldInZoneLossJudged = theCapacityJudged + "6 at the moment of the Failure and 9 once Settled"
+	capacityHeldWhenTheZoneStoppedJudged = theCapacityJudged + "6 at the moment of the Failure and 9 once Settled"
 )
 
 // The labels a run opens each of its control-plane settings with. What such a
@@ -104,6 +113,11 @@ const (
 	unresponsiveNodeSetting = "unresponsive Node:"
 	nodeHeartbeatSetting    = "Node heartbeats:"
 	nodeEvictionSetting     = "Node eviction rate:"
+
+	// The lab's own waiting time is reported beside them under a label of its own,
+	// because it is the longest the lab itself waits rather than a setting it makes
+	// on the control plane.
+	labWaitingTime = "lab waiting time:"
 )
 
 // wholeTimelineAsked is the argument an engineer asks a run for every entry of
@@ -226,17 +240,19 @@ func TestResilientPlacementWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNo
 
 	reportShows(t, reported, resilientPlacementReported)
 	reportShows(t, reported, resilientPlacementDeclared)
+	reportShows(t, reported, allNodesReadyAwaited)
+	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, threePodsPerZoneJudged)
 	reportShows(t, reported, onePodPerNodeJudged)
 	reportShows(t, reported, placementSettled)
 	reportLacks(t, reported, aFindingReported)
 }
 
-// Node loss runs in the same suite and for the same reason: the Placement it
-// judges after the Failure is the control plane's own doing, and the Scenario is
-// itself the check. Its When Step is read too, because the Node the lab picked is
-// something only the run can report.
-func TestNodeLossWrittenAsSteps_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFailedNode(t *testing.T) {
+// The Node stops responding Scenario runs in the same suite and for the same
+// reason: the Placement it judges after the Failure is the control plane's own
+// doing, and the Scenario is itself the check. Its When Step is read too,
+// because the Node the lab picked is something only the run can report.
+func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFailedNode(t *testing.T) {
 	requireEngine(t)
 
 	reported, err := aRun(t)
@@ -244,22 +260,25 @@ func TestNodeLossWrittenAsSteps_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFaile
 		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
 	}
 
-	reportShows(t, reported, nodeLossReported)
+	reportShows(t, reported, nodeStopsRespondingReported)
 	reportShows(t, reported, theRequiredCapacityDeclared)
+	reportShows(t, reported, allNodesReadyAwaited)
+	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneNodeFailsReported)
 	reportShows(t, reported, noPodOnTheFailedNodesJudged)
 	reportShows(t, reported, threePodsPerZoneJudged)
-	reportShows(t, reported, capacityHeldOnNodeLossJudged)
+	reportShows(t, reported, capacityHeldWhenTheNodeStoppedJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
-// Zone loss runs in the same suite for the same reason, and the Zone the lab
-// picked is read out of its When Step: the Scenario names no Zone, so which one
-// stopped is something only the run can report. The count of Pods per Zone is
-// not read after the Failure — two Zones carry nine Pods, so the Placement is
-// skewed and the Scenario judges the capacity alone, by hand and against the
-// minimum its Workload declares (docs/prd.md REQ-SIM-008, REQ-SIM-010).
-func TestARunOfZoneLoss_ShouldReportTheZoneItPickedToFail(t *testing.T) {
+// The Zone stops responding Scenario runs in the same suite for the same reason,
+// and the Zone the lab picked is read out of its When Step: the Scenario names
+// no Zone, so which one stopped is something only the run can report. The count
+// of Pods per Zone is not read after the Failure — two Zones carry nine Pods,
+// so the Placement is skewed and the Scenario judges the capacity alone, by
+// hand and against the minimum its Workload declares (docs/prd.md REQ-SIM-008,
+// REQ-SIM-010).
+func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *testing.T) {
 	requireEngine(t)
 
 	reported, err := aRun(t)
@@ -267,19 +286,23 @@ func TestARunOfZoneLoss_ShouldReportTheZoneItPickedToFail(t *testing.T) {
 		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
 	}
 
-	reportShows(t, reported, zoneLossReported)
+	reportShows(t, reported, zoneStopsRespondingReported)
 	reportShows(t, reported, theRequiredCapacityDeclared)
+	reportShows(t, reported, allNodesReadyAwaited)
+	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneZoneFailsReported)
 	reportShows(t, reported, noPodInTheFailedZonesJudged)
-	reportShows(t, reported, capacityHeldInZoneLossJudged)
+	reportShows(t, reported, capacityHeldWhenTheZoneStoppedJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
 // Every control-plane setting the lab makes is reported against the default it
 // replaces, so a reader of a run can tell which of the timings it watched are
-// the lab's doing and which are Kubernetes' own. One run is read for all three,
-// because each of them is set once for the whole run.
-func TestARun_ShouldReportEveryControlPlaneSettingItMakesAgainstTheDefaultItReplaces(t *testing.T) {
+// the lab's doing and which are Kubernetes' own. The lab's own waiting time is
+// reported beside them, because a time a Wait states is refused against it and an
+// engineer writing one cannot otherwise see the number. One run is read for all
+// four, because each of them holds for the whole run.
+func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaitingTime(t *testing.T) {
 	requireEngine(t)
 
 	reported, err := aRun(t)
@@ -293,6 +316,7 @@ func TestARun_ShouldReportEveryControlPlaneSettingItMakesAgainstTheDefaultItRepl
 		cluster.NodeHeartbeatFactor, cluster.DefaultNodeHeartbeatFactor)
 	reportLineNames(t, reported, nodeEvictionSetting,
 		cluster.NodeEvictionRate, cluster.DefaultNodeEvictionRate)
+	reportLineNames(t, reported, labWaitingTime, scenario.WaitingTime.String())
 }
 
 func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(t *testing.T) {
@@ -450,7 +474,7 @@ const (
 	theThenStepName     = "3 Pods per Zone"
 	aTopologyStepName   = "a Topology of 3 Zones of 3 Nodes"
 
-	whatEndedTheScenario      = "apply the Topology: create Node zone-1-node-1: already exists"
+	whatEndedTheScenario      = "apply " + aTopologyStepName + ": create Node zone-1-node-1: already exists"
 	whyTheTimelineWasNotFiled = "create the Timeline folder /read-only/timelines: permission denied"
 	someTimelinePath          = "/tmp/a-run/timelines/k8s-resilience-lab-resilient-placement-7f3a9c.jsonl"
 )

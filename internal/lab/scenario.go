@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
@@ -23,6 +24,44 @@ import (
 // noPod is what a Node that stopped responding holds once the control plane has
 // moved its Pods away.
 const noPod = 0
+
+const (
+	// noWait is what a Step that waited for nothing carries, reportedWaitPrecision
+	// how finely a Wait's line states the time it waited — the tenth of a second a
+	// reader of a restore time acts on — and theWaitPrefix the phrase that line
+	// opens with, a Wait being the one kind whose line does not open with the
+	// kind's own word.
+	noWait                = 0
+	reportedWaitPrecision = 100 * time.Millisecond
+	theWaitPrefix         = "Wait for"
+
+	// theTimeExpected is what such a line closes with where the Wait was reached
+	// later than it states: the time expected, after the time it took.
+	theTimeExpected = ", expected within "
+
+	// theWholeWaitingTime is the lab's own waiting time in the whole seconds a Wait
+	// states a time in. The plain name of each Wait delegates with it, so a Wait
+	// stating no time of its own is held to the longest the lab waits.
+	theWholeWaitingTime = int(scenario.WaitingTime / time.Second)
+)
+
+const (
+	// allNodesReady and allPodsReady are how the two Waits name the Wait line each
+	// of them reports, whichever way a Scenario wrote them: the Node condition and
+	// the Pod condition the control plane reports, the latter being what kubectl
+	// rollout status waits on.
+	allNodesReady = "all Nodes Ready"
+	allPodsReady  = "all Pods Ready"
+
+	// theWaitThatNeverStood is what a Step reading a Placement names when no Wait
+	// reached one, which is the line a reader has to add to the Scenario.
+	theWaitThatNeverStood = "no Wait stands before it"
+
+	// theWaitReachedTooLate is why a Scenario ends at a Wait the cluster reached
+	// later than that Wait states. The Step's own line states both times, so the
+	// cause names what ended the Scenario rather than repeating them.
+	theWaitReachedTooLate = "this Wait states the time it must be reached in, and the cluster reached it later"
+)
 
 // Zones is how many Zones a Topology Step declares, or how many a When Step stops
 // responding. A Scenario states the count and the lab resolves which, so no
@@ -51,7 +90,7 @@ type WorkloadName string
 // declare is refused by the internal/scenario constructor the Step calls, which
 // stays the one validation home (docs/architecture-principles.md § Go Idioms).
 
-// StepKind is which of the three a Step is.
+// StepKind is which of the four a Step is.
 type StepKind string
 
 const (
@@ -59,20 +98,55 @@ const (
 	GivenStep StepKind = "Given"
 	// WhenStep injects the Failure a Scenario studies.
 	WhenStep StepKind = "When"
+	// WaitStep holds until the control plane reports a state of the cluster.
+	WaitStep StepKind = "Wait"
 	// ThenStep judges the Placement the Scenario settled at.
 	ThenStep StepKind = "Then"
 )
 
-// Step is one line of a Scenario as it ran: which of the three kinds it is, and
-// the name it reports.
+// opens is how a line of this kind opens: the kind's own word, and for a Wait the
+// phrase reading into the state it held for.
+func (k StepKind) opens() string {
+	if k == WaitStep {
+		return theWaitPrefix
+	}
+
+	return string(k)
+}
+
+// Step is one line of a Scenario as it ran: which of the four kinds it is, the
+// name it reports, and how long it waited where that line is a Wait.
 type Step struct {
 	Kind StepKind
 	Name string
+	// Waited is how long a Wait held before the cluster reached what it waited for,
+	// and nothing at all for every other Step. It is a field of its own rather than
+	// part of the name, so a Step's name stays reproducible, the rename a further
+	// call writes stays untouched, and a later Scenario naming its own waiting time
+	// has a value to judge, per
+	// docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md.
+	Waited time.Duration
+	// Within is the time that Wait stated it must be reached in, and nothing at all
+	// for a Wait stating none and for every other Step. A line states it only where
+	// the Wait was reached later, so a Wait that met its time reads as any other.
+	Within time.Duration
 }
 
-// String is how a Step reads in a report, the way its line reads in the source.
+// String is how a Step reads in a report: how its kind opens a line and the name
+// it reports, closing with how long it waited where it is a Wait, and with the
+// time it expected where it was reached later than it stated.
 func (s Step) String() string {
-	return string(s.Kind) + " " + s.Name
+	line := s.Kind.opens() + " " + s.Name
+	if s.Waited == noWait {
+		return line
+	}
+
+	held := line + " in " + s.Waited.Round(reportedWaitPrecision).String()
+	if s.Within == noWait || s.Waited <= s.Within {
+		return held
+	}
+
+	return held + theTimeExpected + s.Within.String()
 }
 
 // Finding is one Then the Settled Placement did not meet, naming the Step that
@@ -84,7 +158,7 @@ type Finding struct {
 }
 
 // Scenario is the Step surface a Scenario's lines run against. Each line is one
-// Given, When or Then Step, and none of them names an error: the value carries
+// Given, When, Wait or Then Step, and none of them names an error: the value carries
 // the first declaration that was refused and every later Step then carries
 // nothing out, the way a run's report keeps its first write error.
 //
@@ -116,13 +190,22 @@ type Scenario struct {
 	// standing before it.
 	runningAtTheFailure int
 
+	// topologyDeclaredAs and workloadDeclaredAs are how the Given that declared each
+	// of them reads. A Wait applies what the Givens above it declared, so it is a
+	// line below the one that declared it, and these are how its cause names what it
+	// applied.
+	topologyDeclaredAs string
+	workloadDeclaredAs string
+
 	observed scenario.Placement
-	// deployed is whether the declaration has reached the Simulated Cluster, and
-	// settled whether the Placement observed since the last Failure has settled. A
-	// When clears the settled flag alone, so the next Step awaits a fresh Settled
-	// Placement without the Topology being applied or the Workload deployed again.
-	deployed bool
-	settled  bool
+	// topologyApplied is whether the declared Topology has reached the Simulated
+	// Cluster and workloadDeployed whether the declared Workload has, so a second
+	// Wait applies neither again. settled is whether a Wait has reached the
+	// Placement observed since the last Failure: a When clears it alone, so the next
+	// Wait applies nothing and holds for the world the Failure left.
+	topologyApplied  bool
+	workloadDeployed bool
+	settled          bool
 
 	endedAt Step
 	cause   error
@@ -142,6 +225,12 @@ func (s *Scenario) Given() Given {
 // When opens a When Step, which injects the Failure the Scenario studies.
 func (s *Scenario) When() When {
 	return When{scenario: s}
+}
+
+// WaitFor opens a Wait Step, which holds until the control plane reports a state
+// of the cluster.
+func (s *Scenario) WaitFor() Wait {
+	return Wait{scenario: s}
 }
 
 // Then opens a Then Step, which judges the Placement the Scenario settled at.
@@ -171,6 +260,16 @@ func (s *Scenario) rename(name string) Step {
 	return s.steps[last]
 }
 
+// waited records on the Step just recorded how long its Wait held for and the
+// time it was held to, each a field of that Step rather than part of its name,
+// and reports that Step as it now reads.
+func (s *Scenario) waited(held time.Duration, within scenario.StatedWait) Step {
+	last := len(s.steps) - 1
+	s.steps[last].Waited, s.steps[last].Within = held, within.Within()
+
+	return s.steps[last]
+}
+
 // end stops the Scenario at the Step that could not be carried out. The first
 // stop is the one kept, so the Step named is the one a reader looks at.
 func (s *Scenario) end(step Step, cause error) {
@@ -182,51 +281,112 @@ func (s *Scenario) end(step Step, cause error) {
 	s.cause = cause
 }
 
-// placement is the Settled Placement every Then judges: the one already observed,
-// or a fresh one awaited at this Step. A Scenario awaits one before its first
-// Then and one after every When, each within a budget of its own. A Scenario that
-// cannot get that far ends at the Step that needed it, naming what it could not
-// reach.
+// placement is the Placement the last Wait reached: what every Then judges, and
+// what a Failure counts the Pods it keeps Running off. A Scenario that has not
+// Waited since the Givens, or since the Failure that discarded the Placement
+// before it, has none and ends at the Step that read for one, per
+// docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md.
 func (s *Scenario) placement(at Step) (scenario.Placement, bool) {
-	if s.settled {
-		return s.observed, true
-	}
-	if !s.deploy(at) {
-		return scenario.Placement{}, false
-	}
-
-	settled, err := s.provisioned.AwaitSettled(s.ctx, s.workload)
-	if err != nil {
-		s.end(at, fmt.Errorf("await the Settled Placement: %w", err))
+	if !s.settled {
+		s.end(at, errors.New("this Step reads the Placement a Wait reached, and "+theWaitThatNeverStood))
 
 		return scenario.Placement{}, false
 	}
-
-	s.observed, s.settled = settled, true
 
 	return s.observed, true
 }
 
-// deploy is where the declaration reaches the Simulated Cluster: the Topology is
-// applied and the Workload deployed, once per Scenario, at the first Step that
-// needs an observed Placement. A later Step awaits the Placement again without
-// declaring the world again.
-func (s *Scenario) deploy(at Step) bool {
-	if s.deployed {
-		return true
+// await is the one Wait both ways of writing one run: it applies whatever the
+// Givens above it declared, holds until the control plane reports what this Wait
+// holds for, and records on its own Wait Step how long it held. A Wait the lab's
+// waiting time outlasts ends the Scenario there, naming what was not Ready.
+//
+// The lab waits its own waiting time whatever seconds the Wait states, so the run
+// reports how long recovery really took, and a time the lab cannot hold a Wait to
+// ends the Scenario at that Wait before anything is applied.
+func (s *Scenario) await(named string, seconds int, reaching func() (scenario.Placement, error)) {
+	step, open := s.record(WaitStep, named)
+	if !open {
+		return
 	}
 
-	if err := s.provisioned.ApplyTopology(s.ctx, s.topology); err != nil {
-		s.end(at, fmt.Errorf("apply the Topology: %w", err))
+	within, err := scenario.NewStatedWait(seconds)
+	if err != nil {
+		s.end(step, err)
 
-		return false
+		return
 	}
-	if err := s.provisioned.Deploy(s.ctx, s.workload, s.accesses...); err != nil {
-		s.end(at, fmt.Errorf("deploy the Workload: %w", err))
+	if !s.apply(step) {
+		return
+	}
 
-		return false
+	holding := time.Now()
+	reached, err := reaching()
+	if err != nil {
+		s.end(step, err)
+
+		return
 	}
-	s.deployed = true
+	s.observed, s.settled = reached, true
+	s.reached(within, time.Since(holding))
+}
+
+// reached records on the Wait just carried out the time it held for and the time
+// it was held to, and ends the Scenario there where the cluster reached it later
+// than that Wait states: the Steps after it would judge a state the Scenario
+// called too late. It takes the time measured rather than reading a clock, so the
+// judgement runs over no cluster.
+func (s *Scenario) reached(within scenario.StatedWait, held time.Duration) {
+	waited := s.waited(held, within)
+	if within.Reached(held) {
+		return
+	}
+
+	s.end(waited, errors.New(theWaitReachedTooLate))
+}
+
+// awaitNodesReady and awaitPodsReady are the two Waits themselves, each the one
+// that fits what a Given declares: every Node of the declared Topology Ready, and
+// every Pod of the declared Workload Ready. A Scenario reaches them through the
+// WaitFor of a Given's own line or through a Wait Step of its own, which is why
+// they are the Scenario's rather than either opening type's.
+func (s *Scenario) awaitNodesReady(seconds int) {
+	s.await(allNodesReady, seconds, func() (scenario.Placement, error) {
+		return s.provisioned.AwaitNodesReady(s.ctx, s.topology, s.workload)
+	})
+}
+
+func (s *Scenario) awaitPodsReady(seconds int) {
+	s.await(allPodsReady, seconds, func() (scenario.Placement, error) {
+		return s.provisioned.AwaitPodsReady(s.ctx, s.workload)
+	})
+}
+
+// apply is where a declaration reaches the Simulated Cluster: the Wait applies
+// what the Givens above it declared and nothing else has applied yet — the
+// Topology first, so the Workload's Pods have Nodes to be placed on — and the
+// Scenario ends at that Wait where the control plane refuses one, its cause naming
+// the declaration the Given above wrote. A Given declares alone and reaches no
+// cluster, so a refusal only the control plane can give is named here and one the
+// lab checks itself stays at the Given, per
+// docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md.
+func (s *Scenario) apply(at Step) bool {
+	if s.topologyDeclaredAs != "" && !s.topologyApplied {
+		if err := s.provisioned.ApplyTopology(s.ctx, s.topology); err != nil {
+			s.end(at, fmt.Errorf("apply %s: %w", s.topologyDeclaredAs, err))
+
+			return false
+		}
+		s.topologyApplied = true
+	}
+	if s.workloadDeclaredAs != "" && !s.workloadDeployed {
+		if err := s.provisioned.Deploy(s.ctx, s.workload, s.accesses...); err != nil {
+			s.end(at, fmt.Errorf("deploy %s: %w", s.workloadDeclaredAs, err))
+
+			return false
+		}
+		s.workloadDeployed = true
+	}
 
 	return true
 }
@@ -275,6 +435,7 @@ func (g Given) Workload(name WorkloadName, pods Pods, declares PodSpecification)
 		return declared
 	}
 	g.scenario.workload, g.scenario.accesses = workload, declares.accesses
+	g.scenario.workloadDeclaredAs = step.Name
 
 	return declared
 }
@@ -306,9 +467,15 @@ func (d DeclaredWorkload) RequiredCapacity(pods Pods) DeclaredWorkload {
 
 		return d
 	}
-	d.scenario.workload = declared
+	d.scenario.workload, d.scenario.workloadDeclaredAs = declared, step.Name
 
 	return d
+}
+
+// WaitFor opens the Wait that fits the Workload this line declared, so a Scenario
+// can write the Wait on the line that declared what it waits for.
+func (d DeclaredWorkload) WaitFor() WorkloadWait {
+	return WorkloadWait{scenario: d.scenario}
 }
 
 // named is how this line reads in a report: its Pods, and the intent of the
@@ -355,9 +522,14 @@ func (d DeclaredTopology) declare(step Step, pods int) DeclaredTopology {
 
 		return d
 	}
-	d.scenario.topology = topology
+	d.scenario.topology, d.scenario.topologyDeclaredAs = topology, step.Name
 
 	return d
+}
+
+// WaitFor opens the Wait that fits the Topology this line declared.
+func (d DeclaredTopology) WaitFor() TopologyWait {
+	return TopologyWait{scenario: d.scenario}
 }
 
 // named is how this line reads in a report.
@@ -366,9 +538,80 @@ func (d DeclaredTopology) named() string {
 		counted(int(d.zones), "Zone", "Zones"), counted(int(d.nodesPerZone), "Node", "Nodes"))
 }
 
-// When injects the Failure a Scenario studies. It waits for the world to have
-// settled before it injects, so what the next Then judges is the Placement the
-// control plane reached after the Failure and not the one it was still in.
+// TopologyWait is what the WaitFor of a Topology line opens, and WorkloadWait
+// what the WaitFor of a Workload line opens: each offers the one Wait that fits
+// what the line just declared, and nothing else.
+type TopologyWait struct {
+	scenario *Scenario
+}
+
+type WorkloadWait struct {
+	scenario *Scenario
+}
+
+// AllNodesReady holds until the control plane reports every Node of the Topology
+// this line declared Ready, within the lab's own waiting time.
+func (t TopologyWait) AllNodesReady() {
+	t.AllNodesReadyWithinSeconds(theWholeWaitingTime)
+}
+
+// AllNodesReadyWithinSeconds is that Wait held to the time this line states it
+// must be reached in, in whole seconds.
+func (t TopologyWait) AllNodesReadyWithinSeconds(seconds int) {
+	t.scenario.awaitNodesReady(seconds)
+}
+
+// AllPodsReady holds until the control plane reports every Pod of the Workload
+// this line declared Ready, within the lab's own waiting time.
+func (w WorkloadWait) AllPodsReady() {
+	w.AllPodsReadyWithinSeconds(theWholeWaitingTime)
+}
+
+// AllPodsReadyWithinSeconds is that Wait held to the time this line states it
+// must be reached in, in whole seconds.
+func (w WorkloadWait) AllPodsReadyWithinSeconds(seconds int) {
+	w.scenario.awaitPodsReady(seconds)
+}
+
+// Wait is the state of the cluster a Scenario holds for the control plane to
+// report, written as a Step of its own: both Waits are offered here, because a
+// Wait of its own stands wherever a Scenario needs one — before any Workload is
+// declared, and after a Failure. A Wait applies what the Givens above it
+// declared, which is why a Given reaches no cluster of its own.
+type Wait struct {
+	scenario *Scenario
+}
+
+// AllNodesReady is the Wait for every Node the declared Topology holds: the Wait a
+// Scenario writes where Nodes are added or come back, and the same Wait the
+// WaitFor of a Topology line opens. It is held to the lab's own waiting time.
+func (w Wait) AllNodesReady() {
+	w.AllNodesReadyWithinSeconds(theWholeWaitingTime)
+}
+
+// AllNodesReadyWithinSeconds is that Wait held to the time this line states it
+// must be reached in, in whole seconds.
+func (w Wait) AllNodesReadyWithinSeconds(seconds int) {
+	w.scenario.awaitNodesReady(seconds)
+}
+
+// AllPodsReady is the Wait for every Pod the declared Workload holds: the Wait a
+// Scenario writes after a Failure, and the same Wait the WaitFor of a Workload
+// line opens. It is held to the lab's own waiting time.
+func (w Wait) AllPodsReady() {
+	w.AllPodsReadyWithinSeconds(theWholeWaitingTime)
+}
+
+// AllPodsReadyWithinSeconds is that Wait held to the time this line states it
+// must be reached in, in whole seconds.
+func (w Wait) AllPodsReadyWithinSeconds(seconds int) {
+	w.scenario.awaitPodsReady(seconds)
+}
+
+// When is what a Scenario does to the cluster: the Failure it injects, and nothing
+// else. A Failure acts on the world the Scenario has reached and waits for nothing
+// beforehand, so the Placement its Thens judge is the one the Wait after it
+// reaches.
 type When struct {
 	scenario *Scenario
 }
@@ -376,7 +619,8 @@ type When struct {
 // NodesFail stops the stated number of Nodes responding: the first ones the
 // declared Topology derives, which makes the pick the same on every run. The Step
 // is renamed to carry the Nodes resolved, so a run reports which of them failed,
-// and the Scenario is left awaiting a fresh Settled Placement.
+// and the Scenario is left for the next Wait to reach the Placement the control
+// plane settles at.
 func (w When) NodesFail(nodes Nodes) {
 	step, open := w.scenario.record(WhenStep, nodesFailing(int(nodes)))
 	if !open {
@@ -402,7 +646,8 @@ func (w When) NodesFail(nodes Nodes) {
 // Zones the declared Topology derives, which makes the pick the same on every run.
 // The Step is renamed to carry the Zones resolved — the Zones and not their Nodes,
 // since a Zone is what this When fails — so a run reports which of them failed,
-// and the Scenario is left awaiting a fresh Settled Placement.
+// and the Scenario is left for the next Wait to reach the Placement the control
+// plane settles at.
 func (w When) ZonesFail(zones Zones) {
 	step, open := w.scenario.record(WhenStep, zonesFailing(int(zones)))
 	if !open {
@@ -426,9 +671,9 @@ func (w When) ZonesFail(zones Zones) {
 	}
 }
 
-// stop stops each of these Nodes responding and leaves this Scenario awaiting a
-// fresh Settled Placement, ending it at the When that could not stop one, and
-// reports whether every one of them stopped. The observation held until now is the
+// stop stops each of these Nodes responding and leaves this Scenario for the Wait
+// after it to reach a fresh Placement, ending it at the When that could not stop
+// one, and reports whether every one of them stopped. The observation held until now is the
 // world before the Failure, so it is discarded rather than judged by the Thens
 // after it.
 func (s *Scenario) stop(at Step, nodes []string) bool {

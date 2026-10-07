@@ -9,8 +9,10 @@ package lab
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -67,6 +69,10 @@ const (
 	// when no When ran before it, which is what a reader has to add.
 	theWhenThatNeverRan = "no When"
 
+	// oneNodeFailing is a Failure the declared Topology can satisfy, which is what
+	// a When reading the Placement before it has to be to get as far as that read.
+	oneNodeFailing = 1
+
 	// theMinimumNeverDeclared is what the Then judging a Required Capacity names
 	// when the Workload declared none, which is the other way it has nothing to
 	// judge.
@@ -85,12 +91,40 @@ const (
 	onePodLeftBehind       = 1
 	podLeftOnTheFailedNode = string(someWorkloadName) + "-left-behind"
 
+	// aFinelyStatedWait is a time a Wait held for, stated more finely than a report
+	// states it, which is what the rounding below is read on.
+	aFinelyStatedWait = 6234 * time.Millisecond
+
+	// aTimeAWaitStates is a time a Wait of the tests below states it must be
+	// reached in, and aWaitPastTheTimeItStates a time such a Wait took past it.
+	aTimeAWaitStates         = 15
+	aWaitPastTheTimeItStates = 25500 * time.Millisecond
+
+	// theSecondsAboveTheLabsWaitingTime and noSecondsAtAll are the two times no
+	// Wait may state: one second more than the lab waits for a state of the
+	// cluster, and no time at all.
+	theSecondsAboveTheLabsWaitingTime = theWholeWaitingTime + 1
+	noSecondsAtAll                    = 0
+
 	// someWorkloadName is the name a Workload's Pods are labelled with. A Then
 	// counts Pods per domain and reads no meaning into the name, so it stands for
 	// any. It is named here rather than taken from the Scenarios' place, which
 	// internal/lab does not import.
 	someWorkloadName WorkloadName = "some-workload"
 )
+
+// aWaitStating is the time a Wait of that many whole seconds is held to, built
+// the way the Step surface builds one.
+func aWaitStating(t *testing.T, seconds int) scenario.StatedWait {
+	t.Helper()
+
+	stated, err := scenario.NewStatedWait(seconds)
+	if err != nil {
+		t.Fatalf("build the time a Wait of %d seconds is held to: %v", seconds, err)
+	}
+
+	return stated
+}
 
 // aScenario is a Scenario whose Steps declare alone. No Placement has been
 // observed and none is needed: the Givens below reach no cluster.
@@ -109,6 +143,23 @@ func aScenarioOver(placed scenario.Placement) *Scenario {
 // Failure judges in.
 func aScenarioAfterFailing(placed scenario.Placement, stopped ...string) *Scenario {
 	return &Scenario{observed: placed, settled: true, failed: stopped}
+}
+
+// aScenarioAtAWaitForEveryPod is a Scenario whose Wait for every Pod Ready has
+// been recorded and not yet judged, which is the world the stated time is judged
+// in.
+func aScenarioAtAWaitForEveryPod() *Scenario {
+	waiting := aScenario()
+	waiting.record(WaitStep, allPodsReady)
+
+	return waiting
+}
+
+// aScenarioAfterFailingWithNoWaitSince is a Scenario whose When stopped this Node
+// responding and which has not Waited since, which is the world a Then standing
+// straight after a Failure judges in.
+func aScenarioAfterFailingWithNoWaitSince(placed scenario.Placement, stopped string) *Scenario {
+	return &Scenario{observed: placed, failed: []string{stopped}}
 }
 
 // aScenarioAfterFailingWhichKept is that Scenario once its When has also derived
@@ -383,8 +434,24 @@ func nodesFailStepOf(nodes int) Step {
 	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Nodes fail", nodes)}
 }
 
+// oneNodeFailsStep is the Step a When of one Node records, which reads in the
+// singular where the counted Steps above read in the plural.
+func oneNodeFailsStep() Step {
+	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Node fails", oneNodeFailing)}
+}
+
 func zonesFailStepOf(zones int) Step {
 	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Zones fail", zones)}
+}
+
+// allNodesReadyStep and allPodsReadyStep are the Steps the two Waits record: a
+// Wait line of their own, whichever way the Scenario wrote them.
+func allNodesReadyStep() Step {
+	return Step{Kind: WaitStep, Name: allNodesReady}
+}
+
+func allPodsReadyStep() Step {
+	return Step{Kind: WaitStep, Name: allPodsReady}
 }
 
 func noPodsOnTheFailedNodesStep() Step {
@@ -451,17 +518,125 @@ func momentNamedBy(finding Finding) string {
 	return noMomentNamed
 }
 
-// kindsOf is which of the three kinds each Step recorded was, in Step order.
-func kindsOf(steps []Step) []StepKind {
-	kinds := make([]StepKind, 0, len(steps))
-	for _, step := range steps {
-		kinds = append(kinds, step.Kind)
-	}
+// A Wait states on its own line how long it waited, to the tenth of a second a
+// reader of a restore time acts on. The time is a field of the Step rather than
+// part of its name, so what a Step is named stays reproducible, per
+// docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md.
+func TestAStepThatWaited_ShouldReadWithHowLongItWaited(t *testing.T) {
+	waited := allPodsReadyStep()
+	waited.Waited = aFinelyStatedWait
 
-	return kinds
+	expect.Expect(t, waited.String()).To(expect.Equal("Wait for " + allPodsReady + " in 6.2s"))
 }
 
-func TestGivenSteps_ShouldDeclareTheTopologyAndTheWorkload(t *testing.T) {
+func TestAStepThatWaitedForNothing_ShouldReadAsItsKindAndNameAlone(t *testing.T) {
+	declared := topologyStepOf(twoZones, twoNodesPerZone)
+
+	expect.Expect(t, declared.String()).To(expect.Equal("Given " + declared.Name))
+}
+
+// A Wait reached in the time it states reads as a Wait that states none: the time
+// expected is on the line only where it was missed, so stating one costs a reader
+// nothing (docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md).
+func TestAWaitReachedInsideTheTimeItStates_ShouldReadAsAnyOtherWait(t *testing.T) {
+	statingNone := allPodsReadyStep()
+	statingNone.Waited = aFinelyStatedWait
+	statingATime := statingNone
+	statingATime.Within = aWaitStating(t, aTimeAWaitStates).Within()
+
+	expect.Expect(t, statingATime.String()).To(expect.Equal(statingNone.String()))
+}
+
+// A Wait reached later than it states ends the Scenario at that Wait, whose line
+// states the time it took and the time it expected, so a reader of a restore time
+// sees both. The judgement takes the time measured rather than reading a clock,
+// which is what lets it run over no cluster (docs/prd.md REQ-SIM-006).
+func TestAWaitNotReachedInTheTimeItStates_ShouldEndTheScenarioStatingTheTimeTakenAndTheTimeExpected(t *testing.T) {
+	ending := aScenarioAtAWaitForEveryPod()
+
+	ending.reached(aWaitStating(t, aTimeAWaitStates), aWaitPastTheTimeItStates)
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt.String()).To(expect.Equal("Wait for " + allPodsReady + " in 25.5s, expected within 15s"))
+	causeNames(t, ended, theWaitReachedTooLate)
+}
+
+// A Wait stating no time is held to the lab's own waiting time: the plain name of
+// each Wait delegates with it, in the whole seconds a Wait states, so every Wait
+// is held to a time and that time is one the domain admits.
+func TestAWaitStatingNoTime_ShouldBeHeldToTheLabsOwnWaitingTime(t *testing.T) {
+	held := aWaitStating(t, theWholeWaitingTime)
+
+	expect.Expect(t, held.Within()).To(expect.Equal(scenario.WaitingTime))
+}
+
+// Each form of writing a Wait states a time of its own: all four carry the
+// seconds written on their line into the domain, which refuses a time the lab
+// cannot hold a Wait to and names the time that Wait stated. The refusal stands
+// before the Wait applies anything, so these Scenarios reach no cluster.
+func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeItStates(t *testing.T) {
+	waits := map[string]struct {
+		write func(*Scenario)
+		named string
+		step  Step
+	}{
+		"chained onto the Topology it declares": {
+			write: func(ending *Scenario) {
+				ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone)).
+					WaitFor().AllNodesReadyWithinSeconds(theSecondsAboveTheLabsWaitingTime)
+			},
+			named: secondsRead(theSecondsAboveTheLabsWaitingTime),
+			step:  allNodesReadyStep(),
+		},
+		"chained onto the Workload it declares": {
+			write: func(ending *Scenario) {
+				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement()).
+					WaitFor().AllPodsReadyWithinSeconds(noSecondsAtAll)
+			},
+			named: strconv.Itoa(noSecondsAtAll),
+			step:  allPodsReadyStep(),
+		},
+		"a Wait Step of its own for the Nodes": {
+			write: func(ending *Scenario) {
+				ending.WaitFor().AllNodesReadyWithinSeconds(noSecondsAtAll)
+			},
+			named: strconv.Itoa(noSecondsAtAll),
+			step:  allNodesReadyStep(),
+		},
+		"a Wait Step of its own for the Pods": {
+			write: func(ending *Scenario) {
+				ending.WaitFor().AllPodsReadyWithinSeconds(theSecondsAboveTheLabsWaitingTime)
+			},
+			named: secondsRead(theSecondsAboveTheLabsWaitingTime),
+			step:  allPodsReadyStep(),
+		},
+	}
+
+	for written, wait := range waits {
+		t.Run(written, func(t *testing.T) {
+			ending := aScenario()
+
+			wait.write(ending)
+
+			ended := ending.outcome()
+			expect.Expect(t, ended.EndedAt).To(expect.Equal(wait.step))
+			causeNames(t, ended, wait.named)
+			causeNames(t, ended, scenario.WaitingTime.String())
+		})
+	}
+}
+
+// secondsRead is how a refusal states a time of that many seconds, which is the
+// duration those seconds are resolved to rather than the count written.
+func secondsRead(seconds int) string {
+	return (time.Duration(seconds) * time.Second).String()
+}
+
+// A Given declares the value its line names and reaches no cluster: what it
+// declared is applied by the Wait a Scenario writes after it, so these two lines
+// run against a Scenario holding no Simulated Cluster at all
+// (docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md).
+func TestAGivenThatIsNotAskedToWait_ShouldDeclareWithoutReachingTheCluster(t *testing.T) {
 	declaring := aScenario()
 
 	declaring.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
@@ -887,18 +1062,66 @@ func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testi
 	}
 }
 
-func TestScenarioWithoutAFailure_ShouldCarryNoWhenStep(t *testing.T) {
-	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
-	settled := onePodPerNodeOf(declared)
-	running := aScenarioOver(settled)
+// A Then judges the Placement a Wait reached, so a Then with no Wait between it
+// and the Givens, or between it and the Failure that discarded the last
+// Placement, has nothing settled to judge and the Scenario ends there
+// (docs/prd.md REQ-SIM-006).
+func TestAThenWithNoWaitBeforeIt_ShouldEndTheScenarioNamingThatThen(t *testing.T) {
+	cases := map[string]func(scenario.Topology) *Scenario{
+		"no Wait since the Givens": func(_ scenario.Topology) *Scenario {
+			return aScenario()
+		},
+		"no Wait since the Failure": func(declared scenario.Topology) *Scenario {
+			stopped := theNodeThatStopped(declared)
 
-	running.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
-	running.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
-	running.Then().AllPodsRunning()
+			return aScenarioAfterFailingWithNoWaitSince(
+				everyPodBackOnTheRespondingNodesOf(declared, stopped), stopped)
+		},
+	}
 
-	reported := running.outcome()
-	expect.Expect(t, kindsOf(reported.Steps)).To(expect.Equal([]StepKind{GivenStep, GivenStep, ThenStep}))
-	expect.Expect(t, reported.Placement).To(expect.Equal(settled))
+	for since, declare := range cases {
+		t.Run(since, func(t *testing.T) {
+			declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+			ending := declare(declared)
+			ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+			ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
+
+			ending.Then().PodsPerZone(podsPerZoneWhenEven)
+			ending.Then().AllPodsRunning()
+
+			ended := ending.outcome()
+			expect.Expect(t, ended.EndedAt).To(expect.Equal(podsPerZoneStepOf(podsPerZoneWhenEven)))
+			expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+				topologyStepOf(twoZones, twoNodesPerZone),
+				resilientPlacementWorkloadStepOf(podsOverEveryNode),
+				podsPerZoneStepOf(podsPerZoneWhenEven),
+			}))
+			expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+			causeNames(t, ended, theWaitThatNeverStood)
+		})
+	}
+}
+
+// A Failure counts what the Workload kept Running at the moment it is injected,
+// off the Placement the last Wait reached, so a Scenario that has not Waited once
+// ends at that When rather than stopping Nodes in a world it has not observed.
+func TestAFailureBeforeTheScenarioHasWaited_ShouldEndTheScenarioNamingThatWhen(t *testing.T) {
+	ending := aScenario()
+	ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
+
+	ending.When().NodesFail(Nodes(oneNodeFailing))
+	ending.Then().AllPodsRunning()
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(oneNodeFailsStep()))
+	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		resilientPlacementWorkloadStepOf(podsOverEveryNode),
+		oneNodeFailsStep(),
+	}))
+	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+	causeNames(t, ended, theWaitThatNeverStood)
 }
 
 // A Scenario's lines are carried out in the order they stand in, so a Then before

@@ -125,6 +125,19 @@ func TestAPlacement_ShouldReportThePodsOfOnePhaseAlone(t *testing.T) {
 	expect.Expect(t, placement.PodsInPhase(scenario.PodPending)).To(expect.Equal([]scenario.Pod{pending}))
 }
 
+// A Wait for every Pod Ready ends the Scenario naming the Pods it did not reach,
+// so a Placement reports the ones it does not hold Ready (docs/prd.md
+// REQ-SIM-006).
+func TestAPlacement_ShouldNameThePodsItDoesNotReportReady(t *testing.T) {
+	ready := scenario.Pod{Name: firstPodOnTheFullestNode, Node: fullestNode, Phase: scenario.PodRunning, Ready: true}
+	notReadyYet := scenario.Pod{Name: podOnTheNextNode, Node: nextNode, Phase: scenario.PodRunning}
+	pending := scenario.Pod{Name: podOnNoNodeAtAll, Phase: scenario.PodPending}
+
+	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), []scenario.Pod{ready, notReadyYet, pending})
+
+	expect.Expect(t, placement.PodsNotReady()).To(expect.Equal([]scenario.Pod{notReadyYet, pending}))
+}
+
 // What a Workload kept at the moment a Failure stopped a Node is read off the
 // observation taken before it: the Pods Running anywhere but on the Nodes that
 // stopped (docs/prd.md REQ-SIM-010).

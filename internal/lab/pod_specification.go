@@ -87,7 +87,7 @@ func FullAccess(change cluster.PodSpecAccess) Customization {
 
 // specification is the base every predefined specification starts from: it names
 // the specification and carries the lab's own settings, the tolerations that keep
-// a Pod on a Node that stopped responding for the lab's waiting time and no
+// a Pod on a Node that stopped responding for the unresponsive-Node wait and no
 // longer. They stand here rather than in the mapper, so a reader of a definition
 // below sees the whole of what decides a Placement one hop away.
 func specification(name string) PodSpecification {
@@ -124,7 +124,8 @@ func ResilientPlacement() PodSpecification {
 // them a worked example of the vocabulary a Scenario customizes in. A value the
 // control plane refuses is refused there and not here: the lab does not own
 // Kubernetes' admissible values, so such a Customization ends the Scenario at the
-// Step that deployed its Workload, per
+// Wait that deployed its Workload, which is the Step a declaration reaches the
+// cluster through, per
 // docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
 func (s PodSpecification) Customize(customizations ...Customization) PodSpecification {
 	customized := s

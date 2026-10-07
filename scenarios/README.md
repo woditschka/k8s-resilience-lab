@@ -1,142 +1,89 @@
 # Scenarios
 
-The lab's experiments. Each Scenario is one file here, holding one exported Go function whose every
-line is a Given, When or Then Step. Nothing of the machinery that runs them lives here: the Step
-surface and the runner are `internal/lab`.
+The lab's experiments. A Scenario is one file here, holding one exported Go function over `*lab.Scenario` whose every line is one Step. Nothing of the machinery that runs them lives here: the Step surface and the runner are `internal/lab`.
 
-Two files sit beside them. `scenarios.go` holds `All`, the list of the Scenarios a run carries out.
-`workloads.go` holds the names of the Workloads they deploy, one constant each.
+Two files sit beside them. `scenarios.go` holds `All`, the list of the Scenarios a run carries out. `workloads.go` holds the names of the Workloads they deploy, one constant each.
 
 Run them all with `go run ./cmd/lab`.
 
-## Resilient placement
+## How one works
 
-`resilient_placement.go`, running as `resilient-placement`
+A Scenario writes these kinds of Step:
 
-| | |
-|---|---|
-| Given | three Zones of three Nodes |
-| Given | the `Checkout` Workload of nine Pods, declaring Resilient placement |
-| Then | every Pod is Running |
-| Then | three Pods sit in every Zone |
-| Then | one Pod sits on every Node |
+- A **Given** declares the Topology or the Workload, and reaches no cluster.
+- A **When** injects the Failure.
+- A **Wait** applies what the Givens above it declared, holds until the cluster reports the state it names, and reports how long it held.
+- A **Then** judges the Placement the last Wait reached, and records a Finding while the later Steps still run.
 
-The Scenario the lab starts from: with room on every Node for more than one Pod, an even Placement
-is the scheduler honouring the specification the Workload declares rather than the Nodes running out
-of space.
+A Then and a Failure both read the Placement the last Wait reached, and a Failure discards it. So a Wait stands before the first Then, and another between a Failure and the Then after it. A Scenario missing either ends at that Step rather than judging a world that is still changing.
 
-## Node loss
+A Wait is written as a Step of its own, `s.WaitFor().AllPodsReady()`, or on the Given whose declaration it fits, `s.Given().Topology(…).WaitFor().AllNodesReady()`. Both forms are a Wait Step. The Scenarios here write the standalone one.
 
-`node_loss.go`, running as `node-loss`
+## The vocabulary a Scenario writes
 
-| | |
-|---|---|
-| Given | three Zones of three Nodes |
-| Given | the `Checkout` Workload of nine Pods, declaring Resilient placement, keeping at least six Pods Running |
-| Then | every Pod is Running |
-| Then | three Pods sit in every Zone |
-| When | one Node fails |
-| Then | every Pod is Running |
-| Then | three Pods sit in every Zone |
-| Then | no Pod sits on the Nodes that failed |
-| Then | the Required Capacity held: eight Pods at the moment of the Failure, nine once Settled |
+Each name below is defined in `internal/lab`, which stays the authority on what it does.
 
-The Resilient placement Scenario's world, and then one Node stops responding. The two Thens before
-the When judge the Placement the Scenario starts from, so the world the Failure is injected into is
-judged rather than assumed and a Finding there points at the starting Placement instead of at the
-recovery. The When says how many Nodes fail rather than naming one: the lab picks the first Nodes the
-declared Topology derives, the same pick on every run, and reports which in the Step's own line. The
-Thens after it judge the Placement the control plane reached next.
+**Givens**
 
-The Workload declares the capacity it has to keep through the Failure, and the last Then judges that
-minimum at two moments: the moment the Failure was injected, and the moment the Placement had settled
-again. One Pod sits on every Node here, so eight are left Running at the first and nine at the
-second, both above the six declared. The Step names the minimum and both counts whether they are met
-or not, and a moment that misses is reported as a Finding naming it.
+- `Given().Topology(lab.Zones, lab.NodesPerZone)`, with `.NodeCapacity(lab.Pods)` for the Pods a Node holds
+- `Given().Workload(name, lab.Pods, specification)`, with `.RequiredCapacity(lab.Pods)` for the fewest Pods it keeps Running through a Failure
+- the Workload constants of `workloads.go`, business capabilities of the domain the Scenarios model
 
-Nothing here moves a Pod. Noticing the Node, tainting it and replacing its Pods on the Nodes still
-responding are the control plane's own doing, which is what makes the judged Placement an observation
-about Kubernetes rather than about the lab. The lab does shorten one wait: a Pod leaves an
-unresponsive Node after seconds rather than the five minutes a default cluster allows, and every run
-reports that setting at its start.
+**Pod specifications**
 
-## Zone loss
+- `lab.ResilientPlacement()` — its Pods spread as evenly over the Zones and over the Nodes as the control plane can place them
+- `lab.DefaultPlacement()` — no spread, so where its Pods land is the scheduler's own choice
+- `.Customize(…)` on a specification — that specification with the lab's own settings changed
+- `lab.FullAccess(…)` — the Customization carrying a Scenario's own change to the Kubernetes Pod specification
 
-`zone_loss.go`, running as `zone-loss`
+**Failures**
 
-| | |
-|---|---|
-| Given | three Zones of three Nodes |
-| Given | the `Checkout` Workload of nine Pods, declaring Resilient placement, keeping at least six Pods Running |
-| Then | every Pod is Running |
-| Then | three Pods sit in every Zone |
-| When | one Zone fails |
-| Then | every Pod is Running |
-| Then | no Pod sits in the Zones that failed |
-| Then | the Required Capacity held: six Pods at the moment of the Failure, nine once Settled |
+- `When().NodesFail(lab.Nodes)` — that many Nodes stop responding
+- `When().ZonesFail(lab.Zones)` — every Node of that many Zones stops responding at once
 
-The same world, and then every Node of one Zone stops responding at once. The When says how many
-Zones fail rather than naming one: the lab picks the first Zones the declared Topology derives, the
-same pick on every run, and reports which in the Step's own line.
+**Waits**
 
-What is judged after the Failure is the capacity and nothing else — nine Pods Running, none of them
-in the Zone that stopped. No count per Zone is judged there, because two Zones take nine Pods: the
-Placement is skewed by one Pod per Zone and two Nodes carry two. That is the impact on reliability a
-lost Zone is accepted to have, and asserting an even spread would assert something Kubernetes cannot
-deliver. Both spread constraints honour the taints the stopped Nodes carry, which is why the Zone
-that failed leaves the spread calculation rather than holding Pods Pending.
+- `WaitFor().AllNodesReady()` and `WaitFor().AllNodesReadyWithinSeconds(seconds)`
+- `WaitFor().AllPodsReady()` and `WaitFor().AllPodsReadyWithinSeconds(seconds)`
+- the same four on the Given that declares the Topology or the Workload
 
-The Workload declares the same minimum of six Pods, and a lost Zone is what tests it: the Zone takes
-three Pods with it, so exactly six are left Running at the moment it stops and all nine once the
-Placement has settled. That is the property the lab is for — the capacity survives a lost Zone — and
-the last Then states both counts beside the minimum.
+A Wait stating no time is held to the lab's own waiting time, which every run reports at its start.
 
-The lab lifts one more control-plane setting for this Scenario. A cluster taints the unresponsive
-Nodes of one Zone at a tenth per second, which would stretch a Zone Failure over half a minute, so
-every cluster the lab provisions runs at ten per second and each run reports that setting at its
-start. What is left to wait for is the period the control plane takes to notice, which is Kubernetes'
-own.
+**Thens**
+
+- `Then().AllPodsRunning()`
+- `Then().PodsPerZone(pods)`
+- `Then().PodsPerNode(pods)`
+- `Then().NoPodsOnTheFailedNodes()`
+- `Then().NoPodsInTheFailedZones()`
+- `Then().RequiredCapacityHeld()` — the declared Required Capacity, judged at the moment of the Failure and once the Placement has settled
+
+## The Scenarios
+
+- **resilient-placement**, `resilient_placement.go` — the lab's simplest Scenario and its starting point. A Workload declares Resilient placement on Nodes with room for more than one of its Pods, so the even Placement is the scheduler honouring that specification.
+- **node-stops-responding**, `node_stops_responding.go` — the Resilient placement world, and then one Node stops responding: what the control plane restores, and the capacity held through it.
+- **zone-stops-responding**, `zone_stops_responding.go` — the same world, and then every Node of one Zone stops responding at once: the capacity surviving a lost Zone.
+
+A Scenario's Steps are read in its source.
 
 ## Writing one
 
-A Step declares or judges; it never handles an error. A Given constructs the Topology or the
-Workload and names itself if that declaration is refused. A Then judges the Settled Placement, and
-one it does not meet is reported as a Finding while the later Steps still run.
+The function is named for the condition it runs under and the outcome it asserts, `<Condition>_Should<Outcome>`.
 
 ```go
 func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
 	s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3))
+	s.WaitFor().AllNodesReady()
 	s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())
-	s.Then().AllPodsRunning()
+	s.WaitFor().AllPodsReady()
+	s.Then().PodsPerZone(3)
 }
 ```
 
-The function is named for the condition it runs under and the outcome it asserts,
-`<Condition>_Should<Outcome>`. The Scenario runs under the stem of its file, with hyphens for
-underscores, so renaming the file renames the Scenario. A new Scenario is a file here and one line
-in `scenarios.go`.
+Every line is one Step opened on `s`, so a reader scans the Step kinds in one column and a line is inserted, removed or reordered on its own. The Scenarios here are held to that layout by a rule test, per [the layout ADR](../docs/adr/2026-10-07-the-labs-scenarios-write-one-step-per-line.md).
 
-A Workload declares one of the lab's predefined Pod specifications and no setting of its own:
+The Scenario runs under the stem of its file, with hyphens for underscores, so renaming the file renames the Scenario. A new Scenario is a file here and one line in `scenarios.go`.
 
-| | |
-|---|---|
-| `lab.ResilientPlacement()` | its Pods spread as evenly over the Zones and over the Nodes as the control plane can place them |
-| `lab.DefaultPlacement()` | no spread at all, so where its Pods land is the scheduler's own choice |
+A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `lab.NodesPerZone`, `lab.Pods`, `lab.WorkloadName` and the specification — so a swapped argument does not compile. An optional setting is a further call on the complete declaration, `.NodeCapacity` on the Topology and `.RequiredCapacity` on the Workload.
 
-Each one is defined in `internal/lab/pod_specification.go` as the settings it sets, under
-Kubernetes' own names, over a base that carries the lab's own — the tolerations that make a Pod leave
-an unresponsive Node after the lab's waiting time. Open a definition to read which setting it sets
-and to which value. A new specification is one function there, added with the Scenario that needs it.
-
-A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `lab.NodesPerZone`,
-`lab.Pods`, `lab.WorkloadName` and the specification — so a swapped argument does not compile. An
-optional setting is a further call on the complete declaration,
-`Topology(lab.Zones(3), lab.NodesPerZone(3)).NodeCapacity(lab.Pods(2))` for the Pods a Node holds and
-`Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).RequiredCapacity(lab.Pods(6))` for the
-fewest Pods the Workload has to keep Running through a Failure. The lab's Scenarios name the
-Workload constants of `workloads.go`, which are business capabilities of the domain they model — an
-online shop in the Scenario above, and any domain the next one needs.
-
-A Scenario has no test of its own: it is itself the check, and a test beside it could only repeat its
-own Then Steps. The lab's Scenarios run in `cmd/lab`'s own suite, which fails when one reports a
-Finding or ends at a Step.
+A Scenario has no test of its own: it is itself the check, and a test beside it could only repeat its own Then Steps. The lab's Scenarios run in `cmd/lab`'s own suite, which fails when one reports a Finding or ends at a Step.
