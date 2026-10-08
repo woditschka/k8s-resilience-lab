@@ -57,6 +57,20 @@ const (
 	onePodNotReadyYet = 1
 )
 
+// What the two Workloads asking for a share of their Node ask for, against a
+// Node of four cores: half of one Node each, so two such Pods fill it and the cpu
+// is a tighter bound than the Pod count, and more cpu than one whole Node has, so
+// no Node has room for a single such Pod.
+const (
+	someNodesCores                 = 4
+	halfTheNodesCPU                = scenario.CPU(2 * millicoresPerCore)
+	moreCPUThanANodeHas            = scenario.CPU((someNodesCores + 1) * millicoresPerCore)
+	threePodsRequestingHalfANode   = 3
+	twoPodsThatFit                 = 2
+	onePodThatDoesNotFit           = 1
+	twoPodsRequestingMoreThanANode = 2
+)
+
 // anEvenSpreadTopology is the Topology the main Scenario provisions: three Zones
 // of three Nodes, each Node able to hold more Pods than the Workload declares.
 func anEvenSpreadTopology(t *testing.T) scenario.Topology {
@@ -452,6 +466,28 @@ func TestAWorkloadWithoutSpreadRulesOnATooSmallTopology_ShouldLeaveTheUnplaceabl
 	expect.Expect(t, settled.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](somePodsPerNode))
 	expect.Expect(t, pending).To(expect.HaveLen[scenario.Pod](onePodTooMany))
 	expectReported(t, recorded, pending[0].Name, podSchedulingFailed)
+}
+
+// Edge cases 2 and 3 of a Request, and the Pods that do fit: the scheduler places
+// a Pod by what it asks for, so the Workload asking for half its Node's cpu fills
+// that Node with two Pods and leaves its third Pending, while every Pod of the
+// Workload asking for more cpu than the Node has stays Pending whatever room the
+// Pod count leaves. Both are deployed onto one provisioned Topology, the way two
+// Workloads of one Scenario are, because a provisioning is what this suite's time
+// goes on.
+func TestAWorkloadRequestingMoreThanItsNodesHaveRoomFor_ShouldLeaveThePodsThatDoNotFitPending(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	fitting := aWorkloadDeclaring(t, threePodsRequestingHalfANode, requestingCPUOf(halfTheNodesCPU))
+	tooLarge := aSecondWorkloadDeclaring(t, twoPodsRequestingMoreThanANode, requestingCPUOf(moreCPUThanANodeHas))
+	deployBoth(t, provisioned, aTopologyOfOneNodeOfFourCores(t), fitting, tooLarge)
+
+	placed, refused := bothSettled(t, provisioned, fitting, tooLarge)
+
+	expect.Expect(t, placed.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](twoPodsThatFit))
+	expect.Expect(t, placed.PodsInPhase(scenario.PodPending)).To(expect.HaveLen[scenario.Pod](onePodThatDoesNotFit))
+	expect.Expect(t, refused.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](noPodAtAll))
+	expect.Expect(t, refused.PodsInPhase(scenario.PodPending)).
+		To(expect.HaveLen[scenario.Pod](twoPodsRequestingMoreThanANode))
 }
 
 // The Failure tests below are what says whether the control plane does the moving:
@@ -858,16 +894,36 @@ func theNodeNamed(t *testing.T, provisioned *SimulatedCluster, name string) core
 func aTopologyOfTwoNodesHoldingOnePod(t *testing.T) scenario.Topology {
 	t.Helper()
 
-	capacity, err := scenario.NewNodeCapacity(roomForOnePod)
-	if err != nil {
-		t.Fatalf("build a Node capacity of %d Pod: %v", roomForOnePod, err)
-	}
+	capacity := aCapacityOf(t, roomForOnePod, someCPUPerNode, someMemoryPerNode)
 	topology, err := scenario.NewTopology(theOneZone, twoNodesInIt, capacity)
 	if err != nil {
 		t.Fatalf("build a Topology of %d Nodes holding one Pod: %v", twoNodesInIt, err)
 	}
 
 	return topology
+}
+
+// aTopologyOfOneNodeOfFourCores is the Topology the Requests above are read on:
+// one Node with room for more Pods than the two Workloads declare between them,
+// so what decides their Placement is the cpu their Pods ask for.
+func aTopologyOfOneNodeOfFourCores(t *testing.T) scenario.Topology {
+	t.Helper()
+
+	capacity := aCapacityOf(t, somePodsPerNode, scenario.CPU(someNodesCores*millicoresPerCore), someMemoryPerNode)
+	topology, err := scenario.NewTopology(theOneZone, theOneNodeInIt, capacity)
+	if err != nil {
+		t.Fatalf("build a Topology of one Node of %d cores: %v", someNodesCores, err)
+	}
+
+	return topology
+}
+
+// requestingCPUOf is the specification a Workload asking for a share of its Node
+// declares: the cpu named and the memory every Request of this suite states,
+// above the lab's own tolerations and with no spread at all, so what decides the
+// Placement is the request alone.
+func requestingCPUOf(cpu scenario.CPU) scenario.PodSpecification {
+	return defaultPlacement().With(scenario.NewRequest(cpu, someRequestedMemory))
 }
 
 // deployBoth applies a Topology once and deploys two Workloads into it, which is

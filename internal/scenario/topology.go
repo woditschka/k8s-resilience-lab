@@ -14,26 +14,47 @@ import "fmt"
 // docs/prd.md, so the count admitted stands until that question is settled.
 const maxZones = 26
 
-// DefaultNodeCapacity is what a declared Node holds when a Scenario names no
-// capacity. It leaves room for more than one Pod per Node, so an even Placement
-// is the scheduler honouring the Workload's declared spread rather than the
-// Nodes running out of room.
-const DefaultNodeCapacity = 10
+// The capacity a declared Node holds when a Scenario names none. It leaves room
+// for more than one Pod per Node, so an even Placement is the scheduler honouring
+// the Workload's declared spread rather than the Nodes running out of room, and
+// enough cpu and memory for every one of those Pods to ask for an ordinary share,
+// so the Pod count stays the tighter bound.
+const (
+	defaultPodsPerNode   = 10
+	defaultCPUPerNode    = CPU(16 * millicoresPerCore)
+	defaultMemoryPerNode = Memory(64 * mebibytesPerNextUnit)
+)
 
-// NodeCapacity is what one Node can hold, so a Workload can declare more Pods
-// than its Topology has room for.
+// NodeCapacity is what one Node can hold: the Pods it has room for, and the cpu
+// and memory the scheduler fits their requests against. A Workload can therefore
+// declare more Pods, or ask for more of either, than its Topology has room for.
 type NodeCapacity struct {
-	pods int
+	pods   int
+	cpu    CPU
+	memory Memory
 }
 
-// NewNodeCapacity builds the capacity of one Node, refusing a Pod count no Node
-// could hold.
-func NewNodeCapacity(pods int) (NodeCapacity, error) {
+// NewNodeCapacity builds the capacity of one Node, refusing each dimension at
+// none: a Node always has room for a Pod that asks for something.
+func NewNodeCapacity(pods int, cpu CPU, memory Memory) (NodeCapacity, error) {
 	if pods < 1 {
 		return NodeCapacity{}, fmt.Errorf("a Node holds at least one Pod, so a capacity of %d Pods is refused", pods)
 	}
+	if cpu < 1 {
+		return NodeCapacity{}, fmt.Errorf("a Node has some cpu, so a capacity of %s cpu is refused", cpu)
+	}
+	if memory < 1 {
+		return NodeCapacity{}, fmt.Errorf("a Node has some memory, so a capacity of %s memory is refused", memory)
+	}
 
-	return NodeCapacity{pods: pods}, nil
+	return NodeCapacity{pods: pods, cpu: cpu, memory: memory}, nil
+}
+
+// DefaultNodeCapacity is the whole capacity a Node holds where its Topology
+// states none. It is built from the package's own literals, every one of them
+// above what NewNodeCapacity refuses, so it needs no error of its own.
+func DefaultNodeCapacity() NodeCapacity {
+	return NodeCapacity{pods: defaultPodsPerNode, cpu: defaultCPUPerNode, memory: defaultMemoryPerNode}
 }
 
 // Pods is how many Pods one Node with this capacity holds.
@@ -41,10 +62,20 @@ func (c NodeCapacity) Pods() int {
 	return c.pods
 }
 
-// Equal reports whether two capacities hold the same number of Pods. It is the
-// equality go-cmp compares through, since the type's field is unexported.
+// CPU is how much processor time one Node with this capacity has.
+func (c NodeCapacity) CPU() CPU {
+	return c.cpu
+}
+
+// Memory is how much memory one Node with this capacity has.
+func (c NodeCapacity) Memory() Memory {
+	return c.memory
+}
+
+// Equal reports whether two capacities hold the same of every dimension. It is
+// the equality go-cmp compares through, since the type's fields are unexported.
 func (c NodeCapacity) Equal(other NodeCapacity) bool {
-	return c.pods == other.pods
+	return c == other
 }
 
 // Node is one simulated machine a Pod can be placed on, named after the Zone it

@@ -59,6 +59,11 @@ const (
 	// after the Node it asks about, and probeContainer is its container. A probe
 	// Pod carries no Workload label, so an observation of a Workload reads none of
 	// them (docs/adr/2026-10-04-scheduler-observable-provisioning.md).
+	// bytesPerMebibyte is the bytes a Kubernetes memory quantity holds for one of
+	// the mebibytes the lab's own Memory is stated in, which is the one place the
+	// two units meet.
+	bytesPerMebibyte = 1024 * 1024
+
 	probeLabel         = "k8s-resilience-lab/probe"
 	probeLabelValue    = "provisioning"
 	probePodNamePrefix = "provisioning-probe-"
@@ -136,11 +141,13 @@ func nodesHoldingRunningProbe(observed []corev1.Pod) []string {
 }
 
 // toNode is the Node the lab creates for one Node of a Topology: a fake Node,
-// Ready at creation, reporting the Pod capacity the Topology declared, and
-// carrying the Zone and hostname labels a spread rule's domain is read from.
+// Ready at creation, reporting the capacity the Topology declared, and carrying
+// the Zone and hostname labels a spread rule's domain is read from.
+//
+// The capacity is reported allocatable as well as whole, because the scheduler
+// fits the requests of the Pods it places against what a Node reports allocatable
+// and nothing of a Simulated Cluster's Node is reserved.
 func toNode(node scenario.Node) *corev1.Node {
-	pods := *resource.NewQuantity(int64(node.Capacity.Pods()), resource.DecimalSI)
-
 	return &corev1.Node{
 		Name: node.Name,
 		Labels: map[string]string{
@@ -150,13 +157,37 @@ func toNode(node scenario.Node) *corev1.Node {
 		},
 		Annotations: map[string]string{fakeNodeAnnotation: fakeNodeAnnotationValue},
 		Status: corev1.NodeStatus{
-			Capacity:    corev1.ResourceList{corev1.ResourcePods: pods},
-			Allocatable: corev1.ResourceList{corev1.ResourcePods: pods},
+			Capacity:    toResourceList(node.Capacity),
+			Allocatable: toResourceList(node.Capacity),
 			Conditions: []corev1.NodeCondition{
 				{Type: corev1.NodeReady, Status: corev1.ConditionTrue, Reason: nodeReadyReason},
 			},
 		},
 	}
+}
+
+// toResourceList is the room one Node reports, in all three dimensions: the Pods
+// it holds, and the cpu and memory the scheduler fits a Pod's request against.
+// Each quantity is built from the integer the lab holds, never parsed from a
+// string, so no path through this mapper can panic on a quantity.
+func toResourceList(capacity scenario.NodeCapacity) corev1.ResourceList {
+	return corev1.ResourceList{
+		corev1.ResourcePods:   *resource.NewQuantity(int64(capacity.Pods()), resource.DecimalSI),
+		corev1.ResourceCPU:    *toCPUQuantity(capacity.CPU()),
+		corev1.ResourceMemory: *toMemoryQuantity(capacity.Memory()),
+	}
+}
+
+// toCPUQuantity and toMemoryQuantity are the one quantity each of the lab's own
+// amounts becomes: the millicores a cpu amount is held in, and the bytes a
+// memory amount's mebibytes make up, in the format Kubernetes spells each of them
+// in.
+func toCPUQuantity(cpu scenario.CPU) *resource.Quantity {
+	return resource.NewMilliQuantity(int64(cpu), resource.DecimalSI)
+}
+
+func toMemoryQuantity(memory scenario.Memory) *resource.Quantity {
+	return resource.NewQuantity(int64(memory)*bytesPerMebibyte, resource.BinarySI)
 }
 
 // PodSpecAccess is full access: a Scenario's own change to the Kubernetes Pod
@@ -242,9 +273,9 @@ func runAccessesWrittenAfter(pod *corev1.PodSpec, transcribed int, accesses []Po
 }
 
 // transcribeSetting transcribes one setting of a specification onto the Pod
-// specification: the one constraint or the one toleration it is, appended in the
-// place the specification holds it. The settings are sealed in internal/scenario,
-// so these two are every kind there is.
+// specification: the one constraint, the one toleration or the one request it is,
+// written in the place the specification holds it. The settings are sealed in
+// internal/scenario, so these three are every kind there is.
 func transcribeSetting(pod *corev1.PodSpec, declared scenario.Setting, workloadName string) {
 	switch setting := declared.(type) {
 	case scenario.TopologySpread:
@@ -252,6 +283,28 @@ func transcribeSetting(pod *corev1.PodSpec, declared scenario.Setting, workloadN
 			toSpreadConstraint(setting, workloadName))
 	case scenario.Toleration:
 		pod.Tolerations = append(pod.Tolerations, toToleration(setting))
+	case scenario.Request:
+		transcribeRequest(pod, setting)
+	}
+}
+
+// transcribeRequest writes what one Pod asks for onto every container of the Pod
+// specification, which is the container the mapper owns unless a full access
+// written before it replaced them. The request stands where the specification
+// holds it, the way a full access does, so a later Customization decides.
+func transcribeRequest(pod *corev1.PodSpec, declared scenario.Request) {
+	for at := range pod.Containers {
+		pod.Containers[at].Resources.Requests = toRequestedResources(declared)
+	}
+}
+
+// toRequestedResources is the resources.requests one request setting becomes: the
+// cpu and the memory it asks for, under the names Kubernetes gives them, built
+// fresh for each container so no two share one list.
+func toRequestedResources(declared scenario.Request) corev1.ResourceList {
+	return corev1.ResourceList{
+		corev1.ResourceCPU:    *toCPUQuantity(declared.CPU()),
+		corev1.ResourceMemory: *toMemoryQuantity(declared.Memory()),
 	}
 }
 
@@ -385,7 +438,7 @@ func isPodReady(pod corev1.Pod) bool {
 func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 	nodes := make([]scenario.Node, 0, len(observed))
 	for _, node := range observed {
-		capacity, err := scenario.NewNodeCapacity(int(node.Status.Capacity.Pods().Value()))
+		capacity, err := fromReportedCapacity(node.Status.Capacity)
 		if err != nil {
 			return nil, fmt.Errorf("read the capacity of Node %s: %w", node.Name, err)
 		}
@@ -398,6 +451,17 @@ func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 	}
 
 	return nodes, nil
+}
+
+// fromReportedCapacity is the Node capacity one observed resource list reports,
+// in the units the lab holds each dimension in. It round-trips exactly against
+// what toResourceList wrote, every Node of a Simulated Cluster being one the lab
+// created.
+func fromReportedCapacity(reported corev1.ResourceList) (scenario.NodeCapacity, error) {
+	return scenario.NewNodeCapacity(
+		int(reported.Pods().Value()),
+		scenario.CPU(reported.Cpu().MilliValue()),
+		scenario.Memory(reported.Memory().Value()/bytesPerMebibyte))
 }
 
 // fromPods reads the Pods of one observation, each with the Node the control
@@ -521,9 +585,16 @@ func readinessOf(node corev1.Node) scenario.NodeReadiness {
 	return scenario.NodeNotReady
 }
 
-// capacityOf is how many Pods a Node reports room for.
+// capacityOf is the room a Node reports: the cpu and memory a Pod's request is
+// fitted against, then the Pods it holds, each as the control plane spells it.
+// It is the line a run reports a Node's capacity on, which is where a reader
+// verifies the capacity a Topology stated, so it names the three in the order
+// every reported capacity names them.
 func capacityOf(node corev1.Node) string {
-	return fmt.Sprintf("%d Pods", node.Status.Capacity.Pods().Value())
+	reported := node.Status.Capacity
+
+	return fmt.Sprintf("%s cpu, %s memory and %d Pods",
+		reported.Cpu(), reported.Memory(), reported.Pods().Value())
 }
 
 // replicasReady is how much of a Workload's own object the control plane reports

@@ -76,7 +76,38 @@ func TestAWaitStatingATimeAboveTheLabsOwnWaitingTime_ShouldBeRefusedNamingThatWa
 func TestAWaitStatingTheLabsOwnWaitingTime_ShouldBeHeldToExactlyThatTime(t *testing.T) {
 	stated := aStatedWaitOf(t, theWaitingTimeInSeconds)
 
-	expect.Expect(t, stated.Within()).To(expect.Equal(scenario.WaitingTime))
+	expect.Expect(t, stated.HeldTo()).To(expect.Equal(scenario.WaitingTime))
+}
+
+// A Wait stating no time is held to the lab's own waiting time, so every Wait has
+// a time, and it carries no statement of one. The statement travels beside the
+// time rather than being re-derived from it, because a line naming the time a
+// Wait was held to marks a stated time and leaves the lab's own waiting time
+// unmarked: a reader never reads that bound for a time a Scenario chose.
+func TestTheTimeAWaitIsHeldTo_ShouldBeTheTimeItStatesOrTheLabsOwnWaitingTimeWhereItStatesNone(t *testing.T) {
+	waits := map[string]struct {
+		held   scenario.StatedWait
+		to     time.Duration
+		stated bool
+	}{
+		"stating no time": {
+			held:   scenario.NewWaitStatingNoTime(),
+			to:     scenario.WaitingTime,
+			stated: false,
+		},
+		"stating a time": {
+			held:   aStatedWaitOf(t, aTimeAWaitStates),
+			to:     time.Duration(aTimeAWaitStates) * time.Second,
+			stated: true,
+		},
+	}
+
+	for written, wait := range waits {
+		t.Run(written, func(t *testing.T) {
+			expect.Expect(t, wait.held.HeldTo()).To(expect.Equal(wait.to))
+			expect.Expect(t, wait.held.Stated()).To(expect.Equal(wait.stated))
+		})
+	}
 }
 
 // A Wait is judged once it is reached, so the time read against the time stated
@@ -88,9 +119,9 @@ func TestTheTimeAWaitTook_ShouldBeReachedOnlyWhereItIsWithinTheTimeStated(t *tes
 		took    time.Duration
 		reached bool
 	}{
-		"inside the time it states":        {took: stated.Within() - aMomentOfIt, reached: true},
-		"exactly at the time it states":    {took: stated.Within(), reached: true},
-		"a moment past the time it states": {took: stated.Within() + aMomentOfIt, reached: false},
+		"inside the time it states":        {took: stated.HeldTo() - aMomentOfIt, reached: true},
+		"exactly at the time it states":    {took: stated.HeldTo(), reached: true},
+		"a moment past the time it states": {took: stated.HeldTo() + aMomentOfIt, reached: false},
 	}
 
 	for read, one := range measured {

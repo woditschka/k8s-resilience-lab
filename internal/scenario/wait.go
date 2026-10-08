@@ -17,12 +17,19 @@ import (
 // long a Pod stays on a Node that stopped responding.
 const WaitingTime = 90 * time.Second
 
-// StatedWait is the time a Wait must be reached in: the whole seconds a Scenario
-// states on the Wait itself, resolved at construction. It judges the time a Wait
+// StatedWait is the time a Wait is held to and whether the Scenario stated it:
+// the whole seconds written on the Wait itself, or the lab's own waiting time
+// where the Wait states none, resolved at construction. It judges the time a Wait
 // took against itself and holds nothing else, so the judgement reaches no cluster
 // and reads no clock.
+//
+// The statement travels with the time rather than being read back off it, because
+// a Wait's line marks a stated time and leaves the lab's own waiting time
+// unmarked: a reader of a line then never reads that bound for a time a Scenario
+// chose (docs/prd.md REQ-SIM-006).
 type StatedWait struct {
-	within time.Duration
+	heldTo time.Duration
+	stated bool
 }
 
 // NewStatedWait builds the time a Wait of that many whole seconds is held to.
@@ -38,23 +45,40 @@ func NewStatedWait(seconds int) (StatedWait, error) {
 			seconds, time.Second, WaitingTime)
 	}
 
-	within := time.Duration(seconds) * time.Second
-	if within > WaitingTime {
+	heldTo := time.Duration(seconds) * time.Second
+	if heldTo > WaitingTime {
 		return StatedWait{}, fmt.Errorf("the lab waits %s for a state of the cluster, so a stated time of %s is refused",
-			WaitingTime, within)
+			WaitingTime, heldTo)
 	}
 
-	return StatedWait{within: within}, nil
+	return StatedWait{heldTo: heldTo, stated: true}, nil
 }
 
-// Within is the time a Wait held to this must be reached in.
-func (w StatedWait) Within() time.Duration {
-	return w.within
+// NewWaitStatingNoTime builds the time a Wait stating none of its own is held to:
+// the lab's own waiting time, which is the longest the lab waits, so every Wait
+// has a time to be judged against.
+//
+// It is refused nothing, since the time is the lab's own rather than a Scenario's
+// statement, which is why it is a second way into this value rather than the
+// constructor above called with that waiting time.
+func NewWaitStatingNoTime() StatedWait {
+	return StatedWait{heldTo: WaitingTime, stated: false}
 }
 
-// Reached reports whether a Wait that took measured was reached in the time it
-// states. A Wait is judged once it is reached, so measured is the whole wait and
-// one reached at the time it states is reached in it.
+// HeldTo is the time a Wait held to this must be reached in.
+func (w StatedWait) HeldTo() time.Duration {
+	return w.heldTo
+}
+
+// Stated reports whether a Scenario stated that time on the Wait itself, as
+// against the lab's own waiting time a Wait stating none is held to.
+func (w StatedWait) Stated() bool {
+	return w.stated
+}
+
+// Reached reports whether a Wait that took measured was reached in the time it is
+// held to. A Wait is judged once it is reached, so measured is the whole wait and
+// one reached at that time is reached in it.
 func (w StatedWait) Reached(measured time.Duration) bool {
-	return measured <= w.within
+	return measured <= w.heldTo
 }

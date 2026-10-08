@@ -13,6 +13,14 @@ import (
 // no Scenario's, which writes the Skew it wants itself.
 const evenSkew = 1
 
+// The whole units a Scenario states a cpu and a memory amount in, as the lab's
+// own quantities hold them: a core is this many millicores, a gibibyte this many
+// mebibytes.
+const (
+	millicoresPerCore    = 1000
+	mebibytesPerGibibyte = 1024
+)
+
 // PodSpecification is the Pod specification a Workload Step declares: one of the
 // lab's predefined ones, each defined below as the settings it sets, under
 // Kubernetes' own names, and each one a Scenario may customize before its
@@ -158,10 +166,10 @@ func inTheSamePlace(one, another cluster.PodSpecAccessInPlace) bool {
 }
 
 // TopologySpread is the setting that decides where a Workload's Pods land, and
-// the one Customization internal/lab offers a Scenario: how evenly its Pods sit
-// over the domains one label names. toleration is the other setting a
-// specification holds, and stays the lab's own, because a Scenario states no
-// waiting time of its own (REQ-SIM-008).
+// Request what one of its Pods asks for: the two Customizations internal/lab
+// offers a Scenario. toleration is the third setting a specification holds, and
+// stays the lab's own, because a Scenario states no waiting time of its own
+// (REQ-SIM-008).
 //
 // Each takes the fields Kubernetes gives that setting, in Kubernetes' own order.
 // No two fields of one setting share a type, so a swapped argument does not
@@ -173,6 +181,14 @@ func TopologySpread(
 	nodeTaintsPolicy scenario.NodeInclusionPolicy,
 ) Customization {
 	return setting{declares: scenario.NewTopologySpread(topologyKey, maxSkew, whenUnsatisfiable, nodeTaintsPolicy)}
+}
+
+// Request is the setting that decides what one Pod of a Workload asks for: the
+// cpu and the memory the scheduler fits against the room a Node reports. Both
+// are stated, because a Pod asking for one of them and not the other is a
+// request the lab's own vocabulary does not name.
+func Request(cpu scenario.CPU, memory scenario.Memory) Customization {
+	return setting{declares: scenario.NewRequest(cpu, memory)}
 }
 
 func toleration(
@@ -203,6 +219,19 @@ func WhenUnsatisfiable(action scenario.UnsatisfiableConstraintAction) scenario.U
 
 func NodeTaintsPolicy(policy scenario.NodeInclusionPolicy) scenario.NodeInclusionPolicy {
 	return policy
+}
+
+// CPU and MemoryGi are the amounts a capacity and a request are stated in: whole
+// cores and whole gibibytes, as the lab's own quantities hold them. They are the
+// one further place the lab's vocabulary meets Kubernetes' unit, beside
+// tolerationSeconds below, and a finer unit joins them as another function rather
+// than changing a signature.
+func CPU(cores int) scenario.CPU {
+	return scenario.CPU(cores * millicoresPerCore)
+}
+
+func MemoryGi(gibibytes int) scenario.Memory {
+	return scenario.Memory(gibibytes * mebibytesPerGibibyte)
 }
 
 func key(taint string) string {

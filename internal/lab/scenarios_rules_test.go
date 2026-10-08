@@ -151,16 +151,21 @@ const (
 var theWorkloadsOwnCalls = []string{"RequiredCapacity"}
 
 // theWaits are the Waits a Scenario writes, under the names the Step surface
-// offers them: every Node of the declared Topology Ready, and every Pod of the
-// declared Workload Ready, each written with the time it must be reached in or
-// without one. theWaitsStatingATime are the two that state it. theWaitOpener is
-// the call every way of writing a Wait is written through — on the Scenario
-// itself, and on the Given whose declaration the Wait fits — and it is the one
-// opener that is not its kind's own word, per
+// offers them: every Node of the declared Topology Ready, every Pod of the
+// declared Workload Ready, and the Placement of that Workload Settled, each
+// written with the time it must be reached in or without one.
+// theWaitsStatingATime are the three that state it. theWaitOpener is the call
+// every way of writing a Wait is written through — on the Scenario itself, and on
+// the Given whose declaration the Wait fits — and it is the one opener that is not
+// its kind's own word, per
 // docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md.
 var (
-	theWaitsStatingATime = []string{"AllNodesReadyWithinSeconds", "AllPodsReadyWithinSeconds"}
-	theWaits             = slices.Concat([]string{"AllNodesReady", "AllPodsReady"}, theWaitsStatingATime)
+	theWaitsStatingATime = []string{
+		"AllNodesReadyWithinSeconds", "AllPodsReadyWithinSeconds", "PlacementSettledWithinSeconds",
+	}
+	theWaits = slices.Concat(
+		[]string{"AllNodesReady", "AllPodsReady", "PlacementSettled"}, theWaitsStatingATime,
+	)
 )
 
 const theWaitOpener = "WaitFor"
@@ -254,7 +259,7 @@ func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnyth
 			admitted: false,
 		},
 		"a call written after the Workload Step": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).NodeCapacity(lab.Pods(2))`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).NodeCapacity(lab.CPU(4), lab.MemoryGi(16), lab.Pods(2))`,
 			admitted: false,
 		},
 		"a specification of the Scenario's own": {
@@ -347,11 +352,12 @@ func TestEveryScenarioOfTheLab_ShouldWaitBeforeItsFirstThenAndAfterEveryFailure(
 }
 
 // The Wait after a Failure is where the lab's own subject is measured — how long
-// the control plane took to place the Pods again — so each Failure Scenario
-// states the time that Wait must be reached in and a run judges the restore
-// rather than only reporting it. The Waits above the first Failure wait for the
-// world the Failure is injected into and state none (docs/prd.md REQ-SIM-006).
-func TestBothFailureScenarios_ShouldStateATimeOnTheWaitAfterTheirFailure(t *testing.T) {
+// the control plane took to place the Pods it could place again — so every
+// Failure Scenario states the time that Wait must be reached in and a run judges
+// the restore rather than only reporting it. The Waits above the first Failure
+// wait for the world the Failure is injected into and state none (docs/prd.md
+// REQ-SIM-006).
+func TestEveryFailureScenario_ShouldStateATimeOnTheWaitAfterItsFailure(t *testing.T) {
 	place := theScenariosPlace(t)
 
 	offenders := waitsStatingATimeTheirPlaceDoesNotAskFor(filesOfThePlace(t, place))

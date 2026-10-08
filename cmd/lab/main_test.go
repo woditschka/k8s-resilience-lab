@@ -54,11 +54,18 @@ const (
 )
 
 // The two Wait lines every Scenario of the lab reports, read by the prefix each
-// opens with: a Wait's line names how long it held, and how long that is belongs
-// to the run rather than to what a Scenario asserts.
+// opens with: a Wait that was reached names the time it took, and how long that
+// is belongs to the run rather than to what a Scenario asserts.
 const (
-	allNodesReadyAwaited = "Wait for all Nodes Ready in "
-	allPodsReadyAwaited  = "Wait for all Pods Ready in "
+	allNodesReadyAwaited = "Wait for all Nodes Ready, reached in "
+	allPodsReadyAwaited  = "Wait for all Pods Ready, reached in "
+
+	// theStatedRestoreTimeAwaited is how such a line closes where the Scenario
+	// stated the time the Wait must be reached in, which the Wait after a Failure
+	// does: the time it was held to follows the time it took, marked as stated, so
+	// the two are never read for one another. The seconds are the ones those
+	// Scenarios write on that line.
+	theStatedRestoreTimeAwaited = " of the 30s stated"
 )
 
 // The lines both Failure Scenarios share: the Given line above renamed by the
@@ -104,6 +111,23 @@ const (
 	noPodInTheFailedZonesJudged = "Then no Pod in the Zones that failed"
 
 	capacityHeldWhenTheZoneStoppedJudged = theCapacityJudged + "6 at the moment of the Failure and 9 once Settled"
+)
+
+// The lines a run of the No room after a Zone stops responding Scenario is read
+// by, in the same parts: its heading, the capacity its Topology declares, the
+// Wait for the Placement alone standing after the Failure, the Then counting the
+// Pods the Placement left Pending, and the counts its capacity judgement states.
+// Each Pod of this Workload asks for more than half of what a Node holds, so the
+// six Nodes still responding have room for six of the nine Pods: exactly the
+// minimum, at the moment of the Failure and once Settled, with the other three
+// left Pending.
+const (
+	noRoomAfterAZoneStopsRespondingReported = aScenarioHeading + "no-room-after-a-zone-stops-responding"
+	theNodeCapacityDeclared                 = "Given a Topology of 3 Zones of 3 Nodes holding 4 cpu and 16Gi memory each"
+	thePlacementSettledAwaited              = "Wait for the Placement Settled, reached in "
+	threePodsPendingJudged                  = "Then 3 Pods Pending"
+
+	capacityHeldWithNoRoomLeftJudged = theCapacityJudged + "6 at the moment of the Failure and 6 once Settled"
 )
 
 // The labels a run opens each of its control-plane settings with. What such a
@@ -265,6 +289,7 @@ func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFai
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneNodeFailsReported)
+	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, noPodOnTheFailedNodesJudged)
 	reportShows(t, reported, threePodsPerZoneJudged)
 	reportShows(t, reported, capacityHeldWhenTheNodeStoppedJudged)
@@ -291,8 +316,36 @@ func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *tes
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneZoneFailsReported)
+	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, noPodInTheFailedZonesJudged)
 	reportShows(t, reported, capacityHeldWhenTheZoneStoppedJudged)
+	reportLacks(t, reported, aFindingReported)
+}
+
+// The Scenario of a Workload the Nodes still responding have no room for runs in
+// the same suite for the same reason, and what only a run can report is where the
+// control plane settles: the Wait after the Failure holds for the Placement alone,
+// so it is reached with the three Pods that no longer fit left Pending, and the
+// Required Capacity of six is met at both moments it is judged at (docs/prd.md
+// REQ-SIM-011).
+func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending(t *testing.T) {
+	requireEngine(t)
+
+	reported, err := aRun(t)
+	if err != nil {
+		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
+	}
+
+	reportShows(t, reported, noRoomAfterAZoneStopsRespondingReported)
+	reportShows(t, reported, theNodeCapacityDeclared)
+	reportShows(t, reported, theRequiredCapacityDeclared)
+	reportShows(t, reported, onePodPerNodeJudged)
+	reportShows(t, reported, oneZoneFailsReported)
+	reportShows(t, reported, thePlacementSettledAwaited)
+	reportShows(t, reported, theStatedRestoreTimeAwaited)
+	reportShows(t, reported, noPodInTheFailedZonesJudged)
+	reportShows(t, reported, threePodsPendingJudged)
+	reportShows(t, reported, capacityHeldWithNoRoomLeftJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
@@ -485,7 +538,7 @@ const (
 	whenTheNodeWasAdded    = 120 * time.Millisecond
 	theNodeAdded           = "zone-1-node-1"
 	theNodeReady           = "Ready"
-	theNodeCapacity        = "10 Pods"
+	theNodeCapacity        = "4 cpu, 16Gi memory and 10 Pods"
 	whenThePodWasScheduled = 3470 * time.Millisecond
 	thePodReported         = "web-5d8f9b7c6-2xk4m"
 	thePodScheduled        = "Scheduled"

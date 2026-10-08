@@ -32,7 +32,7 @@ const (
 	theNodeAddedAsFiled    = "120ms"
 	aNodeName              = "zone-1-node-1"
 	theReadyCondition      = "Ready"
-	theNodeCapacity        = "10 Pods"
+	theNodeCapacity        = "4 cpu, 16Gi memory and 10 Pods"
 	whenThePodWasScheduled = 3470 * time.Millisecond
 	thePodScheduledAsFiled = "3.47s"
 	aPodName               = "web-5d8f9b7c6-2xk4m"

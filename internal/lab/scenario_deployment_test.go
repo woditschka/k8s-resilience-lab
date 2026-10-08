@@ -24,10 +24,19 @@ import (
 // The Scenarios the Simulated Clusters of this file are provisioned for, so each
 // container on the engine says which Scenario it serves.
 const (
-	theRefusedSettingScenario = "a-refused-setting"
-	theWaitingScenario        = "a-wait-for-the-cluster"
-	theNothingPendingScenario = "a-wait-with-nothing-pending"
+	theRefusedSettingScenario  = "a-refused-setting"
+	theWaitingScenario         = "a-wait-for-the-cluster"
+	theNothingPendingScenario  = "a-wait-with-nothing-pending"
+	theSettlingScenario        = "a-wait-for-the-settled-placement"
+	theNothingDeclaredScenario = "a-wait-with-nothing-declared"
 )
+
+// atOnce is the time a Wait with nothing to wait for is reached inside. The
+// control plane is polled rather than watched, so such a Wait is reached at the
+// poll that finds nothing pending rather than instantly: a tenth of the lab's own
+// waiting time is well above one poll and well short of waiting for a state to
+// arrive.
+const atOnce = scenario.WaitingTime / 10
 
 const (
 	// theRefusedRestartPolicy is a value the control plane refuses on a Deployment's
@@ -76,16 +85,19 @@ func aScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario {
 	return newScenario(t.Context(), provisioned)
 }
 
-// reportedStep is one Step as the tests here compare it: the line it reports,
-// whether it stated a time it held for, and the time it was held to. How long a
-// Wait held varies from run to run, so what a comparison pins is that the line
-// carries a time at all; the time it was held to is the Scenario's own statement
-// and is compared outright.
+// reportedStep is one Step as the tests here compare it: which kind it is and the
+// name it reports, whether it carries a time it took, the time it was held to,
+// whether the Scenario stated that time, and whether the Wait was reached. How
+// long a Wait held varies from run to run, so what a comparison pins is that the
+// line carries a time at all; the other three are the Scenario's own and are
+// compared outright.
 type reportedStep struct {
-	Kind   StepKind
-	Name   string
-	Waited bool
-	Within time.Duration
+	Kind       StepKind
+	Name       string
+	Waited     bool
+	HeldTo     time.Duration
+	TimeStated bool
+	Reached    bool
 }
 
 // asReported is every Step a Scenario recorded, read that way.
@@ -93,10 +105,12 @@ func asReported(steps []Step) []reportedStep {
 	reported := make([]reportedStep, 0, len(steps))
 	for _, step := range steps {
 		reported = append(reported, reportedStep{
-			Kind:   step.Kind,
-			Name:   step.Name,
-			Waited: step.Waited > noWait,
-			Within: step.Within,
+			Kind:       step.Kind,
+			Name:       step.Name,
+			Waited:     step.Waited > noWait,
+			HeldTo:     step.HeldTo,
+			TimeStated: step.TimeStated,
+			Reached:    step.Reached,
 		})
 	}
 
@@ -104,10 +118,10 @@ func asReported(steps []Step) []reportedStep {
 }
 
 // reportedAsWaiting and reportedAtOnce are one expected Step read that way: a
-// Wait stating no time of its own, which is held to the lab's own waiting time,
-// and a Step that waited for nothing.
+// Wait that was reached, stating no time of its own and so held to the lab's own
+// waiting time and marked as stating none, and a Step that waited for nothing.
 func reportedAsWaiting(step Step) reportedStep {
-	return reportedStep{Kind: step.Kind, Name: step.Name, Waited: true, Within: scenario.WaitingTime}
+	return reportedStep{Kind: step.Kind, Name: step.Name, Waited: true, HeldTo: scenario.WaitingTime, Reached: true}
 }
 
 func reportedAtOnce(step Step) reportedStep {
@@ -184,6 +198,70 @@ func TestAWaitWithNothingToWaitFor_ShouldReportAtOnceRatherThanBeRefused(t *test
 	}))
 	expect.Expect(t, waited.Placement.Pods()).To(expect.HaveLen[scenario.Pod](noPod))
 	expect.Expect(t, waited.Placement.PodsPerNode()).To(expect.Equal(evenlyOver(nodesOf(declared), noPod)))
+}
+
+// A Wait for the Settled Placement holds for the Placement alone: it is reached
+// once the control plane has accounted for every Pod the Workload declares,
+// placed or not, so a Workload of one Pod more than its Nodes have room for
+// reaches it with that Pod left Pending. A Wait for every Pod Ready would be
+// outlasted by the lab's own waiting time in the same world, which is why this
+// Wait is the one a Scenario of a Workload with no room writes (docs/prd.md
+// REQ-SIM-011).
+func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testing.T) {
+	waiting := aScenarioOnAClusterFor(t, theSettlingScenario)
+
+	waiting.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone)).
+		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(roomForOnePodPerNode))
+	waiting.WaitFor().AllNodesReady()
+	waiting.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), ResilientPlacement())
+	waiting.WaitFor().PlacementSettled()
+
+	settled := waiting.outcome()
+	expect.Expect(t, causeOf(settled)).To(expect.Equal(""))
+	expect.Expect(t, asReported(settled.Steps)).To(expect.Equal([]reportedStep{
+		reportedAtOnce(topologyStepHoldingOnePodOf(twoZones, twoNodesPerZone)),
+		reportedAsWaiting(allNodesReadyStep()),
+		reportedAtOnce(resilientPlacementWorkloadStepOf(podsBeyondEveryNode)),
+		reportedAsWaiting(settledPlacementStep()),
+	}))
+	expect.Expect(t, asJudged(settled.Findings)).To(expect.Equal([]judgedFinding{}))
+	expect.Expect(t, settled.Placement.PodsInPhase(scenario.PodPending)).
+		To(expect.HaveLen[scenario.Pod](onePodLeftPending))
+	expect.Expect(t, settled.Placement.PodsInPhase(scenario.PodRunning)).
+		To(expect.HaveLen[scenario.Pod](podsOverEveryNode))
+}
+
+// That Wait standing before any Workload is declared has nothing to wait for, so
+// it is reached at once, as the Wait for every Pod in the same place is: the
+// Placement it reaches holds no Pod, and no Node either where no Topology has
+// been declared above it (docs/prd.md REQ-SIM-011).
+func TestAWaitForASettledPlacementWithNothingDeclared_ShouldBeReachedAtOnce(t *testing.T) {
+	waiting := aScenarioOnAClusterFor(t, theNothingDeclaredScenario)
+
+	waiting.WaitFor().PlacementSettled()
+
+	reached := waiting.outcome()
+	expect.Expect(t, causeOf(reached)).To(expect.Equal(""))
+	expect.Expect(t, asReported(reached.Steps)).To(expect.Equal([]reportedStep{
+		reportedAsWaiting(settledPlacementStep()),
+	}))
+	expectReachedAtOnce(t, reached.Steps)
+	expect.Expect(t, reached.Placement.Pods()).To(expect.HaveLen[scenario.Pod](noPod))
+	expect.Expect(t, reached.Placement.Nodes()).To(expect.HaveLen[scenario.Node](noNodeDeclared))
+}
+
+// expectReachedAtOnce asserts every Wait among these Steps was reached at once,
+// which is what tells a Wait with nothing to wait for apart from one that held
+// until the cluster changed. How long a Wait held varies from run to run, so what
+// it is asserted against is a bound and not a time.
+func expectReachedAtOnce(t *testing.T, recorded []Step) {
+	t.Helper()
+
+	for _, step := range recorded {
+		if step.Kind == WaitStep && step.Waited >= atOnce {
+			t.Errorf("a Wait with nothing to wait for is reached within %s, but reads: %s", atOnce, step)
+		}
+	}
 }
 
 // Edge case 8: a value the control plane refuses ends the Scenario at the Wait

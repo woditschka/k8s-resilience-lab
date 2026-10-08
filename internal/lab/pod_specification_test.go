@@ -78,6 +78,26 @@ func theZoneSpreadAt(maxSkew int) scenario.TopologySpread {
 	return scenario.NewTopologySpread(scenario.ZoneLabel, maxSkew, scenario.DoNotSchedule, scenario.Honor)
 }
 
+// The cpu and memory a Request below asks for, in the whole cores and whole
+// gibibytes a Scenario states them in, and the larger cpu a second Request asks
+// for, so the later of two Requests is told from the earlier.
+const (
+	oneCorePerPod      = 1
+	twoGibibytesPerPod = 2
+	twoCoresPerPod     = 2
+)
+
+// aRequestOf is a Request as a Scenario writes one, in the vocabulary
+// internal/lab offers it. theRequestOf is that same setting as the domain holds
+// it, which is what a customized specification reads back as.
+func aRequestOf(cores, gibibytes int) Customization {
+	return Request(CPU(cores), MemoryGi(gibibytes))
+}
+
+func theRequestOf(cores, gibibytes int) scenario.Request {
+	return scenario.NewRequest(CPU(cores), MemoryGi(gibibytes))
+}
+
 // somePriorityClass is a Kubernetes Pod setting the lab's own vocabulary does not
 // name, which no test of this file turns on: what a specification holds of a full
 // access is the place it was written in and not the change itself.
@@ -198,6 +218,20 @@ func TestASpecificationCustomizedByAScenario_ShouldHoldTheCustomizedSettingsAndK
 			expect.Expect(t, customized.declared.Settings()).To(expect.Equal(taken.held))
 		})
 	}
+}
+
+// A specification holds one Request, so a Customization written after a Request
+// states another one and the later of the two is the one that stands - the rule
+// every setting of one field follows.
+func TestARequestWrittenAfterAnother_ShouldStandAsTheLaterSetting(t *testing.T) {
+	declaring := DefaultPlacement()
+
+	customized := declaring.Customize(
+		aRequestOf(oneCorePerPod, twoGibibytesPerPod), aRequestOf(twoCoresPerPod, twoGibibytesPerPod))
+
+	expect.Expect(t, customized.declared.Settings()).To(expect.Equal([]scenario.Setting{
+		theNotReadyToleration(), theUnreachableToleration(), theRequestOf(twoCoresPerPod, twoGibibytesPerPod),
+	}))
 }
 
 // A full access takes the place it was written in: the number of settings the

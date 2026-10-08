@@ -22,6 +22,22 @@ const (
 	evenSkew             = 1
 	widerSkew            = 2
 
+	// The cpu and memory the Nodes of this suite hold, and the cpu and memory one
+	// Pod of it asks for, in the millicores and mebibytes the lab's own quantities
+	// hold: four cores and sixteen gibibytes a Node, one core and two gibibytes a
+	// Pod.
+	someCPUPerNode      = scenario.CPU(4 * millicoresPerCore)
+	someMemoryPerNode   = scenario.Memory(16 * mebibytesPerGibibyte)
+	someRequestedCPU    = scenario.CPU(1 * millicoresPerCore)
+	someRequestedMemory = scenario.Memory(2 * mebibytesPerGibibyte)
+
+	// The whole units a capacity and a request are stated in on the Step surface,
+	// as the lab's own quantities hold them. internal/lab states them in whole
+	// units and converts there, and this suite converts the same way rather than
+	// importing the Step surface, which imports this package.
+	millicoresPerCore    = 1000
+	mebibytesPerGibibyte = 1024
+
 	// someSpecificationName is the name the specifications below carry into the
 	// Step that declares one, which no test of this suite turns on.
 	someSpecificationName = "a Pod specification"
@@ -296,11 +312,17 @@ func TestADeployedPodTemplate_ShouldCarryTheContainerNoSpecificationCanName(t *t
 // aReportedStatus is the status a Node reports: the capacity this suite
 // provisions with, and the conditions named.
 func aReportedStatus(conditions ...corev1.NodeCondition) corev1.NodeStatus {
-	return corev1.NodeStatus{
-		Capacity: corev1.ResourceList{
-			corev1.ResourcePods: *resource.NewQuantity(somePodsPerNode, resource.DecimalSI),
-		},
-		Conditions: conditions,
+	return corev1.NodeStatus{Capacity: aReportedCapacity(), Conditions: conditions}
+}
+
+// aReportedCapacity is the capacity a Node of this suite reports room for, in all
+// three dimensions: a Node the lab created reports every one of them, which is
+// what an observation reads back.
+func aReportedCapacity() corev1.ResourceList {
+	return corev1.ResourceList{
+		corev1.ResourcePods:   *resource.NewQuantity(somePodsPerNode, resource.DecimalSI),
+		corev1.ResourceCPU:    *resource.NewMilliQuantity(int64(someCPUPerNode), resource.DecimalSI),
+		corev1.ResourceMemory: *resource.NewQuantity(int64(someMemoryPerNode)*bytesPerMebibyte, resource.BinarySI),
 	}
 }
 
@@ -402,16 +424,98 @@ func TestAProvisionedNode_ShouldBeFakeAndCarryItsZoneAndHostnameLabels(t *testin
 	expect.Expect(t, mapped.Annotations).To(expect.Equal(map[string]string{fakeNodeAnnotation: fakeNodeAnnotationValue}))
 }
 
-func TestAProvisionedNode_ShouldBeReadyWithItsDeclaredPodCapacity(t *testing.T) {
+// A provisioned Node reports the capacity its Topology stated in all three
+// dimensions, and reports it as allocatable too: the scheduler fits the requests
+// of the Pods it places against what a Node reports allocatable.
+func TestATopologyStatingItsNodesCpuMemoryAndPodCount_ShouldProvisionNodesWithThatCapacity(t *testing.T) {
 	provisioned := aNode(t)
 
 	mapped := toNode(provisioned)
 
-	expect.Expect(t, int(mapped.Status.Capacity.Pods().Value())).To(expect.Equal(somePodsPerNode))
-	expect.Expect(t, int(mapped.Status.Allocatable.Pods().Value())).To(expect.Equal(somePodsPerNode))
+	expect.Expect(t, theCapacityReportedIn(t, mapped.Status.Capacity)).To(expect.Equal(provisioned.Capacity))
+	expect.Expect(t, theCapacityReportedIn(t, mapped.Status.Allocatable)).To(expect.Equal(provisioned.Capacity))
 	expect.Expect(t, mapped.Status.Conditions).To(expect.Equal([]corev1.NodeCondition{
 		{Type: corev1.NodeReady, Status: corev1.ConditionTrue, Reason: nodeReadyReason},
 	}))
+}
+
+// theCapacityReportedIn is the Node capacity one resource list of a mapped Node
+// reports, read back through the dimensions the lab wrote, so what a test
+// compares is one whole capacity rather than three quantities picked apart.
+func theCapacityReportedIn(t *testing.T, reported corev1.ResourceList) scenario.NodeCapacity {
+	t.Helper()
+
+	return aCapacityOf(t,
+		int(reported.Pods().Value()),
+		scenario.CPU(reported.Cpu().MilliValue()),
+		scenario.Memory(reported.Memory().Value()/bytesPerMebibyte))
+}
+
+// A cpu or memory amount the lab spells itself is spelled the way the client
+// library spells the same amount: a Scenario reads its Node capacity off a Step
+// line the lab spells, and reads it again off a Timeline the client library
+// spells, so one amount stated two ways would read as two
+// (docs/architecture-principles.md § Domain Core).
+func TestEveryQuantityTheLabSpells_ShouldEqualTheClientLibrarysOwnSpelling(t *testing.T) {
+	stated := map[string]struct {
+		cores, gibibytes int
+	}{
+		"a Node of one core and one gibibyte":              {cores: 1, gibibytes: 1},
+		"a Node of four cores and sixteen gibibytes":       {cores: 4, gibibytes: 16},
+		"a Node of sixteen cores and a tebibyte of memory": {cores: 16, gibibytes: 1024},
+	}
+
+	for capacity, held := range stated {
+		t.Run(capacity, func(t *testing.T) {
+			cpu := scenario.CPU(held.cores * millicoresPerCore)
+			memory := scenario.Memory(held.gibibytes * mebibytesPerGibibyte)
+
+			mapped := toNode(aNodeHolding(t, aCapacityOf(t, somePodsPerNode, cpu, memory)))
+
+			expect.Expect(t, mapped.Status.Capacity.Cpu().String()).To(expect.Equal(cpu.String()))
+			expect.Expect(t, mapped.Status.Capacity.Memory().String()).To(expect.Equal(memory.String()))
+		})
+	}
+}
+
+// The Request a specification states reaches the container the mapper owns, under
+// the names Kubernetes gives it, because the scheduler places a Pod by what it
+// asks for. A specification stating none leaves its Pods asking for nothing, so
+// the spread alone decides where they land.
+func TestAPodSpecificationStatingARequest_ShouldDeployItsPodsWithThatRequest(t *testing.T) {
+	declared := aSpecificationOf(scenario.NewRequest(someRequestedCPU, someRequestedMemory))
+
+	deployed := toDeployment(aWorkload(t, declared))
+
+	expect.Expect(t, theQuantitiesRequestedIn(deployed)).To(expect.Equal([]map[corev1.ResourceName]string{{
+		corev1.ResourceCPU:    someRequestedCPU.String(),
+		corev1.ResourceMemory: someRequestedMemory.String(),
+	}}))
+}
+
+func TestAPodSpecificationStatingNoRequest_ShouldDeployItsPodsAskingForNothing(t *testing.T) {
+	declared := aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
+
+	deployed := toDeployment(aWorkload(t, declared))
+
+	expect.Expect(t, theQuantitiesRequestedIn(deployed)).To(expect.Equal([]map[corev1.ResourceName]string{{}}))
+}
+
+// theQuantitiesRequestedIn are the resource requests the containers of a deployed
+// Pod template carry, each amount as Kubernetes spells it, which is how a request
+// is read back without a quantity being picked apart.
+func theQuantitiesRequestedIn(deployed *appsv1.Deployment) []map[corev1.ResourceName]string {
+	containers := deployed.Spec.Template.Spec.Containers
+	requested := make([]map[corev1.ResourceName]string, 0, len(containers))
+	for _, container := range containers {
+		spelled := make(map[corev1.ResourceName]string, len(container.Resources.Requests))
+		for name, quantity := range container.Resources.Requests {
+			spelled[name] = quantity.String()
+		}
+		requested = append(requested, spelled)
+	}
+
+	return requested
 }
 
 func TestAProbePod_ShouldNameItsOwnNodeByHostnameAndLeaveThePlacingToTheScheduler(t *testing.T) {
@@ -527,9 +631,7 @@ func TestAnObservedNode_ShouldTakeItsZoneFromItsLabelRatherThanItsName(t *testin
 	observed, err := fromNodes([]corev1.Node{{
 		Name:   observedNodeName,
 		Labels: map[string]string{zoneLabel: labelledZone},
-		Status: corev1.NodeStatus{Capacity: corev1.ResourceList{
-			corev1.ResourcePods: *resource.NewQuantity(somePodsPerNode, resource.DecimalSI),
-		}},
+		Status: corev1.NodeStatus{Capacity: aReportedCapacity()},
 	}})
 	if err != nil {
 		t.Fatalf("read an observed Node: %v", err)
@@ -575,15 +677,21 @@ const (
 	someUnwatchedName = "web-service"
 )
 
+// theCapacityReported is how a Node entry of a Timeline states the capacity this
+// suite provisions with: the cpu and memory the scheduler fits a request
+// against, then the Pods it has room for, each as Kubernetes spells it.
+func theCapacityReported() string {
+	return someCPUPerNode.String() + " cpu, " + someMemoryPerNode.String() + " memory and " +
+		strconv.Itoa(somePodsPerNode) + " Pods"
+}
+
 // aWatchedNode is the Node a Timeline reads a change to, reporting the Ready
 // condition given and room for the capacity this suite provisions with.
 func aWatchedNode(ready corev1.ConditionStatus) *corev1.Node {
 	return &corev1.Node{
 		Name: watchedNodeName,
 		Status: corev1.NodeStatus{
-			Capacity: corev1.ResourceList{
-				corev1.ResourcePods: *resource.NewQuantity(somePodsPerNode, resource.DecimalSI),
-			},
+			Capacity:   aReportedCapacity(),
 			Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: ready}},
 		},
 	}
@@ -601,7 +709,7 @@ func TestAnObservedChangeToAKindATimelineReads_ShouldBecomeOneEntryOfThatChange(
 			recorded: scenario.Entry{
 				Elapsed: observedAfter, Change: scenario.ChangeAdded, Kind: scenario.NodeObject,
 				Name: watchedNodeName, Reason: string(scenario.NodeReady),
-				Detail: strconv.Itoa(somePodsPerNode) + " Pods",
+				Detail: theCapacityReported(),
 			},
 		},
 		"a Node the control plane no longer reports Ready": {
@@ -609,7 +717,7 @@ func TestAnObservedChangeToAKindATimelineReads_ShouldBecomeOneEntryOfThatChange(
 			recorded: scenario.Entry{
 				Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.NodeObject,
 				Name: watchedNodeName, Reason: string(scenario.NodeNotReady),
-				Detail: strconv.Itoa(somePodsPerNode) + " Pods",
+				Detail: theCapacityReported(),
 			},
 		},
 		"a Pod the scheduler placed on a Node": {
@@ -712,8 +820,16 @@ func TestAnObservedChangeNoTimelineRecords_ShouldBecomeNoEntry(t *testing.T) {
 func aNode(t *testing.T) scenario.Node {
 	t.Helper()
 
+	return aNodeHolding(t, aCapacity(t))
+}
+
+// aNodeHolding is the one Node of a Topology whose Nodes hold the capacity named,
+// which is how a test that turns on a capacity states it.
+func aNodeHolding(t *testing.T, capacity scenario.NodeCapacity) scenario.Node {
+	t.Helper()
+
 	const oneZone, oneNodePerZone = 1, 1
-	topology, err := scenario.NewTopology(oneZone, oneNodePerZone, aCapacity(t))
+	topology, err := scenario.NewTopology(oneZone, oneNodePerZone, capacity)
 	if err != nil {
 		t.Fatalf("build a Topology of one Node: %v", err)
 	}
@@ -725,9 +841,17 @@ func aNode(t *testing.T) scenario.Node {
 func aCapacity(t *testing.T) scenario.NodeCapacity {
 	t.Helper()
 
-	capacity, err := scenario.NewNodeCapacity(somePodsPerNode)
+	return aCapacityOf(t, somePodsPerNode, someCPUPerNode, someMemoryPerNode)
+}
+
+// aCapacityOf is the Node capacity of the dimensions named, which is what a test
+// turning on one of them states.
+func aCapacityOf(t *testing.T, pods int, cpu scenario.CPU, memory scenario.Memory) scenario.NodeCapacity {
+	t.Helper()
+
+	capacity, err := scenario.NewNodeCapacity(pods, cpu, memory)
 	if err != nil {
-		t.Fatalf("build a Node capacity of %d Pods: %v", somePodsPerNode, err)
+		t.Fatalf("build a Node capacity of %d Pods, %s cpu and %s memory: %v", pods, cpu, memory, err)
 	}
 
 	return capacity

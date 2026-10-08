@@ -24,7 +24,15 @@ The owner then moved the time out of the argument: "Maybe we add a second versio
 
 The lab waits its own waiting time whatever a Wait states, so a run reports how long recovery really took. A Wait cancelled at its stated time would report the bound instead of the measurement, which is the lab's own subject.
 
+The slice left one case open: the Scenario whose Placement settles with Pods still Pending. REQ-SIM-011's Scenario is that case — one Zone stops responding, and the Nodes still responding have room for six of the nine Pods. A Wait for every Pod Ready would end such a Scenario at that Wait, after waiting the lab's whole waiting time. The state it needs is the one `AwaitSettled` already holds for, and the glossary already names that state Settled.
+
+Option 1's objection stands and no longer decides: a state only this lab defines is exactly what such a Scenario is about.
+
 The owner then drew the line at the refusal rather than at the call. The lab's own refusal — a Zone count above the limit, a minimum above the Pod count — is checkable at the call and names its Given. What the control plane refuses may surface at the Step that reaches the cluster, as long as that Step names what was deployed.
+
+Reading a run of the Zone loss Scenario, the owner found the printed time ambiguous: "In the output the time information is unclear: is it the upper limit or the real time it took? Let's make this clearer." Its lines read `Wait for all Nodes Ready in 1.4s` and `Wait for all Pods Ready in 6.5s`. A Wait stating thirty seconds printed the same shape as one stating none. One preposition carried a measurement, and the time the Wait was held to was absent unless missed.
+
+The plain name of each Wait delegated with the lab's own waiting time, so the Step surface held a stated time for every Wait. A line could therefore not tell a time a Scenario chose from the lab's own budget, because nothing recorded which it was.
 
 ## Options Considered
 
@@ -80,19 +88,54 @@ Where a stated time the lab cannot honour is caught:
 24. **Clamped to the lab's own waiting time** — a miss then reads against a time the lab never waited.
 25. **Refused where it is stated, naming that waiting time** — a Scenario states a time the lab can hold it to.
 
+What a Scenario expecting Pods to stay Pending waits for:
+
+26. **`PlacementSettled`** — the lab's own state, under the word the glossary gives it.
+27. **A Wait naming the Pending outcome** — `PodsPending(3)`, which states in the Wait what a Then asserts.
+28. **`AllPodsReady` widened** — its readiness clause dropped where Pods stay Pending, so one name covers two states.
+
+Where that Wait is offered:
+
+29. **The Scenario's own `WaitFor()` alone** — such a Wait is always a Step of its own.
+30. **A Workload Given's `WaitFor()` as well** — the chained form the two Ready Waits have.
+
+How a Wait's line tells the time it took from the time it was held to:
+
+31. **`reached in 6.5s of the 30s stated`** — one word per time, and the stated marker on the time a Scenario chose.
+32. **`took 6.5s, within 30s`** — two prepositions, neither saying which time a reader acts on.
+33. **`in 6.5s (at most 30s)`** — the bound in brackets, read as an aside rather than as the Wait's own statement.
+
+Where the line reads the stated time from:
+
+34. **The plain form states none** — a Wait carries a stated time only where its line wrote one, and the lab's own waiting time reaches no Step.
+35. **A marker beside the budget** — the plain form keeps delegating with the waiting time, and the Step records that the Scenario did not state it.
+36. **The budget compared on the line** — `internal/lab` reads the waiting time and prints no stated time where the two agree, which a Wait stating ninety seconds reads wrong.
+
 ## Decision
 
-Options 2, 4 and 5, 8 and 9, 14 and 18. A Wait is the fourth Step kind: a Given declares, a When changes the cluster, a Wait waits for a state of it, a Then judges. It is written `WaitFor()`, on the Scenario or on the Given before it. A Given's `WaitFor()` returns a type offering the one Wait that fits what it declared. A chain therefore reaches no other Step, and every Wait is written through `WaitFor()`. The Scenario's own `WaitFor()` offers both Waits, and `When()` keeps the Failures alone. Either form reports the same line, after the Given's own, with the time it took: `Wait for all Pods Ready in 6.5s`. That time is measured from the Step before it, so a reader of a restore time reasons about one Wait rather than about the run. The Step carries it as a value of its own rather than inside its name, so what a Step is named stays what its line says. `within` names no measurement: it is reserved for the bound a Wait states itself, a later slice.
+Options 2, 4 and 5, 8 and 9, 14 and 18. A Wait is the fourth Step kind: a Given declares, a When changes the cluster, a Wait waits for a state of it, a Then judges. It is written `WaitFor()`, on the Scenario or on the Given before it. A Given's `WaitFor()` returns a type offering the one Wait that fits what it declared. A chain therefore reaches no other Step, and every Wait is written through `WaitFor()`. The Scenario's own `WaitFor()` offers both Waits, and `When()` keeps the Failures alone. Either form reports the same line, after the Given's own, with the time it took: `Wait for all Pods Ready, reached in 6.5s`. That time is measured from the Step before it, so a reader of a restore time reasons about one Wait rather than about the run. The Step carries it as a value of its own rather than inside its name, so what a Step is named stays what its line says. `within` names no measurement: it names the bound on the Wait's own name, `AllPodsReadyWithinSeconds`.
 
 `AllPodsReady` holds until every Pod the Workloads declared reports the Ready condition, `AllNodesReady` until every Node the Topology declared reports it. Beneath either the lab observes that the Placement has stopped changing, so the Thens after a Wait judge a Settled Placement. The Pod wait is a second wait over the polling loop `AwaitSettled` already runs. A Wait for a Placement that settles with Pods Pending is a later slice, and so is a waiting time a Wait names itself.
 
 A Given declares, and the first Step after its line applies what it declared, which this grammar makes a Wait. One line's further calls therefore reach the cluster once, and `ApplyTopology` stays create-only. A Failure When applies nothing and waits for nothing beforehand. It reads the Placement the last Wait reached, which is the moment its Required Capacity is judged at, per [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md). A Then, or a Failure, with no Wait since the Given or the Failure before it ends the Scenario at that Step. A Scenario with no Wait after its Givens therefore ends at its first Then, with nothing deployed. A Wait the lab's waiting time outlasts ends it there, naming what was not Ready. Two Waits in a row are admitted, and a Wait for every Pod before any Workload is declared waits for no Pod.
 
-Options 20, 23 and 25. A Wait states the time it must be reached in as a second name per Wait, `AllPodsReadyWithinSeconds` and `AllNodesReadyWithinSeconds`, in whole seconds, on the Scenario's own `WaitFor()` and on a Given's alike. The plain name delegates to it with the lab's own waiting time, so every Wait is held to a time and a Scenario stating none reads as it did. The time belongs to the name rather than to an argument: a Scenario reads one call, and the Step vocabulary takes no further type.
+Options 20, 23 and 25. A Wait states the time it must be reached in as a second name per Wait, `AllPodsReadyWithinSeconds` and `AllNodesReadyWithinSeconds`, in whole seconds, on the Scenario's own `WaitFor()` and on a Given's alike. The plain name states none, and is held to the lab's own waiting time, so every Wait is held to a time. The time belongs to the name rather than to an argument: a Scenario reads one call, and the Step vocabulary takes no further type.
 
 The lab's own waiting time moves to `internal/scenario`, beside the unresponsive-Node wait already there. It is what a stated time is refused against, so that refusal is the domain core's own and the Step surface carries no bound of its own. A time of no seconds, and one above that waiting time, are refused at the Wait, named with the waiting time the lab can hold it to.
 
-A Wait waits the lab's own waiting time whatever it states, and the time it took is judged against the time it stated once reached. A Wait reached later ends the Scenario at that Step, its line stating both times. A Wait the lab's own waiting time outlasts ends it as before, naming what was not Ready: what held the Wait open is more use than the bound it missed. Both Failure Scenarios state thirty seconds on the Wait after their Failure — some three times the slowest restore measured, and a third of the lab's own waiting time — so a loaded machine reports a restore rather than a Finding. Every run reports the lab's own waiting time at its start, beside the control-plane settings it sets.
+A Wait waits the lab's own waiting time whatever it states, and the time it took is judged against the time it stated once reached. A Wait reached later ends the Scenario at that Step, its line naming the time it was held to. A Wait the lab's own waiting time outlasts ends it as before, named with what was not Ready: what held the Wait open is more use than the time it missed. Both Failure Scenarios state thirty seconds on the Wait after their Failure — some three times the slowest restore measured, and a third of the lab's own waiting time — so a loaded machine reports a restore rather than a Finding. Every run reports the lab's own waiting time at its start, beside the control-plane settings it sets.
+
+Options 26 and 29. `PlacementSettled` is the third Wait, with `PlacementSettledWithinSeconds` beside it as options 20, 23 and 25 fixed for the two before it. Its line reads `Wait for the Placement Settled, reached in 12.4s`. It holds for what `AwaitSettled` already holds for, so the predicate reaching the cluster is the one the two Ready Waits sit on. Every declared Pod is accounted for there, placed or not, so a Placement holding Pending Pods settles. One written before any Workload is declared is reached at once, as a Wait with nothing to wait for is.
+
+How many Pods a Placement leaves Pending is a Then, `Then().PodsPending(3)`, beside the counts per Zone and per Node. Option 27 is rejected because a Wait holding for a count would judge where a Then judges. A count such a Wait missed would report what was not Ready rather than a Finding.
+
+Option 28 is rejected because one name for both states says less than the line it prints. A reader of `Wait for all Pods Ready` could no longer tell whether every Pod was Ready.
+
+Option 30 is rejected. A Workload line declares Pods, and the Wait that fits what it declared is every one of them Ready; a Settled Placement is the Scenario's state rather than that line's. The lab's own Scenarios write each Wait as a Step of its own, so the chained form would ship unused.
+
+Options 31 and 34. A Wait's line names one time and says what that time is. A Wait that was reached names the time it took: `Wait for all Nodes Ready, reached in 1.4s`. Where the Scenario stated a time, that time follows: `Wait for all Pods Ready, reached in 6.5s of the 30s stated`. A Wait that was not reached names the time it was held to and not the time it took: `Wait for all Pods Ready, not reached in the 30s stated`. The marker is dropped where the Scenario stated none. Option 31 narrows option 18: `in` still carries the measurement, and `reached` says whether the cluster got there. Options 32 and 33 are rejected because neither says which time a reader acts on.
+
+The plain form of each Wait states no time, so the lab's own waiting time is never carried through the Step surface and keeps its one home in `internal/scenario`. That waiting time and the stated seconds are one domain value, and so is whether a Scenario stated them: the Step records the resolved time beside the time it took, the stated marker, and whether the Wait was reached. Option 35 is rejected because a budget travelling as a stated time is the conflation this line had to undo. Option 36 is rejected because a Wait stating the whole waiting time would then read as having stated nothing. A Wait with nothing to wait for reports that nothing was waited for, as before: no measurable time reaches its line.
 
 ## Consequences
 
@@ -100,9 +143,13 @@ Nothing waits silently, and the restore time after a Failure is on a line of the
 
 A Scenario states a restore time, so the lab judges recovery rather than only reporting it. The two Waits are four names, and a later Wait option multiplies them again: the next one weighs that against the argument form once more. A miss is known only once the Wait is reached, so a Scenario stating a short time still waits the lab's own waiting time out. The judgement is a pure function of two durations, so the Step-surface tests exercise it over no cluster and no clock of their own. The lab's own waiting time leaving `internal/cluster` renames nothing a Scenario reads, and gives `cmd/lab` a settings line it could not print before. A Wait's Step carries the time it was held to beside the time it took, and states it only where it was missed, so a Scenario that meets its time reads as it always did.
 
+The lab's Waits are three states and six calls, which the next Wait option weighs again. A Scenario expecting Pods to stay Pending reads its intent on two lines: the Wait that holds for a Settled Placement, and the Then that counts the Pods left Pending. A Workload meeting its minimum with Pods Pending reports no Finding. Required Capacity is judged at the same two moments as before, per [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md). The Scenario-place rules carry the new Wait in the names they read a line's kind by, so a Wait those rules do not know is still reported.
+
+A reader tells the time the cluster took from the time the Scenario allowed it, on the Wait's own line and without reading the Scenario. The three Wait kinds read alike. A Wait the lab's own waiting time outlasts names that time on its line as well as what was not Ready, so the two misses read the same way. `internal/lab` derives the waiting time no longer, and the Step surface carries no bound of its own. A Wait's Step carries four values where it carried two, because a line that drops the measured time on a miss cannot be read off two durations. Every line constant a test matches on moves with the wording, and so does every line quoted beside the Scenarios.
+
 ## Implementation
 
-**Requirements:** REQ-SIM-006, REQ-SIM-008
+**Requirements:** REQ-SIM-006, REQ-SIM-008, REQ-SIM-011
 
 ## References
 

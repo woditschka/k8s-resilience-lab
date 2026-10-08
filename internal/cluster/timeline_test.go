@@ -57,10 +57,7 @@ func (e *entriesDelivered) Write(entry scenario.Entry) {
 func aTopologyOfOneNodeHoldingOnePod(t *testing.T) scenario.Topology {
 	t.Helper()
 
-	capacity, err := scenario.NewNodeCapacity(roomForOnePod)
-	if err != nil {
-		t.Fatalf("build a Node capacity of %d Pod: %v", roomForOnePod, err)
-	}
+	capacity := aCapacityOf(t, roomForOnePod, someCPUPerNode, someMemoryPerNode)
 	topology, err := scenario.NewTopology(theOneZone, theOneNodeInIt, capacity)
 	if err != nil {
 		t.Fatalf("build a Topology of one Node: %v", err)

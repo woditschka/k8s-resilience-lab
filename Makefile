@@ -71,6 +71,12 @@ deps-check:
 # in which a control plane reacts, and the detector's slower timing is the regime a
 # wrong order shows in.
 #
+# The run states a timeout of its own, above what a cluster-backed package takes
+# for every Scenario the lab ships: a package running the lab pays one container
+# start per Scenario per case, so Go's own per-package default would fail the gate
+# on the clock as Scenarios are added. Every wait the lab makes is bounded by a
+# timeout of its own, so the default guards nothing (same ADR, option 6).
+#
 # The check asserts no toolchain prerequisite of its own: no CGO_ENABLED test, no
 # search for a C compiler and no operating-system branch, because each of those is
 # a second rule about where the detector needs a compiler and macOS needs none.
@@ -78,7 +84,7 @@ deps-check:
 # find; that refusal is this failure, and the install names below are the ones
 # CLAUDE.md § Toolchain documents.
 test:
-	@go test -race ./... || { \
+	@go test -race -timeout 30m ./... || { \
 		refused=$$?; \
 		echo "test: the tests must pass under the race detector (docs/adr/2026-10-04-race-detector-in-the-gate.md)"; \
 		echo "  if the Go toolchain refused the detector above, it needs cgo and a C compiler:"; \

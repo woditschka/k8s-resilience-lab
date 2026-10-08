@@ -32,7 +32,7 @@ const (
 // two Workloads whose names nest, the Pods placed for them, and the replica set
 // the control plane made for the first Workload.
 const (
-	someNodeCapacity        = "10 Pods"
+	someNodeCapacity        = "4 cpu, 16Gi memory and 10 Pods"
 	aSecondNodeName         = "zone-3-node-1"
 	aProbePodName           = "provisioning-probe-" + aNodeName
 	aSecondPodName          = "web-5d8f9b7c6-9ptwz"

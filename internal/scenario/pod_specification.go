@@ -72,12 +72,13 @@ const (
 const (
 	spreadSetting     = "topologySpread"
 	tolerationSetting = "toleration"
+	requestSetting    = "request"
 )
 
-// Setting is one thing a Pod specification sets: either where a Workload's Pods
-// land or when they leave a Node. Its one method is unexported, so the two
-// settings below are every setting there is and a specification can hold no
-// value from outside this package.
+// Setting is one thing a Pod specification sets: where a Workload's Pods land,
+// when they leave a Node, or what one of them asks for. Its one method is
+// unexported, so the three settings below are every setting there is and a
+// specification can hold no value from outside this package.
 type Setting interface {
 	// field is the field of a Pod specification this setting occupies. A setting
 	// written for a field a specification already holds replaces it.
@@ -210,6 +211,45 @@ func (t Toleration) Equal(other Toleration) bool {
 // taint once.
 func (t Toleration) field() settingField {
 	return settingField{kind: tolerationSetting, key: t.key}
+}
+
+// Request is the setting that decides what one Pod of a Workload asks for: the
+// cpu and the memory the scheduler fits against the room a Node reports. It is
+// Kubernetes' resources.requests, in types of the lab's own, per
+// docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md, and it
+// states no limit: nothing runs in a Simulated Cluster for a limit to bind.
+type Request struct {
+	cpu    CPU
+	memory Memory
+}
+
+// NewRequest builds one request setting, refusing nothing for the reason
+// NewTopologySpread refuses nothing: what a Kubernetes quantity admits is the
+// control plane's to judge.
+func NewRequest(cpu CPU, memory Memory) Request {
+	return Request{cpu: cpu, memory: memory}
+}
+
+// CPU is how much processor time one Pod with this setting asks for.
+func (r Request) CPU() CPU {
+	return r.cpu
+}
+
+// Memory is how much memory one Pod with this setting asks for.
+func (r Request) Memory() Memory {
+	return r.memory
+}
+
+// Equal reports whether two requests ask for the same of both. It is the
+// equality go-cmp compares through, since the type's fields are unexported.
+func (r Request) Equal(other Request) bool {
+	return r == other
+}
+
+// field is the one field a request occupies: a specification states what one Pod
+// asks for once, so it carries no key of its own.
+func (Request) field() settingField {
+	return settingField{kind: requestSetting}
 }
 
 // PodSpecification is the settings one Workload's Pods are deployed with, under

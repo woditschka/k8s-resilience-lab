@@ -35,6 +35,8 @@ Each specification is named for the intent it serves: `ResilientPlacement` and `
 
 A specification is an immutable value of the domain core carrying its name and its settings: one topology spread per topology key, one toleration per taint. A setting names the Kubernetes fields it sets — `topologyKey`, `maxSkew`, `whenUnsatisfiable` and `nodeTaintsPolicy` for a spread, `key`, `operator`, `effect` and `tolerationSeconds` for a toleration — in types of the lab's own. `internal/scenario` spells the Kubernetes label, taint and value names itself, and the mapping test pins each one to the client library's constant.
 
+A setting stating a Kubernetes quantity holds it as the integer that quantity carries exactly: millicores for cpu, mebibytes for memory. The Step surface spells it in whole units, `lab.CPU(1)` and `lab.MemoryGi(2)`, the way the toleration's whole seconds are spelled from a duration. A Node capacity states its cpu and memory in the same two types, so one spelling serves the room a Node has and the share a Pod asks for.
+
 Each predefined specification is defined in `internal/lab`, over the base every one starts from, which names it and carries the lab's own settings:
 
 ```go
@@ -95,7 +97,7 @@ A setting's constructor returns no error, for either builder. The control plane 
 
 The Workload-line rule reads that Step's own expression rather than the source line, so it admits a `Customize` call of any length and nothing after it. That last part is narrowed by [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md): the rule admits one further call of the Workload's own, and no setting of the Scenario's own.
 
-The specification set grows one entry per Scenario that needs one. Zone spread only, soft spread and affinity between a Workload's Pods are not offered yet, so a Customization today names the spread fields the definitions already name.
+The specification set grows one entry per Scenario that needs one. The settings offered are the spread and the Request, and no predefined definition sets a Request. Zone spread only, soft spread and affinity between a Workload's Pods are not offered yet.
 
 No Scenario of the lab names a Customization: the callers are the predefined definitions and the tests. One arrives with the Scenario whose intent needs it.
 
@@ -109,7 +111,7 @@ No Scenario of the lab uses full access, so the single-import exception is unexe
 
 ## Implementation
 
-**Requirements:** REQ-SIM-009
+**Requirements:** REQ-SIM-009, REQ-SIM-011
 
 ## References
 
