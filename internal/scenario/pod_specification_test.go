@@ -1,7 +1,10 @@
 package scenario_test
 
 import (
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -135,4 +138,111 @@ func TestTwoPodSpecifications_ShouldBeEqualWhenTheyNameTheSameSettingsUnderTheSa
 			expect.Expect(t, taken.one.Equal(taken.other)).To(expect.Equal(taken.equal))
 		})
 	}
+}
+
+// The Startup times the tests below state, in whole seconds: a shortest and a
+// longest apart from each other and from the lab's own, so a time read back is
+// the one written; and the times a Pod cannot take to start.
+const (
+	aShortStartup    = 3
+	aLongerStartup   = 7
+	noStartupAtAll   = 0
+	aNegativeStartup = -1
+)
+
+// aStartupTimeBetween is the Startup time of that shortest and that longest.
+func aStartupTimeBetween(t *testing.T, shortest, longest int) scenario.StartupTime {
+	t.Helper()
+
+	stated, err := scenario.NewStartupTime(shortest, longest)
+	if err != nil {
+		t.Fatalf("build a Startup time between %d and %d seconds: %v", shortest, longest, err)
+	}
+
+	return stated
+}
+
+func TestAStartupTime_ShouldTakeEachPodBetweenItsShortestAndItsLongest(t *testing.T) {
+	stated := map[string]struct {
+		shortest, longest         int
+		wantShortest, wantLongest time.Duration
+	}{
+		"a shortest and a longest": {
+			shortest: aShortStartup, longest: aLongerStartup,
+			wantShortest: aShortStartup * time.Second, wantLongest: aLongerStartup * time.Second,
+		},
+		"equal bounds, acting as one time": {
+			shortest: aShortStartup, longest: aShortStartup,
+			wantShortest: aShortStartup * time.Second, wantLongest: aShortStartup * time.Second,
+		},
+		"no time at all, Ready at placement": {
+			shortest: noStartupAtAll, longest: noStartupAtAll,
+			wantShortest: noStartupAtAll * time.Second, wantLongest: noStartupAtAll * time.Second,
+		},
+	}
+
+	for how, startup := range stated {
+		t.Run(how, func(t *testing.T) {
+			taken := aStartupTimeBetween(t, startup.shortest, startup.longest)
+
+			expect.Expect(t, taken.Shortest()).To(expect.Equal(startup.wantShortest))
+			expect.Expect(t, taken.Longest()).To(expect.Equal(startup.wantLongest))
+		})
+	}
+}
+
+func TestAStartupTimeThatCannotHold_ShouldBeRefusedWhereItIsStated(t *testing.T) {
+	refusals := map[string]struct {
+		shortest, longest int
+		named             string
+	}{
+		"a shortest above its longest": {shortest: aLongerStartup, longest: aShortStartup, named: strconv.Itoa(aLongerStartup)},
+		"a negative shortest":          {shortest: aNegativeStartup, longest: aShortStartup, named: strconv.Itoa(aNegativeStartup)},
+		"a negative time":              {shortest: aNegativeStartup, longest: aNegativeStartup, named: strconv.Itoa(aNegativeStartup)},
+	}
+
+	for refused, startup := range refusals {
+		t.Run(refused, func(t *testing.T) {
+			_, err := scenario.NewStartupTime(startup.shortest, startup.longest)
+
+			if err == nil {
+				t.Fatalf("a Startup time between %d and %d seconds is refused, but it was admitted", startup.shortest, startup.longest)
+			}
+			if !strings.Contains(err.Error(), startup.named) {
+				t.Errorf("the refusal names %s, but reads: %v", startup.named, err)
+			}
+		})
+	}
+}
+
+func TestAPodSpecificationStatingNoStartupTime_ShouldHaveItsPodsTakeTheLabsOwnStartupTime(t *testing.T) {
+	declared := aPodSpecification()
+
+	expect.Expect(t, declared.StartupTime().Shortest()).To(expect.Equal(scenario.DefaultStartupTime))
+	expect.Expect(t, declared.StartupTime().Longest()).To(expect.Equal(scenario.DefaultStartupTime))
+}
+
+func TestAStartupTimeStatedOnASpecification_ShouldStandWhereverItsSettingsAreCustomizedAfter(t *testing.T) {
+	stated := aStartupTimeBetween(t, aShortStartup, aLongerStartup)
+
+	customized := aPodSpecification().WithStartupTime(stated).With(aNodeSpread(someSkew))
+
+	expect.Expect(t, customized.StartupTime()).To(expect.Equal(stated))
+}
+
+func TestTwoStartupTimesStatedOnOneSpecification_ShouldLeaveTheLaterOneStanding(t *testing.T) {
+	theEarlier, theLater := aStartupTimeBetween(t, aShortStartup, aShortStartup), aStartupTimeBetween(t, aLongerStartup, aLongerStartup)
+
+	customized := aPodSpecification().WithStartupTime(theEarlier).WithStartupTime(theLater)
+
+	expect.Expect(t, customized.StartupTime()).To(expect.Equal(theLater))
+}
+
+func TestAStartupTimeStatedOnASpecification_ShouldLeaveTheOneItWasStatedOnAsItWas(t *testing.T) {
+	defined := aPodSpecification()
+
+	customized := defined.WithStartupTime(aStartupTimeBetween(t, aShortStartup, aLongerStartup))
+
+	expect.Expect(t, defined.Equal(aPodSpecification())).To(expect.Equal(true))
+	expect.Expect(t, customized.Equal(defined)).To(expect.Equal(false))
 }

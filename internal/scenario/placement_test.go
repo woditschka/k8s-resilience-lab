@@ -163,3 +163,18 @@ func TestTwoObservationsOfTheSamePodsOnTheSameNodes_ShouldAgree(t *testing.T) {
 
 	expect.Expect(t, secondObservation).To(expect.Equal(firstObservation))
 }
+
+// A placed Pod inside its Startup time stands on its Node and is not yet Running,
+// which is what keeps its Placement from being Settled (docs/prd.md REQ-SIM-012).
+func TestAPodInsideItsStartupTime_ShouldBeCountedPendingOnItsNode(t *testing.T) {
+	const theStartingPodAlone = 1
+	starting := scenario.Pod{Name: podOnTheNextNode, Node: nextNode, Phase: scenario.PodPending}
+	unplaced := scenario.Pod{Name: podOnNoNodeAtAll, Phase: scenario.PodPending}
+	running := scenario.Pod{Name: firstPodOnTheFullestNode, Node: fullestNode, Phase: scenario.PodRunning}
+
+	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), []scenario.Pod{running, starting, unplaced})
+
+	expect.Expect(t, placement.PodsStarting()).To(expect.Equal([]scenario.Pod{starting}))
+	expect.Expect(t, placement.PodsPerNode()[nextNode]).To(expect.Equal(theStartingPodAlone))
+	expect.Expect(t, placement.PodsInPhase(scenario.PodPending)).To(expect.Equal([]scenario.Pod{starting, unplaced}))
+}

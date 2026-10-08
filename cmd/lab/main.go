@@ -76,6 +76,11 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	// state, which is what a Wait stating more is refused against.
 	reported.printf("lab waiting time:   at most %s for a state of the cluster, and the most a Wait may state\n",
 		scenario.WaitingTime)
+	// The lab's own Startup time is no control-plane setting either: it is the time
+	// every placed Pod takes to become Ready where its Scenario states none
+	// (docs/prd.md REQ-SIM-012).
+	reported.printf("Pod startup time:   %s for every Pod whose Scenario states none\n",
+		scenario.DefaultStartupTime)
 
 	// The Scenarios the lab holds, in the order the list beside them names: the
 	// command names no Scenario, so adding one touches the Scenarios' place alone.

@@ -306,3 +306,63 @@ func TestAPredefinedSpecificationCustomizedByOneWorkload_ShouldStayAsItWasForAno
 	expect.Expect(t, declaredByTheFirstWorkload.Equal(ResilientPlacement())).To(expect.Equal(true))
 	expect.Expect(t, customized.Equal(ResilientPlacement())).To(expect.Equal(false))
 }
+
+// The Startup times a Customization below states, in the whole seconds a
+// Scenario writes them in: a shortest and a longest apart from each other and
+// from the lab's own, so the time a specification holds is read back as the
+// Scenario's and the later of two is told from the earlier.
+const (
+	aShortStartup  = 3
+	aLongerStartup = 7
+)
+
+// theStartupTimeBetween is a Startup time as the domain holds it, which is what
+// a customized specification reads back as.
+func theStartupTimeBetween(t *testing.T, shortest, longest int) scenario.StartupTime {
+	t.Helper()
+
+	stated, err := scenario.NewStartupTime(shortest, longest)
+	if err != nil {
+		t.Fatalf("build a Startup time between %d and %d seconds: %v", shortest, longest, err)
+	}
+
+	return stated
+}
+
+// A Scenario states a Startup time as one time every Pod takes, or as a shortest
+// and a longest each Pod takes its own time between (docs/prd.md REQ-SIM-012).
+func TestAStartupTimeAScenarioStates_ShouldBeTheOneItsWorkloadsPodsTake(t *testing.T) {
+	written := map[string]struct {
+		customization Customization
+		shortest      int
+		longest       int
+	}{
+		"one time":                 {customization: StartupSeconds(aShortStartup), shortest: aShortStartup, longest: aShortStartup},
+		"a shortest and a longest": {customization: StartupSecondsBetween(aShortStartup, aLongerStartup), shortest: aShortStartup, longest: aLongerStartup},
+	}
+
+	for how, taken := range written {
+		t.Run(how, func(t *testing.T) {
+			customized := ResilientPlacement().Customize(taken.customization)
+
+			expect.Expect(t, customized.declared.StartupTime()).To(expect.Equal(theStartupTimeBetween(t, taken.shortest, taken.longest)))
+			expect.Expect(t, customized.declared.Settings()).To(expect.Equal(ResilientPlacement().declared.Settings()))
+		})
+	}
+}
+
+func TestTwoStartupTimeCustomizations_ShouldLeaveTheLaterOneStanding(t *testing.T) {
+	customized := DefaultPlacement().Customize(StartupSeconds(aShortStartup), StartupSeconds(aLongerStartup))
+
+	expect.Expect(t, customized.declared.StartupTime()).To(expect.Equal(theStartupTimeBetween(t, aLongerStartup, aLongerStartup)))
+}
+
+func TestAStartupTimeCustomizedForOneWorkload_ShouldLeaveTheSpecificationItCustomizedUnchanged(t *testing.T) {
+	declaredByTheFirstWorkload := ResilientPlacement()
+
+	customized := declaredByTheFirstWorkload.Customize(StartupSeconds(aLongerStartup))
+
+	expect.Expect(t, declaredByTheFirstWorkload.Equal(ResilientPlacement())).To(expect.Equal(true))
+	expect.Expect(t, customized.Equal(ResilientPlacement())).To(expect.Equal(false))
+	expect.Expect(t, declaredByTheFirstWorkload.declared.StartupTime().Shortest()).To(expect.Equal(scenario.DefaultStartupTime))
+}

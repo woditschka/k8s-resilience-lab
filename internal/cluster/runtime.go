@@ -451,6 +451,13 @@ const (
 	manageMarkedNodesArgument = "--extra-args=kwok-controller=manage-nodes-with-label-selector=" + fakeNodeLabel + "=" + fakeNodeLabelValue
 )
 
+// stageCRDArgument enables KWOK's Stage CRD, so the KWOK controller applies the
+// Stages served through the API, the lab's own set (stages.go), rather than the
+// ones the image's configuration file holds. Its pod-ready Stage is what reads a
+// Pod's Startup time, per
+// docs/adr/2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md.
+const stageCRDArgument = "--enable-crds=Stage"
+
 // clusterArguments are the arguments every Simulated Cluster's container is
 // created with. The image's entrypoint forwards them verbatim to the command
 // that creates the cluster inside it.
@@ -464,6 +471,7 @@ var clusterArguments = []string{
 	evictionRateArgument,
 	manageAllNodesArgument,
 	manageMarkedNodesArgument,
+	stageCRDArgument,
 }
 
 // Engine is the restricted engine surface over one resolved unix socket, bound to

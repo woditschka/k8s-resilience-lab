@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"fmt"
 	"slices"
 	"time"
 )
@@ -66,6 +67,67 @@ const (
 	UnresponsiveNodeWait        = 2 * time.Second
 	DefaultUnresponsiveNodeWait = 300 * time.Second
 )
+
+// DefaultStartupTime is the lab's own Startup time: the one time every placed
+// Pod takes to become Ready where its specification states none. It is fixed,
+// the same for every Pod, so a Scenario's outcome does not vary between runs, and
+// every run prints it beside the other times the lab sets (docs/prd.md
+// REQ-SIM-012).
+const DefaultStartupTime = 2 * time.Second
+
+// StartupTime is the time one placed Pod takes to become Ready: each Pod takes
+// its own time between the shortest and the longest, both included, so equal
+// bounds are one time every Pod takes. It is no Setting, because no Kubernetes
+// field holds it; the simulator reads it off the Pod, per
+// docs/adr/2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md.
+type StartupTime struct {
+	shortest time.Duration
+	longest  time.Duration
+}
+
+// NewStartupTime builds the Startup time of that shortest and that longest, in
+// the whole seconds a Wait's time is stated in.
+//
+// A negative time is refused, because no Pod is Ready before it is placed, and so
+// is a shortest above its longest, which leaves no time to take between them. A
+// time of none is admitted: such a Pod is Ready as soon as it is placed.
+func NewStartupTime(shortestSeconds, longestSeconds int) (StartupTime, error) {
+	if shortestSeconds < 0 || longestSeconds < 0 {
+		return StartupTime{}, fmt.Errorf("no Pod is Ready before it is placed, so a Startup time between %d and %d seconds is refused",
+			shortestSeconds, longestSeconds)
+	}
+	if shortestSeconds > longestSeconds {
+		return StartupTime{}, fmt.Errorf("a shortest Startup time of %d seconds above its longest of %d seconds leaves no time to take, so it is refused",
+			shortestSeconds, longestSeconds)
+	}
+
+	return StartupTime{
+		shortest: time.Duration(shortestSeconds) * time.Second,
+		longest:  time.Duration(longestSeconds) * time.Second,
+	}, nil
+}
+
+// labsOwnStartupTime is the Startup time a specification stating none holds. It
+// is the lab's own rather than a Scenario's statement, so it is refused nothing.
+func labsOwnStartupTime() StartupTime {
+	return StartupTime{shortest: DefaultStartupTime, longest: DefaultStartupTime}
+}
+
+// Shortest is the least time a Pod taking this Startup time takes to become Ready.
+func (s StartupTime) Shortest() time.Duration {
+	return s.shortest
+}
+
+// Longest is the most time a Pod taking this Startup time takes to become Ready.
+func (s StartupTime) Longest() time.Duration {
+	return s.longest
+}
+
+// Equal reports whether two Startup times hold the same bounds. It is the
+// equality go-cmp compares through, since the type's fields are unexported.
+func (s StartupTime) Equal(other StartupTime) bool {
+	return s == other
+}
 
 // The kinds of setting a Pod specification holds, which is what makes one
 // setting of a field replaceable by another of the same field.
@@ -259,22 +321,44 @@ func (Request) field() settingField {
 // Each of the lab's predefined specifications is defined in internal/lab as the
 // settings it sets, so what a reader of a definition sees is the whole of what
 // decides a Placement.
+//
+// It also holds the Startup time its Pods take: the lab's own unless one was
+// stated, and a later statement wins over an earlier one.
 type PodSpecification struct {
-	name     string
-	settings []Setting
+	name        string
+	settings    []Setting
+	startupTime StartupTime
 }
 
 // NewPodSpecification builds the specification of that name out of the settings
 // written, keeping each field once at the value written last for it. It is the
 // one place that rule lives, which is why a customized copy re-enters here.
 func NewPodSpecification(name string, settings ...Setting) PodSpecification {
-	return PodSpecification{name: name, settings: eachFieldOnce(settings)}
+	return PodSpecification{name: name, settings: eachFieldOnce(settings), startupTime: labsOwnStartupTime()}
 }
 
 // With is this specification customized by the settings named: a copy holding
 // them, leaving the specification they were applied to as it was.
 func (s PodSpecification) With(settings ...Setting) PodSpecification {
-	return NewPodSpecification(s.name, append(slices.Clone(s.settings), settings...)...)
+	customized := NewPodSpecification(s.name, append(slices.Clone(s.settings), settings...)...)
+	customized.startupTime = s.startupTime
+
+	return customized
+}
+
+// WithStartupTime is this specification with its Pods taking the Startup time
+// stated: a copy, leaving the specification it was stated on as it was.
+func (s PodSpecification) WithStartupTime(stated StartupTime) PodSpecification {
+	customized := s.With()
+	customized.startupTime = stated
+
+	return customized
+}
+
+// StartupTime is the time each Pod of this specification takes to become Ready:
+// the one stated last, or the lab's own where none was stated.
+func (s PodSpecification) StartupTime() StartupTime {
+	return s.startupTime
 }
 
 // Name is the intent this specification stands for, which is what the Step
@@ -315,10 +399,10 @@ func (s PodSpecification) Tolerations() []Toleration {
 }
 
 // Equal reports whether two specifications name the same settings under the same
-// name. It is the equality go-cmp compares through, since the type's fields are
-// unexported.
+// name, and have their Pods take the same Startup time. It is the equality go-cmp
+// compares through, since the type's fields are unexported.
 func (s PodSpecification) Equal(other PodSpecification) bool {
-	return s.name == other.name && slices.Equal(s.settings, other.settings)
+	return s.name == other.name && slices.Equal(s.settings, other.settings) && s.startupTime == other.startupTime
 }
 
 // eachFieldOnce are these settings with every field held once: the setting

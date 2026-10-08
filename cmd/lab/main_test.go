@@ -142,6 +142,11 @@ const (
 	// because it is the longest the lab itself waits rather than a setting it makes
 	// on the control plane.
 	labWaitingTime = "lab waiting time:"
+
+	// The lab's own Startup time is reported under a label of its own as well: it
+	// is the time every Pod of a Scenario stating none takes to become Ready
+	// (docs/prd.md REQ-SIM-012).
+	labStartupTime = "Pod startup time:"
 )
 
 // wholeTimelineAsked is the argument an engineer asks a run for every entry of
@@ -353,9 +358,10 @@ func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndTh
 // replaces, so a reader of a run can tell which of the timings it watched are
 // the lab's doing and which are Kubernetes' own. The lab's own waiting time is
 // reported beside them, because a time a Wait states is refused against it and an
-// engineer writing one cannot otherwise see the number. One run is read for all
-// four, because each of them holds for the whole run.
-func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaitingTime(t *testing.T) {
+// engineer writing one cannot otherwise see the number, and so is its own Startup
+// time, which every Pod of a Scenario stating none takes. One run is read for all
+// five, because each of them holds for the whole run.
+func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaitingAndStartupTimes(t *testing.T) {
 	requireEngine(t)
 
 	reported, err := aRun(t)
@@ -370,6 +376,7 @@ func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaiting
 	reportLineNames(t, reported, nodeEvictionSetting,
 		cluster.NodeEvictionRate, cluster.DefaultNodeEvictionRate)
 	reportLineNames(t, reported, labWaitingTime, scenario.WaitingTime.String())
+	reportLineNames(t, reported, labStartupTime, scenario.DefaultStartupTime.String())
 }
 
 func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(t *testing.T) {

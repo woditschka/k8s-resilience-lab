@@ -856,3 +856,69 @@ func aCapacityOf(t *testing.T, pods int, cpu scenario.CPU, memory scenario.Memor
 
 	return capacity
 }
+
+// The Startup times a specification below states, in whole seconds: a shortest
+// and a longest apart from each other and from the lab's own, so what a template
+// carries is read back as the specification's.
+const (
+	aShortStartup  = 3
+	aLongerStartup = 7
+)
+
+// aStartupTimeBetween is the Startup time of that shortest and that longest.
+func aStartupTimeBetween(t *testing.T, shortest, longest int) scenario.StartupTime {
+	t.Helper()
+
+	stated, err := scenario.NewStartupTime(shortest, longest)
+	if err != nil {
+		t.Fatalf("build a Startup time between %d and %d seconds: %v", shortest, longest, err)
+	}
+
+	return stated
+}
+
+// theStartupAnnotations are the two annotations the simulator's pod-ready Stage
+// reads a Pod's Startup time from: the shortest as its delay and the longest as
+// the bound of the time drawn above it, per
+// docs/adr/2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md.
+func theStartupAnnotations(shortest, longest time.Duration) map[string]string {
+	return map[string]string{
+		podReadyDelayAnnotation:       shortest.String(),
+		podReadyJitterDelayAnnotation: longest.String(),
+	}
+}
+
+// Every Workload's Pod template carries a Startup time, the lab's own where its
+// specification states none. The annotations sit on the template's metadata,
+// which full access does not reach, so a full access leaving nothing of the Pod
+// specification leaves them standing (docs/prd.md REQ-SIM-012).
+func TestAWorkloadsPodTemplate_ShouldCarryItsStartupTimeWhateverFullAccessNames(t *testing.T) {
+	statingNone := aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
+	statingARange := statingNone.WithStartupTime(aStartupTimeBetween(t, aShortStartup, aLongerStartup))
+
+	deployed := map[string]struct {
+		template *appsv1.Deployment
+		carries  map[string]string
+	}{
+		"a specification stating none": {
+			template: toDeployment(aWorkload(t, statingNone)),
+			carries:  theStartupAnnotations(scenario.DefaultStartupTime, scenario.DefaultStartupTime),
+		},
+		"a specification stating a shortest and a longest": {
+			template: toDeployment(aWorkload(t, statingARange)),
+			carries:  theStartupAnnotations(aShortStartup*time.Second, aLongerStartup*time.Second),
+		},
+		"a full access leaving nothing of the Pod specification": {
+			template: toDeployment(aWorkload(t, statingARange), PodSpecAccessInPlace{
+				Access: leavingNothingOfThePodSpecification(), AfterSettings: beforeEverySetting,
+			}),
+			carries: theStartupAnnotations(aShortStartup*time.Second, aLongerStartup*time.Second),
+		},
+	}
+
+	for how, taken := range deployed {
+		t.Run(how, func(t *testing.T) {
+			expect.Expect(t, taken.template.Spec.Template.Annotations).To(expect.Equal(taken.carries))
+		})
+	}
+}

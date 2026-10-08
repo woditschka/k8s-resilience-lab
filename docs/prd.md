@@ -168,6 +168,36 @@ No room after a Zone stops responding demonstrates that. Its Topology gives ever
 
 **Design:** [system-design.md](system-design.md)
 
+### Starting a Workload's Pods
+
+<a id="req-sim-012"></a>
+A real Pod takes time to become Ready once it is placed, and a Workload replacing Pods after a Failure stays short of them for that time. Every placed Pod of a Simulated Cluster therefore takes a Startup time before it is Ready `[REQ-SIM-012]`. A Pod inside its Startup time stands on the Node it was placed on, counted as Pending and not as Running `[REQ-SIM-012]`. A Placement holding such a Pod is not yet Settled `[REQ-SIM-012]`. A Pod replacing one lost in a Failure takes a Startup time of its own, counted from its own placement `[REQ-SIM-012]`.
+
+Every Pod takes the lab's own Startup time, one time the same for every Pod, unless its Pod specification states another `[REQ-SIM-012]`. Every run reports the lab's own Startup time `[REQ-SIM-012]`. No predefined specification states one, so every Scenario of the lab takes the lab's own and keeps the outcome it asserts `[REQ-SIM-012]`.
+
+A Scenario states another Startup time as one more Customization of the specification its Workload declares, written beside its Request `[REQ-SIM-012]`. It states either one time, which every Pod of that Workload takes, or a shortest and a longest time `[REQ-SIM-012]`. Given a shortest and a longest, each Pod takes its own time between the two, both included `[REQ-SIM-012]`. A Startup time is stated in whole seconds, as a Wait's time is `[REQ-SIM-012]`. A Startup time is the one thing a Customization changes that is no Kubernetes setting, and otherwise behaves as any Customization does `[REQ-SIM-012]`. It leaves the specification it was applied to as it was, and a later Startup time wins over an earlier one `[REQ-SIM-012]`.
+
+**Done when:**
+
+- `[REQ-SIM-012]` given a Workload whose specification states no Startup time, when its Pods are placed, then no Pod is Ready sooner than the lab's own Startup time after its placement.
+- `[REQ-SIM-012]` given a Workload customized with one Startup time, when its Pods are placed, then no Pod is Ready sooner than that time after its placement.
+- `[REQ-SIM-012]` given a Workload customized with a shortest and a longest Startup time, when its Pods are placed, then each Pod is Ready between the two after its placement.
+- `[REQ-SIM-012]` given a placed Pod inside its Startup time, when the Placement is reported, then that Pod is counted Pending on its Node, and the Placement is not yet Settled.
+- `[REQ-SIM-012]` given two Customizations of one Workload each stating a Startup time, when its Pods are placed, then they take the later one.
+- `[REQ-SIM-012]` given one Workload customized its Startup time, when a second Workload declares the same specification, then its Pods take the lab's own Startup time.
+- `[REQ-SIM-012]` given any run, when it starts, then it reports the lab's own Startup time.
+- `[REQ-SIM-012]` given every Scenario of the lab, when it runs, then it reaches the outcome it asserted before Pods took a Startup time.
+
+**Edge cases:**
+
+1. A Startup time of zero. The Pod is Ready as soon as it is placed.
+2. A shortest Startup time longer than its longest, or a negative time. It is refused where it is stated, and the Scenario ends at the Step declaring that Workload.
+3. A shortest and a longest Startup time that are equal. Every Pod takes that one time.
+4. A Startup time longer than the time a Wait for every Pod to be Ready is held to. The Scenario ends at that Wait, which names the Pods not Ready.
+5. A Pod replacing one lost in a Failure. It counts as Pending on its new Node until its own Startup time has passed, so a Required Capacity judged meanwhile does not count it.
+
+**Design:** [system-design.md](system-design.md)
+
 ### Surviving a Node or Zone Failure
 
 <a id="req-sim-008"></a>
@@ -347,4 +377,6 @@ Every name a Scenario uses is one the lab offers Scenarios, so one vocabulary ca
 - Whether a run reports the specification each Workload was deployed with, and its settings after Customization.
 - Whether a Then asserts which Pods stay Pending, or their count alone, which is what No room after a Zone stops responding asserts.
 - Whether the lab's own vocabulary names a Pod's limits beside its Request, and what a Scenario would assert with them. Nothing runs in a Simulated Cluster, so a limit decides no Placement, and full access reaches one today.
+- Whether a run also names one Startup time for every Pod it starts, beside the Startup time a Scenario states for its own Workload.
+- Whether the lab also gives a Pod a time to stop once it is removed, as it gives one to start.
 - Which further specifications the lab predefines, and which further settings one may hold and a Customization may name. Zone spread only and Soft spread each arrive with the Scenario that uses them, and so does affinity between a Workload's Pods. Also open: what a Scenario asserts when it demonstrates a deliberately weak specification.

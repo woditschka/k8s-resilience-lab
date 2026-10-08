@@ -4,7 +4,7 @@ The lab's experiments. A Scenario is one file here, holding one exported Go func
 
 Two files sit beside them. `scenarios.go` holds `All`, the list of the Scenarios a run carries out. `workloads.go` holds the names of the Workloads they deploy, one constant each.
 
-Run them all with `go run ./cmd/lab`.
+Run them all with `make run`, or `go run ./cmd/lab`. The lab's flags pass through as `make run ARGS="--whole-timeline"`.
 
 ## How one works
 
@@ -35,6 +35,8 @@ Each name below is defined in `internal/lab`, which stays the authority on what 
 - `lab.DefaultPlacement()` — no spread, so where its Pods land is the scheduler's own choice
 - `.Customize(…)` on a specification — that specification with the lab's own settings changed
 - `lab.FullAccess(…)` — the Customization carrying a Scenario's own change to the Kubernetes Pod specification
+- `lab.StartupSeconds(n)` — the Customization stating the whole seconds each of its Pods takes to start; with none stated, every Pod takes the lab's own Startup time
+- `lab.StartupSecondsBetween(shortest, longest)` — the Customization stating that each Pod takes a time between the two, in whole seconds
 
 **Failures**
 

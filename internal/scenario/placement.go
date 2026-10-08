@@ -22,7 +22,8 @@ const (
 type PodPhase string
 
 const (
-	// PodPending is a Pod the control plane has not placed on a Node.
+	// PodPending is a Pod the control plane has not placed on a Node, or has
+	// placed on one and that Pod is still inside its Startup time.
 	PodPending PodPhase = "Pending"
 	// PodRunning is a Pod placed on a Node and running there.
 	PodRunning PodPhase = "Running"
@@ -103,6 +104,22 @@ func (p Placement) PodsNotReady() []Pod {
 	}
 
 	return notReady
+}
+
+// PodsStarting are the observed Pods the control plane has placed on a Node and
+// still reports Pending: Pods inside their Startup time, in the order they were
+// observed. Such a Pod has not stopped changing, so a Placement holding one is
+// not yet Settled (docs/prd.md REQ-SIM-012). An unplaced Pod is not starting: it
+// stays Pending until a Node has room for it.
+func (p Placement) PodsStarting() []Pod {
+	var starting []Pod
+	for _, pod := range p.pods {
+		if pod.Placed() && pod.Phase == PodPending {
+			starting = append(starting, pod)
+		}
+	}
+
+	return starting
 }
 
 // PodsRunningApartFrom are the observed Pods the control plane reports Running on

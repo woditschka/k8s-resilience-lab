@@ -26,9 +26,14 @@ PROHIBITED_IMPORTS := \
 	sigs.k8s.io/controller-runtime \
 	k8s.io/kubectl
 
-.PHONY: ci tidy-check fmt fmt-check vet lint lint-fix deps-check test test-race build
+.PHONY: ci run tidy-check fmt fmt-check vet lint lint-fix deps-check test test-race build
 
 ci: tidy-check fmt-check vet lint deps-check test build
+
+# run starts the lab: every Scenario, each on a Simulated Cluster of its own.
+# The lab's flags pass through ARGS, as in `make run ARGS="--whole-timeline"`.
+run:
+	go run ./cmd/lab $(ARGS)
 
 tidy-check:
 	go mod tidy -diff

@@ -36,6 +36,13 @@ const (
 	fakeNodeLabel           = "type"
 	fakeNodeLabelValue      = "kwok"
 
+	// podReadyDelayAnnotation and podReadyJitterDelayAnnotation are the two Pod
+	// annotations the lab's pod-ready Stage reads a Startup time from: the delay
+	// before a placed Pod is Ready, and the bound of a time drawn at random above
+	// it (stages.go, measured on the pinned KWOK release).
+	podReadyDelayAnnotation       = "pod-ready.stage.kwok.x-k8s.io/delay"
+	podReadyJitterDelayAnnotation = "pod-ready.stage.kwok.x-k8s.io/jitter-delay"
+
 	// nodeReadyReason is the reason a provisioned Node reports Ready with. A
 	// provisioned Node is Ready at creation rather than after a heartbeat, per
 	// docs/adr/2026-10-03-go-program-on-a-kwok-simulated-cluster.md.
@@ -226,10 +233,26 @@ func toDeployment(workload scenario.Workload, accesses ...PodSpecAccessInPlace) 
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: selector},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: selector},
-				Spec:       toPodSpec(workload, accesses),
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      selector,
+					Annotations: toStartupAnnotations(workload.PodSpecification().StartupTime()),
+				},
+				Spec: toPodSpec(workload, accesses),
 			},
 		},
+	}
+}
+
+// toStartupAnnotations are the annotations a Pod takes its Startup time from: the
+// shortest as the delay and the longest as the bound above it, so equal bounds
+// are one time. They are formatted from the validated whole seconds the domain
+// holds, never from a string a Scenario wrote, and they sit on the template's
+// metadata, which full access does not reach, per
+// docs/adr/2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md.
+func toStartupAnnotations(startup scenario.StartupTime) map[string]string {
+	return map[string]string{
+		podReadyDelayAnnotation:       startup.Shortest().String(),
+		podReadyJitterDelayAnnotation: startup.Longest().String(),
 	}
 }
 

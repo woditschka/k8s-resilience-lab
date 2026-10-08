@@ -518,6 +518,12 @@ func (g Given) Workload(name WorkloadName, pods Pods, declares PodSpecification)
 		return declared
 	}
 
+	if declares.refused != nil {
+		g.scenario.end(step, declares.refused)
+
+		return declared
+	}
+
 	workload, err := scenario.NewWorkload(string(name), int(pods), declares.declared)
 	if err != nil {
 		g.scenario.end(step, err)

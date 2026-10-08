@@ -74,10 +74,11 @@ type SimulatedCluster struct {
 }
 
 // Provision starts a Simulated Cluster for one Scenario on a resolved engine, for
-// a resolved Kubernetes version, and waits for its API server to answer. It
-// returns the handle whose close removes the cluster, or an error naming what it
-// could not reach; a cluster whose API server never answers is removed rather
-// than left behind.
+// a resolved Kubernetes version, waits for its API server to answer, and makes
+// the Stages it serves the lab's own set before any Node exists. It returns the
+// handle whose close removes the cluster, or an error naming what it could not
+// reach; a cluster it could not finish provisioning is removed rather than left
+// behind.
 func Provision(ctx context.Context, endpoint Endpoint, version KubernetesVersion, scenarioName string) (*SimulatedCluster, error) {
 	engine, err := newEngine(endpoint, scenarioName)
 	if err != nil {
@@ -91,6 +92,9 @@ func Provision(ctx context.Context, endpoint Endpoint, version KubernetesVersion
 
 	provisioned, err := awaitControlPlane(ctx, container)
 	if err != nil {
+		return nil, errors.Join(err, container.Remove(ctx))
+	}
+	if err := provisioned.ownStages(ctx); err != nil {
 		return nil, errors.Join(err, container.Remove(ctx))
 	}
 
@@ -630,11 +634,13 @@ func podNamesOf(pods []scenario.Pod) []string {
 // didNotSettle is what an expired settle wait reports: the Placement last
 // observed, rather than a longer wait. It names one count per clause of
 // hasSettled — the Pods created of the Pods declared, the Ready Nodes they were
-// read against, and the Pods on a Node the observation does not hold — so a
-// reader of an expired wait can tell which clause held it open (PRD edge case 3).
+// read against, the Pods on a Node the observation does not hold, and the placed
+// Pods still inside their Startup time — so a reader of an expired wait can tell
+// which clause held it open (PRD edge case 3).
 func didNotSettle(workload scenario.Workload, observed scenario.Placement) error {
-	return fmt.Errorf("the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold",
-		workload.Name(), scenario.WaitingTime, len(observed.Pods()), workload.Pods(), len(observed.Nodes()), len(observed.PodsItCannotAccountFor()))
+	return fmt.Errorf("the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold and %d still starting",
+		workload.Name(), scenario.WaitingTime, len(observed.Pods()), workload.Pods(), len(observed.Nodes()),
+		len(observed.PodsItCannotAccountFor()), len(observed.PodsStarting()))
 }
 
 // hasSettled reports whether current can be the Workload's settled Placement:
@@ -653,9 +659,15 @@ func didNotSettle(workload scenario.Workload, observed scenario.Placement) error
 // only once the control plane has tainted the Node and the Pod has stopped
 // tolerating that taint. Two observations inside that window agree without the
 // Placement having stopped changing.
+//
+// A placed Pod still inside its Startup time is a third such window: it stands
+// Pending on its Node until its time passes and it turns Running, so two
+// observations within that time agree on a Placement that is about to change
+// (docs/prd.md REQ-SIM-012). An unplaced Pod is no such Pod and still counts.
 func hasSettled(previous, current scenario.Placement, workload scenario.Workload) bool {
 	return len(current.Pods()) >= workload.Pods() &&
 		len(current.PodsItCannotAccountFor()) == 0 &&
+		len(current.PodsStarting()) == 0 &&
 		current.Equal(previous)
 }
 

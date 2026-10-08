@@ -30,17 +30,22 @@ const (
 // full accesses its Workload line wrote, each in the place it was written: the
 // domain core keeps no Kubernetes type and no function value, per
 // docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
+//
+// A Customization carries no error of its own, so a Startup time the domain
+// refuses travels here instead, and the Given declaring a Workload of this
+// specification ends the Scenario with it (docs/prd.md REQ-SIM-012 edge case 2).
 type PodSpecification struct {
 	declared scenario.PodSpecification
 	accesses []cluster.PodSpecAccessInPlace
+	refused  error
 }
 
 // Customization is one change a Scenario writes on its Workload line: a setting
 // of the specification it declares, named under the field names Kubernetes gives
-// that setting, or full access to the Kubernetes Pod specification for a setting
-// the lab's own vocabulary does not name. Its one method is unexported, so the
-// two cases below are every Customization there is and a Scenario can write no
-// value of its own.
+// that setting, the Startup time its Pods take, or full access to the Kubernetes
+// Pod specification for a setting the lab's own vocabulary does not name. Its one
+// method is unexported, so the three cases below are every Customization there is
+// and a Scenario can write no value of its own.
 type Customization interface {
 	// customize is this change applied to a specification: the changed copy,
 	// leaving the specification it was applied to as it was.
@@ -54,10 +59,30 @@ type setting struct {
 }
 
 func (s setting) customize(specification PodSpecification) PodSpecification {
-	return PodSpecification{
-		declared: specification.declared.With(s.declares),
-		accesses: specification.accesses,
+	customized := specification
+	customized.declared = specification.declared.With(s.declares)
+
+	return customized
+}
+
+// startupTime is the Customization a Startup time is: the domain value its
+// Pods take, or the refusal the domain gave the time a Scenario wrote. The first
+// refusal stands, since the Scenario ends at it whatever is written after.
+type startupTime struct {
+	stated  scenario.StartupTime
+	refused error
+}
+
+func (s startupTime) customize(specification PodSpecification) PodSpecification {
+	customized := specification
+	if s.refused != nil && customized.refused == nil {
+		customized.refused = s.refused
 	}
+	if s.refused == nil {
+		customized.declared = specification.declared.WithStartupTime(s.stated)
+	}
+
+	return customized
 }
 
 // fullAccess is the Customization full access is: the change a Scenario wrote,
@@ -67,13 +92,13 @@ type fullAccess struct {
 }
 
 func (f fullAccess) customize(specification PodSpecification) PodSpecification {
-	return PodSpecification{
-		declared: specification.declared,
-		accesses: append(slices.Clone(specification.accesses), cluster.PodSpecAccessInPlace{
-			Access:        f.change,
-			AfterSettings: len(specification.declared.Settings()),
-		}),
-	}
+	customized := specification
+	customized.accesses = append(slices.Clone(specification.accesses), cluster.PodSpecAccessInPlace{
+		Access:        f.change,
+		AfterSettings: len(specification.declared.Settings()),
+	})
+
+	return customized
 }
 
 // FullAccess is the Customization a Scenario writes where the lab's own
@@ -189,6 +214,25 @@ func TopologySpread(
 // request the lab's own vocabulary does not name.
 func Request(cpu scenario.CPU, memory scenario.Memory) Customization {
 	return setting{declares: scenario.NewRequest(cpu, memory)}
+}
+
+// StartupSeconds is the Startup time every Pod of a Workload takes to become
+// Ready once it is placed, and StartupSecondsBetween the shortest and the longest
+// each Pod takes its own time between. Both are written beside a Request, in the
+// whole seconds a Wait's time is stated in, and a Workload whose specification
+// states neither takes the lab's own, scenario.DefaultStartupTime (docs/prd.md
+// REQ-SIM-012).
+//
+// A Startup time the domain refuses ends the Scenario at the Given declaring the
+// Workload, because a Customization is written inside that Given's line.
+func StartupSeconds(seconds int) Customization {
+	return StartupSecondsBetween(seconds, seconds)
+}
+
+func StartupSecondsBetween(shortest, longest int) Customization {
+	stated, err := scenario.NewStartupTime(shortest, longest)
+
+	return startupTime{stated: stated, refused: err}
 }
 
 func toleration(

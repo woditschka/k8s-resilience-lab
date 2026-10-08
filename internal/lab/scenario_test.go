@@ -820,6 +820,27 @@ func TestARequiredCapacityNoWorkloadCouldKeep_ShouldEndTheScenarioNamingThatGive
 	causeNames(t, ended, fmt.Sprintf("could never keep %d Pods Running", aMinimumNoWorkloadCouldKeep))
 }
 
+// A Startup time the domain refuses is refused where it is stated, so the
+// Scenario ends at the Given declaring that Workload, which is docs/prd.md
+// REQ-SIM-012 edge case 2. The times the domain refuses are its own suite's, this
+// one being the path through the Given Step.
+func TestARefusedStartupTime_ShouldEndTheScenarioAtTheGivenDeclaringItsWorkload(t *testing.T) {
+	const aShortestAboveItsLongest, itsLongest = 9, 4
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	ending := aScenarioOver(onePodPerNodeOf(declared))
+	ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode),
+		ResilientPlacement().Customize(StartupSecondsBetween(aShortestAboveItsLongest, itsLongest)))
+
+	ending.Then().AllPodsRunning()
+
+	ended := ending.outcome()
+	refused := resilientPlacementWorkloadStepOf(podsOverEveryNode)
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(refused))
+	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{topologyStepOf(twoZones, twoNodesPerZone), refused}))
+	causeNames(t, ended, fmt.Sprintf("shortest Startup time of %d seconds", aShortestAboveItsLongest))
+}
+
 // A Topology naming no capacity gets the lab's own, which is what keeps a
 // Scenario that states none running as it did.
 func TestATopologyStatingNoNodeCapacity_ShouldProvisionNodesWithTheLabsDefaultCapacity(t *testing.T) {

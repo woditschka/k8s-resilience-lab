@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -55,6 +57,10 @@ const (
 	// onePodNotReadyYet is the Pod the control plane has placed and not yet
 	// reported Ready, which is what an expired Wait for every Pod Ready names.
 	onePodNotReadyYet = 1
+
+	// noPodStillStarting is how many placed Pods inside their Startup time an
+	// observation taken long after its Pods were placed holds.
+	noPodStillStarting = 0
 )
 
 // What the two Workloads asking for a share of their Node ask for, against a
@@ -592,6 +598,96 @@ func TestAWaitForEveryPodOfADeployedWorkload_ShouldReachThePlacementWithEveryPod
 	expect.Expect(t, ready.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](ninePods))
 }
 
+// The Startup times the two tests below state, in whole seconds: one time every
+// Pod takes, and a shortest and a longest each Pod takes its own time between.
+// Each is longer than the poll interval, so a Pod Ready at placement would be
+// told from one that waited.
+const (
+	oneStartupTime  = 4
+	shortestStartup = 2
+	longestStartup  = 5
+)
+
+// A Pod's Startup time is read off the control plane's own record: the moment it
+// reports the Pod placed and the moment it reports it Ready, both in whole
+// seconds. A Pod Ready no sooner than its shortest after placement is Ready no
+// sooner in whole seconds either, and the longest is allowed one poll interval
+// for the simulator's own round trip (docs/prd.md REQ-SIM-012).
+func TestAPodSpecificationCustomizedWithOneStartupTime_ShouldHaveNoPodReadySoonerThanThatTime(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	workload := aWorkloadDeclaring(t, threePods, resilientPlacement().WithStartupTime(aStartupTimeBetween(t, oneStartupTime, oneStartupTime)))
+	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+
+	if _, err := provisioned.AwaitPodsReady(t.Context(), workload); err != nil {
+		t.Fatalf("await every Pod of the Workload reporting Ready: %v", err)
+	}
+
+	taken := theTimesTakenToBeReady(t, provisioned, workload)
+	expect.Expect(t, takenSoonerThan(taken, oneStartupTime*time.Second)).To(expect.HaveLen[time.Duration](0))
+	expect.Expect(t, takenLaterThan(taken, oneStartupTime*time.Second+pollInterval)).To(expect.HaveLen[time.Duration](0))
+}
+
+func TestAPodSpecificationCustomizedWithAStartupTimeRange_ShouldHaveEachPodReadyWithinTheRange(t *testing.T) {
+	provisioned, _ := aProvisionedCluster(t)
+	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement().WithStartupTime(aStartupTimeBetween(t, shortestStartup, longestStartup)))
+	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+
+	if _, err := provisioned.AwaitPodsReady(t.Context(), workload); err != nil {
+		t.Fatalf("await every Pod of the Workload reporting Ready: %v", err)
+	}
+
+	taken := theTimesTakenToBeReady(t, provisioned, workload)
+	expect.Expect(t, takenSoonerThan(taken, shortestStartup*time.Second)).To(expect.HaveLen[time.Duration](0))
+	expect.Expect(t, takenLaterThan(taken, longestStartup*time.Second+pollInterval)).To(expect.HaveLen[time.Duration](0))
+}
+
+// theTimesTakenToBeReady are the times each Pod of this Workload took from the
+// moment the control plane reports it placed to the moment it reports it Ready.
+func theTimesTakenToBeReady(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) []time.Duration {
+	t.Helper()
+
+	held, err := provisioned.client.CoreV1().Pods(workloadNamespace).List(t.Context(), metav1.ListOptions{
+		LabelSelector: podSelectorOf(workload),
+	})
+	if err != nil {
+		t.Fatalf("read the Pods of the Workload %s: %v", workload.Name(), err)
+	}
+	if len(held.Items) != workload.Pods() {
+		t.Fatalf("the Workload %s declares %d Pods, but the cluster holds %d", workload.Name(), workload.Pods(), len(held.Items))
+	}
+
+	taken := make([]time.Duration, 0, len(held.Items))
+	for _, pod := range held.Items {
+		taken = append(taken, conditionSince(t, pod, corev1.PodReady).Sub(conditionSince(t, pod, corev1.PodScheduled)))
+	}
+
+	return taken
+}
+
+// conditionSince is the moment the control plane last reported this condition
+// of the Pod changed.
+func conditionSince(t *testing.T, pod corev1.Pod, kind corev1.PodConditionType) time.Time {
+	t.Helper()
+
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == kind && condition.Status == corev1.ConditionTrue {
+			return condition.LastTransitionTime.Time
+		}
+	}
+	t.Fatalf("the Pod %s reports no %s condition", pod.Name, kind)
+
+	return time.Time{}
+}
+
+// takenSoonerThan and takenLaterThan are the times taken outside one bound.
+func takenSoonerThan(taken []time.Duration, bound time.Duration) []time.Duration {
+	return slices.DeleteFunc(slices.Clone(taken), func(took time.Duration) bool { return took >= bound })
+}
+
+func takenLaterThan(taken []time.Duration, bound time.Duration) []time.Duration {
+	return slices.DeleteFunc(slices.Clone(taken), func(took time.Duration) bool { return took <= bound })
+}
+
 // A Wait for every Node Ready is written with the Topology Given, before any
 // Workload is declared, so the Placement it reaches holds the Nodes the Topology
 // declared and no Pod at all.
@@ -647,19 +743,20 @@ func TestAPlacementThatDoesNotSettleAfterTheFailure_ShouldReportTheObservedPlace
 	reported := didNotSettle(aWorkloadDeclaring(t, ninePods, resilientPlacement()), observed)
 
 	expect.Expect(t, reported.Error()).To(expect.Equal(fmt.Sprintf(
-		"the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold",
-		deployedWorkloadName, scenario.WaitingTime, ninePods, ninePods, nodesStillResponding, onePodLeftBehind)))
+		"the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold and %d still starting",
+		deployedWorkloadName, scenario.WaitingTime, ninePods, ninePods, nodesStillResponding, onePodLeftBehind, noPodStillStarting)))
 }
 
 // The rule an await stops at, asserted a clause at a time: an observation can be
 // the settled Placement when every Pod the Workload declares has been created,
-// every Pod it found is on a Node it was read against, and it agrees with the
-// observation before it. Each row below meets every clause but the one it names,
+// every Pod it found is on a Node it was read against, no placed Pod is still
+// inside its Startup time, and it agrees with the observation before it. Each row below meets every clause but the one it names,
 // so the row says which clause decided it.
 func TestAnObservedPlacement_ShouldCountAsSettledOnlyWhenItAccountsForEveryDeclaredPodAndAgreesWithTheOneBeforeIt(t *testing.T) {
 	accountedFor := aPlacementOfEveryDeclaredPod(t)
 	stillHoldingAPodOnTheFailedNode := aPlacementStillHoldingAPodOnTheFailedNode(t)
 	shortOfOnePod := aPlacementShortOfOnePod(t)
+	withOnePodStillStarting := aPlacementWithOnePodStillStarting(t)
 
 	observations := map[string]struct {
 		previous, current scenario.Placement
@@ -676,6 +773,9 @@ func TestAnObservedPlacement_ShouldCountAsSettledOnlyWhenItAccountsForEveryDecla
 		},
 		"two observations that do not agree": {
 			previous: shortOfOnePod, current: accountedFor, settled: false,
+		},
+		"an observation holding a placed Pod still inside its Startup time": {
+			previous: withOnePodStillStarting, current: withOnePodStillStarting, settled: false,
 		},
 	}
 
@@ -718,6 +818,19 @@ func aPlacementWithOnePodNotReadyYet(t *testing.T) scenario.Placement {
 	nodes := anEvenSpreadTopology(t).Nodes()
 	placed := onePodOnEachOf(nodes)
 	placed[0].Ready = false
+
+	return scenario.NewPlacement(nodes, placed)
+}
+
+// aPlacementWithOnePodStillStarting is the observation taken while one placed
+// Pod is still inside its Startup time: on its Node, and Pending rather than
+// Running, so the Placement has not stopped changing (docs/prd.md REQ-SIM-012).
+func aPlacementWithOnePodStillStarting(t *testing.T) scenario.Placement {
+	t.Helper()
+
+	nodes := anEvenSpreadTopology(t).Nodes()
+	placed := onePodOnEachOf(nodes)
+	placed[0].Phase, placed[0].Ready = scenario.PodPending, false
 
 	return scenario.NewPlacement(nodes, placed)
 }
