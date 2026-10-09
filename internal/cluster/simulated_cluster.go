@@ -73,6 +73,19 @@ type SimulatedCluster struct {
 	recording *recording
 }
 
+// ObtainVersion makes the engine hold the cluster image of version, pulling it
+// only when the engine does not hold it already, so a run learns once, before
+// any Scenario starts, whether every Simulated Cluster it provisions can mirror
+// that version (docs/prd.md REQ-SIM-001 edge case 4). Provision pulls the same
+// image when absent, so after ObtainVersion it finds the image held.
+func ObtainVersion(ctx context.Context, endpoint Endpoint, version KubernetesVersion) error {
+	if err := (Engine{endpoint: endpoint}).pullWhenAbsent(ctx, clusterImage(version)); err != nil {
+		return fmt.Errorf("obtain Kubernetes version %s: %w", version, err)
+	}
+
+	return nil
+}
+
 // Provision starts a Simulated Cluster for one Scenario on a resolved engine, for
 // a resolved Kubernetes version, waits for its API server to answer, and makes
 // the Stages it serves the lab's own set before any Node exists. It returns the

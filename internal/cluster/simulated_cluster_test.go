@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,7 +83,7 @@ const (
 func anEvenSpreadTopology(t *testing.T) scenario.Topology {
 	t.Helper()
 
-	topology, err := scenario.NewTopology(threeZones, threeNodesPerZone, aCapacity(t))
+	topology, err := topologyOfTheGeneralNodePool(threeZones, threeNodesPerZone, aCapacity(t))
 	if err != nil {
 		t.Fatalf("build a Topology of %d Zones of %d Nodes: %v", threeZones, threeNodesPerZone, err)
 	}
@@ -149,7 +150,7 @@ func aWorkloadNamed(t *testing.T, name string, pods int, declaring scenario.PodS
 func aTopologyOfOneZone(t *testing.T) scenario.Topology {
 	t.Helper()
 
-	topology, err := scenario.NewTopology(theOneZone, threeNodesPerZone, aCapacity(t))
+	topology, err := topologyOfTheGeneralNodePool(theOneZone, threeNodesPerZone, aCapacity(t))
 	if err != nil {
 		t.Fatalf("build a Topology of one Zone of %d Nodes: %v", threeNodesPerZone, err)
 	}
@@ -160,7 +161,7 @@ func aTopologyOfOneZone(t *testing.T) scenario.Topology {
 func aTopologyOfOneNode(t *testing.T) scenario.Topology {
 	t.Helper()
 
-	topology, err := scenario.NewTopology(theOneZone, theOneNodeInIt, aCapacity(t))
+	topology, err := topologyOfTheGeneralNodePool(theOneZone, theOneNodeInIt, aCapacity(t))
 	if err != nil {
 		t.Fatalf("build a Topology of one Node: %v", err)
 	}
@@ -248,6 +249,37 @@ func taintsPolicyOf(constraint corev1.TopologySpreadConstraint) scenario.NodeInc
 	return scenario.NodeInclusionPolicy(*constraint.NodeTaintsPolicy)
 }
 
+// aVersionWithNoClusterImage is a well-formed Kubernetes version for which no
+// cluster image is published, so it passes validation and fails at the pull.
+const aVersionWithNoClusterImage = "v1.0.0"
+
+func TestAVersionWithNoClusterImage_ShouldNotBeObtainedAndShouldBeNamed(t *testing.T) {
+	t.Parallel()
+	engine := requireEngine(t)
+	unpublished, err := ParseKubernetesVersion(aVersionWithNoClusterImage)
+	if err != nil {
+		t.Fatalf("parse the version %s: %v", aVersionWithNoClusterImage, err)
+	}
+
+	err = ObtainVersion(t.Context(), engine, unpublished)
+
+	if err == nil {
+		t.Fatalf("no cluster image is published for %s, but the version was obtained", aVersionWithNoClusterImage)
+	}
+	if !strings.Contains(err.Error(), aVersionWithNoClusterImage) {
+		t.Errorf("the error names the version it could not obtain, but reads: %v", err)
+	}
+}
+
+func TestThePinnedVersion_ShouldBeObtainedFromTheEngine(t *testing.T) {
+	t.Parallel()
+	engine := requireEngine(t)
+
+	if err := ObtainVersion(t.Context(), engine, DefaultKubernetesVersion()); err != nil {
+		t.Fatalf("obtain the pinned version %s: %v", DefaultKubernetesVersion(), err)
+	}
+}
+
 // aProvisionedCluster provisions one Simulated Cluster for the test that asks,
 // and removes it when that test ends however it ends.
 func aProvisionedCluster(t *testing.T) (*SimulatedCluster, Endpoint) {
@@ -283,6 +315,7 @@ func stillOnTheEngine(t *testing.T, endpoint Endpoint, name string) bool {
 }
 
 func TestAProvisionedTopology_ShouldHoldThreeZonesOfThreeReadyNodes(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology := anEvenSpreadTopology(t)
 
@@ -299,7 +332,7 @@ func TestAProvisionedTopology_ShouldHoldThreeZonesOfThreeReadyNodes(t *testing.T
 
 func TestADeclaredNodeHoldingNoRunningProbePod_ShouldBeNamedAsStillUnheld(t *testing.T) {
 	const oneZone, twoNodesPerZone = 1, 2
-	topology, err := scenario.NewTopology(oneZone, twoNodesPerZone, aCapacity(t))
+	topology, err := topologyOfTheGeneralNodePool(oneZone, twoNodesPerZone, aCapacity(t))
 	if err != nil {
 		t.Fatalf("build a Topology of %d Nodes: %v", twoNodesPerZone, err)
 	}
@@ -312,6 +345,7 @@ func TestADeclaredNodeHoldingNoRunningProbePod_ShouldBeNamedAsStillUnheld(t *tes
 }
 
 func TestProvisioning_ShouldLeaveNoProbePodOnTheClusterItHandsBack(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 
 	if err := provisioned.ApplyTopology(t.Context(), anEvenSpreadTopology(t)); err != nil {
@@ -330,6 +364,7 @@ func TestProvisioning_ShouldLeaveNoProbePodOnTheClusterItHandsBack(t *testing.T)
 // specification names — read back off a Pod the cluster holds, which is
 // acceptance criterion three of REQ-SIM-009.
 func TestAWorkloadDeclaringResilientPlacement_ShouldPlaceOnePodOnEveryNodeOfEveryZone(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement())
 	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
@@ -355,6 +390,7 @@ func TestAWorkloadDeclaringResilientPlacement_ShouldPlaceOnePodOnEveryNodeOfEver
 // lab's own tolerations as Resilient placement defines them. Read back off a Pod
 // the cluster holds, which is acceptance criterion two of REQ-SIM-009.
 func TestAWorkloadDeployedFromACustomizedSpecification_ShouldCarryTheCustomizedSettings(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	theZoneSpreadTheScenarioWrote := anEvenSpreadOver(scenario.ZoneLabel, widerSkew)
 	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement().With(theZoneSpreadTheScenarioWrote))
@@ -378,6 +414,7 @@ func TestAWorkloadDeployedFromACustomizedSpecification_ShouldCarryTheCustomizedS
 // own choice, so what holds of every such Placement is all this asserts: every
 // Pod Running, and every one of them on a Node the Topology holds.
 func TestAWorkloadDeclaringDefaultPlacement_ShouldPlaceEveryPodWithNoCountPromisedPerZone(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	workload := aWorkloadDeclaring(t, ninePods, defaultPlacement())
 	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
@@ -396,6 +433,7 @@ func TestAWorkloadDeclaringDefaultPlacement_ShouldPlaceEveryPodWithNoCountPromis
 // declare: the one declaring Resilient placement is spread one Pod per Node,
 // and the one declaring Default placement is placed wherever the scheduler puts it.
 func TestTwoWorkloadsDeclaringDifferentSpecifications_ShouldEachBePlacedByTheOneItDeclares(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	spreadEvenly := aWorkloadDeclaring(t, ninePods, resilientPlacement())
 	spreadNowhere := aSecondWorkloadDeclaring(t, threePods, defaultPlacement())
@@ -413,6 +451,7 @@ func TestTwoWorkloadsDeclaringDifferentSpecifications_ShouldEachBePlacedByTheOne
 // label, so the other's Pods are not counted towards the Skew and both reach one
 // Pod per Node.
 func TestTwoWorkloadsDeclaringTheSameSpecification_ShouldEachBeSpreadWithoutCountingTheOthersPods(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	first := aWorkloadDeclaring(t, ninePods, resilientPlacement())
 	second := aSecondWorkloadDeclaring(t, ninePods, resilientPlacement())
@@ -429,6 +468,7 @@ func TestTwoWorkloadsDeclaringTheSameSpecification_ShouldEachBeSpreadWithoutCoun
 // Pods one per Node, and that one Zone holds them all, because a spread over the
 // Zones of a Topology that has one is satisfied by every Placement.
 func TestResilientPlacementOnATopologyOfOneZone_ShouldStillPlaceOnePodPerNode(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	oneZone := aTopologyOfOneZone(t)
 	workload := aWorkloadDeclaring(t, threeNodesPerZone, resilientPlacement())
@@ -444,6 +484,7 @@ func TestResilientPlacementOnATopologyOfOneZone_ShouldStillPlaceOnePodPerNode(t 
 }
 
 func TestARunAfterAnEarlierRun_ShouldReportOnlyItsOwnNodesAndPods(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology := anEvenSpreadTopology(t)
 	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement())
@@ -463,6 +504,8 @@ func TestARunAfterAnEarlierRun_ShouldReportOnlyItsOwnNodesAndPods(t *testing.T) 
 // scheduler cannot place stay Pending and the control plane's own reason for each
 // is on the Timeline.
 func TestAWorkloadWithoutSpreadRulesOnATooSmallTopology_ShouldLeaveTheUnplaceablePodsPending(t *testing.T) {
+	t.Parallel()
+
 	morePodsThanTheTopologyHolds := somePodsPerNode + onePodTooMany
 	workload := aWorkloadDeclaring(t, morePodsThanTheTopologyHolds, defaultPlacement())
 
@@ -482,6 +525,7 @@ func TestAWorkloadWithoutSpreadRulesOnATooSmallTopology_ShouldLeaveTheUnplaceabl
 // Workloads of one Scenario are, because a provisioning is what this suite's time
 // goes on.
 func TestAWorkloadRequestingMoreThanItsNodesHaveRoomFor_ShouldLeaveThePodsThatDoNotFitPending(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	fitting := aWorkloadDeclaring(t, threePodsRequestingHalfANode, requestingCPUOf(halfTheNodesCPU))
 	tooLarge := aSecondWorkloadDeclaring(t, twoPodsRequestingMoreThanANode, requestingCPUOf(moreCPUThanANodeHas))
@@ -505,6 +549,7 @@ func TestAWorkloadRequestingMoreThanItsNodesHaveRoomFor_ShouldLeaveThePodsThatDo
 // and not the period the control plane takes to notice, so the budget they run in
 // is the settle wait.
 func TestANodeThatStopsResponding_ShouldLeaveNinePodsRunningThreePerZoneAndNoneOnIt(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement())
 	stopped := theFirstNodeOf(topology)
@@ -538,6 +583,7 @@ func TestANodeThatStopsResponding_ShouldLeaveNinePodsRunningThreePerZoneAndNoneO
 // nine Pods: the Placement is skewed by one Pod per Zone, which is the impact on
 // reliability a Zone Failure is accepted to have (docs/prd.md REQ-SIM-008).
 func TestAZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement())
 	stopped := theFirstZoneOf(topology)
@@ -556,6 +602,7 @@ func TestAZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillRespond
 }
 
 func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheControlPlanesReason(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology := aTopologyOfTwoNodesHoldingOnePod(t)
 	workload := aWorkloadDeclaring(t, twoPods, resilientPlacement())
@@ -585,6 +632,7 @@ func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheCont
 // condition on every Pod the Workload declares, which is the condition kubectl
 // rollout status waits on (docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md).
 func TestAWaitForEveryPodOfADeployedWorkload_ShouldReachThePlacementWithEveryPodReady(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement())
 	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
@@ -614,6 +662,7 @@ const (
 // sooner in whole seconds either, and the longest is allowed one poll interval
 // for the simulator's own round trip (docs/prd.md REQ-SIM-012).
 func TestAPodSpecificationCustomizedWithOneStartupTime_ShouldHaveNoPodReadySoonerThanThatTime(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	workload := aWorkloadDeclaring(t, threePods, resilientPlacement().WithStartupTime(aStartupTimeBetween(t, oneStartupTime, oneStartupTime)))
 	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
@@ -628,6 +677,7 @@ func TestAPodSpecificationCustomizedWithOneStartupTime_ShouldHaveNoPodReadySoone
 }
 
 func TestAPodSpecificationCustomizedWithAStartupTimeRange_ShouldHaveEachPodReadyWithinTheRange(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement().WithStartupTime(aStartupTimeBetween(t, shortestStartup, longestStartup)))
 	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
@@ -692,6 +742,7 @@ func takenLaterThan(taken []time.Duration, bound time.Duration) []time.Duration 
 // Workload is declared, so the Placement it reaches holds the Nodes the Topology
 // declared and no Pod at all.
 func TestAWaitForEveryNodeBeforeAWorkloadIsDeployed_ShouldReachThePlacementOfThoseNodesAndNoPod(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology := anEvenSpreadTopology(t)
 	if err := provisioned.ApplyTopology(t.Context(), topology); err != nil {
@@ -881,6 +932,7 @@ func onePodOnEachOf(nodes []scenario.Node) []scenario.Pod {
 }
 
 func TestAScenarioThatEnds_ShouldLeaveNoSimulatedClusterBehind(t *testing.T) {
+	t.Parallel()
 	endings := map[string]func(*testing.T, *SimulatedCluster){
 		"a Scenario whose steps all passed": func(t *testing.T, provisioned *SimulatedCluster) {
 			t.Helper()
@@ -900,6 +952,7 @@ func TestAScenarioThatEnds_ShouldLeaveNoSimulatedClusterBehind(t *testing.T) {
 
 	for ending, steps := range endings {
 		t.Run(ending, func(t *testing.T) {
+			t.Parallel()
 			engine := requireEngine(t)
 			provisioned, err := Provision(t.Context(), engine, DefaultKubernetesVersion(), resilientPlacementScenario)
 			if err != nil {
@@ -918,6 +971,7 @@ func TestAScenarioThatEnds_ShouldLeaveNoSimulatedClusterBehind(t *testing.T) {
 }
 
 func TestConcurrentRuns_ShouldEachRemoveOnlyTheClusterTheyCreated(t *testing.T) {
+	t.Parallel()
 	engine := requireEngine(t)
 	firstRun, secondRun := aClusterOfItsOwnInvocation(t, engine), aClusterOfItsOwnInvocation(t, engine)
 
@@ -1008,7 +1062,7 @@ func aTopologyOfTwoNodesHoldingOnePod(t *testing.T) scenario.Topology {
 	t.Helper()
 
 	capacity := aCapacityOf(t, roomForOnePod, someCPUPerNode, someMemoryPerNode)
-	topology, err := scenario.NewTopology(theOneZone, twoNodesInIt, capacity)
+	topology, err := topologyOfTheGeneralNodePool(theOneZone, twoNodesInIt, capacity)
 	if err != nil {
 		t.Fatalf("build a Topology of %d Nodes holding one Pod: %v", twoNodesInIt, err)
 	}
@@ -1023,7 +1077,7 @@ func aTopologyOfOneNodeOfFourCores(t *testing.T) scenario.Topology {
 	t.Helper()
 
 	capacity := aCapacityOf(t, somePodsPerNode, scenario.CPU(someNodesCores*millicoresPerCore), someMemoryPerNode)
-	topology, err := scenario.NewTopology(theOneZone, theOneNodeInIt, capacity)
+	topology, err := topologyOfTheGeneralNodePool(theOneZone, theOneNodeInIt, capacity)
 	if err != nil {
 		t.Fatalf("build a Topology of one Node of %d cores: %v", someNodesCores, err)
 	}

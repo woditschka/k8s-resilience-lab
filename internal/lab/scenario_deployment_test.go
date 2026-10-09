@@ -29,6 +29,8 @@ const (
 	theNothingPendingScenario  = "a-wait-with-nothing-pending"
 	theSettlingScenario        = "a-wait-for-the-settled-placement"
 	theNothingDeclaredScenario = "a-wait-with-nothing-declared"
+	theNodePoolsScenario       = "a-topology-of-node-pools"
+	theGpuRequestScenario      = "a-request-only-gpu-nodes-hold"
 )
 
 // atOnce is the time a Wait with nothing to wait for is reached inside. The
@@ -135,14 +137,15 @@ func reportedAtOnce(step Step) reportedStep {
 // the Placement reached are the same, and the Thens after it judge a Placement
 // that has stopped changing (docs/prd.md REQ-SIM-006).
 func TestAWaitWrittenWithItsGivenAndOneWrittenOnItsOwn_ShouldReportTheSameWaitLineAndPlacement(t *testing.T) {
+	t.Parallel()
 	forms := map[string]func(*Scenario){
 		"with the Given that declared it": func(waiting *Scenario) {
-			waiting.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone)).WaitFor().AllNodesReady()
+			waiting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
 			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement()).
 				WaitFor().AllPodsReady()
 		},
 		"as a Step of its own": func(waiting *Scenario) {
-			waiting.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+			waiting.Given().Topology(Zones(twoZones), theGeneralNodePool())
 			waiting.WaitFor().AllNodesReady()
 			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 			waiting.WaitFor().AllPodsReady()
@@ -181,10 +184,11 @@ func TestAWaitWrittenWithItsGivenAndOneWrittenOnItsOwn_ShouldReportTheSameWaitLi
 // row finds nothing pending, and a Wait for every Pod before any Workload is
 // declared waits for no Pod (docs/prd.md REQ-SIM-006 edge cases 1 and 2).
 func TestAWaitWithNothingToWaitFor_ShouldReportAtOnceRatherThanBeRefused(t *testing.T) {
+	t.Parallel()
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	waiting := aScenarioOnAClusterFor(t, theNothingPendingScenario)
 
-	waiting.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone)).WaitFor().AllNodesReady()
+	waiting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
 	waiting.WaitFor().AllPodsReady()
 	waiting.WaitFor().AllPodsReady()
 
@@ -208,10 +212,11 @@ func TestAWaitWithNothingToWaitFor_ShouldReportAtOnceRatherThanBeRefused(t *test
 // Wait is the one a Scenario of a Workload with no room writes (docs/prd.md
 // REQ-SIM-011).
 func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testing.T) {
+	t.Parallel()
 	waiting := aScenarioOnAClusterFor(t, theSettlingScenario)
 
-	waiting.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone)).
-		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(roomForOnePodPerNode))
+	waiting.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone)).
+		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(roomForOnePodPerNode)))
 	waiting.WaitFor().AllNodesReady()
 	waiting.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), ResilientPlacement())
 	waiting.WaitFor().PlacementSettled()
@@ -236,6 +241,7 @@ func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testin
 // Placement it reaches holds no Pod, and no Node either where no Topology has
 // been declared above it (docs/prd.md REQ-SIM-011).
 func TestAWaitForASettledPlacementWithNothingDeclared_ShouldBeReachedAtOnce(t *testing.T) {
+	t.Parallel()
 	waiting := aScenarioOnAClusterFor(t, theNothingDeclaredScenario)
 
 	waiting.WaitFor().PlacementSettled()
@@ -273,9 +279,10 @@ func expectReachedAtOnce(t *testing.T, recorded []Step) {
 func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTheWaitThatDeployedTheWorkload(
 	t *testing.T,
 ) {
+	t.Parallel()
 	ending := aScenarioOnAClusterFor(t, theRefusedSettingScenario)
 
-	ending.Given().Topology(Zones(twoZones), NodesPerZone(twoNodesPerZone))
+	ending.Given().Topology(Zones(twoZones), theGeneralNodePool())
 	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode),
 		ResilientPlacement().Customize(aFullAccessTheControlPlaneRefuses()))
 	ending.WaitFor().AllPodsReady()
@@ -291,4 +298,60 @@ func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTh
 	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
 	causeNames(t, ended, theDeployingCauseNames)
 	causeNames(t, ended, string(theRefusedRestartPolicy))
+}
+
+// A Topology of NodePools reaches the cluster as every Zone holding each
+// NodePool's Nodes Ready at that NodePool's capacity, numbered from one through
+// the NodePools in declaration order, and a Node of the gpu NodePool carrying its
+// label: the Nodes read back from the control plane equal those the Topology
+// declared (docs/prd.md REQ-SIM-013).
+func TestATopologyOfNodePools_ShouldProvisionEveryZoneWithEachNodePoolsNodesAndCapacity(t *testing.T) {
+	t.Parallel()
+	const threeZones = 3
+	provisioning := aScenarioOnAClusterFor(t, theNodePoolsScenario)
+
+	provisioning.Given().Topology(Zones(threeZones), theGeneralNodePool(), theGpuNodePool())
+	provisioning.WaitFor().AllNodesReady()
+
+	ready := provisioning.outcome()
+	expect.Expect(t, causeOf(ready)).To(expect.Equal(""))
+	expect.Expect(t, ready.Placement.Nodes()).To(expect.Equal(aTopologyOfNodePools(t, threeZones).Nodes()))
+}
+
+// The scheduler places a Pod by the room each Node has, so a Request only the gpu
+// NodePool's Nodes have room for runs its Pods on those Nodes alone. The Workload
+// declares no spread and one Pod per gpu Node, so room alone decides where they
+// land (docs/prd.md REQ-SIM-013).
+func TestARequestOnlyOneNodePoolHasRoomFor_ShouldPlacePodsOnThatNodePoolAlone(t *testing.T) {
+	t.Parallel()
+	const onePodPerGpuNode = 1
+	podsTheGpuNodesHold := twoZones * oneGpuNodePerZone * onePodPerGpuNode
+	aboveTheLabsOwnCapacity := Request(
+		scenario.DefaultNodeCapacity().CPU()+CPU(1), scenario.DefaultNodeCapacity().Memory()+MemoryGi(1))
+	placing := aScenarioOnAClusterFor(t, theGpuRequestScenario)
+
+	placing.Given().Topology(Zones(twoZones), theGeneralNodePool(), theGpuNodePool())
+	placing.Given().Workload(someWorkloadName, Pods(podsTheGpuNodesHold), DefaultPlacement().Customize(aboveTheLabsOwnCapacity))
+	placing.WaitFor().PlacementSettled()
+
+	settled := placing.outcome()
+	expect.Expect(t, causeOf(settled)).To(expect.Equal(""))
+	expect.Expect(t, settled.Placement.PodsInPhase(scenario.PodRunning)).
+		To(expect.HaveLen[scenario.Pod](podsTheGpuNodesHold))
+	expect.Expect(t, settled.Placement.PodsPerNode()).
+		To(expect.Equal(onEveryNodeOf(aTopologyOfNodePools(t, twoZones), string(gpuNodePool), onePodPerGpuNode)))
+}
+
+// onEveryNodeOf is the Pods per Node a Placement holds where every Node of the
+// NodePool named holds pods Pods and every other Node none.
+func onEveryNodeOf(topology scenario.Topology, nodePool string, pods int) map[string]int {
+	counts := make(map[string]int)
+	for _, node := range topology.Nodes() {
+		counts[node.Name] = 0
+		if node.NodePool == nodePool {
+			counts[node.Name] = pods
+		}
+	}
+
+	return counts
 }

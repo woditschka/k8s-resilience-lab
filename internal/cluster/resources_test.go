@@ -1,7 +1,9 @@
 package cluster
 
 import (
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
@@ -397,6 +400,7 @@ func TestANodeTheKWOKControllerNoLongerMaintains_ShouldKeepEveryLabelButTheMarki
 	expect.Expect(t, unmarked).To(expect.Equal(map[string]string{
 		zoneLabel:     provisioned.Zone,
 		hostnameLabel: provisioned.Name,
+		nodePoolLabel: provisioned.NodePool,
 	}))
 	expect.Expect(t, labelled[fakeNodeLabel]).To(expect.Equal(fakeNodeLabelValue))
 }
@@ -416,11 +420,9 @@ func TestAProvisionedNode_ShouldBeFakeAndCarryItsZoneAndHostnameLabels(t *testin
 	mapped := toNode(provisioned)
 
 	expect.Expect(t, mapped.Name).To(expect.Equal(provisioned.Name))
-	expect.Expect(t, mapped.Labels).To(expect.Equal(map[string]string{
-		zoneLabel:     provisioned.Zone,
-		hostnameLabel: provisioned.Name,
-		fakeNodeLabel: fakeNodeLabelValue,
-	}))
+	expect.Expect(t, mapped.Labels[zoneLabel]).To(expect.Equal(provisioned.Zone))
+	expect.Expect(t, mapped.Labels[hostnameLabel]).To(expect.Equal(provisioned.Name))
+	expect.Expect(t, mapped.Labels[fakeNodeLabel]).To(expect.Equal(fakeNodeLabelValue))
 	expect.Expect(t, mapped.Annotations).To(expect.Equal(map[string]string{fakeNodeAnnotation: fakeNodeAnnotationValue}))
 }
 
@@ -642,6 +644,55 @@ func TestAnObservedNode_ShouldTakeItsZoneFromItsLabelRatherThanItsName(t *testin
 	}))
 }
 
+// A Node carries its NodePool's name as a label, so the cluster tells a Node's
+// NodePool from the Node alone (docs/prd.md REQ-SIM-013).
+func TestEveryNodeOfANodePool_ShouldCarryALabelNamingItsNodePool(t *testing.T) {
+	const gpu = "gpu"
+	provisioned := aNodeOfTheNodePool(t, gpu)
+
+	mapped := toNode(provisioned)
+
+	expect.Expect(t, mapped.Labels[nodePoolLabel]).To(expect.Equal(gpu))
+}
+
+// An observed Node is read with the NodePool its label names, so a Node read back
+// from the cluster equals the one its Topology declared.
+func TestAnObservedNode_ShouldBeReadWithThatNodePool(t *testing.T) {
+	const gpu = "gpu"
+	declared := aNodeOfTheNodePool(t, gpu)
+
+	observed, err := fromNodes([]corev1.Node{*toNode(declared)})
+	if err != nil {
+		t.Fatalf("read an observed Node: %v", err)
+	}
+
+	expect.Expect(t, observed).To(expect.Equal([]scenario.Node{declared}))
+}
+
+// The domain holds Kubernetes' label-value syntax itself, since it names no
+// Kubernetes package, so it is held to the client library's own validation over
+// names it admits and names it refuses (docs/adr/
+// 2026-10-09-every-nodepool-is-named-where-it-is-declared.md).
+func TestTheNodePoolNameRule_ShouldAgreeWithTheClientLibrarysLabelValueValidation(t *testing.T) {
+	const someNodesPerZone = 1
+
+	namesALabelHolds := []string{
+		"gpu", "g", "GPU-a100", "a.b_c-d", "0pool9", strings.Repeat("a", validation.LabelValueMaxLength),
+	}
+	namesNoLabelHolds := []string{
+		strings.Repeat("a", validation.LabelValueMaxLength+1),
+		"-gpu", "gpu-", ".gpu", "gpu_", "gpu nodes", "gpu/a100", "gpü",
+	}
+
+	for _, name := range slices.Concat(namesALabelHolds, namesNoLabelHolds) {
+		t.Run(name, func(t *testing.T) {
+			_, refusal := scenario.NewNodePool(name, someNodesPerZone, aCapacity(t))
+
+			expect.Expect(t, refusal == nil).To(expect.Equal(len(validation.IsValidLabelValue(name)) == 0))
+		})
+	}
+}
+
 func TestAnObservedNodeWithNoUsableCapacity_ShouldBeRefused(t *testing.T) {
 	const observedNodeName = "zone-1-node-1"
 
@@ -829,9 +880,40 @@ func aNodeHolding(t *testing.T, capacity scenario.NodeCapacity) scenario.Node {
 	t.Helper()
 
 	const oneZone, oneNodePerZone = 1, 1
-	topology, err := scenario.NewTopology(oneZone, oneNodePerZone, capacity)
+	topology, err := topologyOfTheGeneralNodePool(oneZone, oneNodePerZone, capacity)
 	if err != nil {
 		t.Fatalf("build a Topology of one Node: %v", err)
+	}
+
+	return topology.Nodes()[0]
+}
+
+// topologyOfTheGeneralNodePool is a Topology of zones Zones each holding the one
+// NodePool general of nodesPerZone Nodes at capacity, or the refusal either
+// constructor gave.
+func topologyOfTheGeneralNodePool(zones, nodesPerZone int, capacity scenario.NodeCapacity) (scenario.Topology, error) {
+	pool, err := scenario.NewNodePool("general", nodesPerZone, capacity)
+	if err != nil {
+		return scenario.Topology{}, err
+	}
+
+	return scenario.NewTopology(zones, pool)
+}
+
+// aNodeOfTheNodePool is the first Node of a Topology of one Zone holding one
+// NodePool of the name stated, which is how a test that turns on a NodePool's
+// name states it.
+func aNodeOfTheNodePool(t *testing.T, name string) scenario.Node {
+	t.Helper()
+
+	const oneZone, oneNodePerZone = 1, 1
+	pool, err := scenario.NewNodePool(name, oneNodePerZone, aCapacity(t))
+	if err != nil {
+		t.Fatalf("build a NodePool %q: %v", name, err)
+	}
+	topology, err := scenario.NewTopology(oneZone, pool)
+	if err != nil {
+		t.Fatalf("build a Topology of the NodePool %q: %v", name, err)
 	}
 
 	return topology.Nodes()[0]

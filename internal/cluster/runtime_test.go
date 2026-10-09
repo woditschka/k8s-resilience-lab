@@ -54,6 +54,7 @@ func aSocketThatIsNotThere(t *testing.T) string {
 }
 
 func TestADockerHostNamingAUnixSocketThatAnswers_ShouldBeUsedWithoutProbingACandidate(t *testing.T) {
+	t.Parallel()
 	live := requireEngine(t)
 
 	resolved, err := detectEngine(t.Context(), discardedWarnings(), "unix://"+live.Socket(), []string{aSocketThatIsNotThere(t)})
@@ -65,6 +66,7 @@ func TestADockerHostNamingAUnixSocketThatAnswers_ShouldBeUsedWithoutProbingACand
 }
 
 func TestADockerHostNamingADeadUnixSocket_ShouldFallThroughToALiveCandidate(t *testing.T) {
+	t.Parallel()
 	live := requireEngine(t)
 	warnings, written := recordedWarnings()
 	dead := aSocketThatIsNotThere(t)
@@ -85,6 +87,7 @@ func TestADockerHostNamingADeadUnixSocket_ShouldFallThroughToALiveCandidate(t *t
 // would answer a connection, so the count it keeps is the observation that none
 // was made.
 func TestADockerHostOfAnotherScheme_ShouldBeSkippedWithoutADialAndTheLiveCandidateUsed(t *testing.T) {
+	t.Parallel()
 	live := requireEngine(t)
 	elsewhere, dials := aListenerCountingItsDials(t)
 
@@ -205,6 +208,7 @@ func TestAParseFailure_ShouldBeReportedWithoutTheValueThatFailed(t *testing.T) {
 }
 
 func TestADockerHostThatIsNotAURL_ShouldBeSkippedWithAWarningAndTheLiveCandidateUsed(t *testing.T) {
+	t.Parallel()
 	live := requireEngine(t)
 	// A percent escape that is not hexadecimal is the one DOCKER_HOST shape that
 	// does not parse as a URL at all.
@@ -223,6 +227,7 @@ func TestADockerHostThatIsNotAURL_ShouldBeSkippedWithAWarningAndTheLiveCandidate
 }
 
 func TestAnEngineThatAnswers_ShouldReportTheVersionItRuns(t *testing.T) {
+	t.Parallel()
 	live := requireEngine(t)
 
 	if live.EngineVersion() == "" {

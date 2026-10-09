@@ -82,6 +82,10 @@ deps-check:
 # on the clock as Scenarios are added. Every wait the lab makes is bounded by a
 # timeout of its own, so the default guards nothing (same ADR, option 6).
 #
+# The tests needing a Simulated Cluster run in parallel, at most four at a time
+# per package, which bounds how many clusters the gate asks of the engine at once
+# (docs/system-design.md § Scale and Load, Simulated Clusters at once).
+#
 # The check asserts no toolchain prerequisite of its own: no CGO_ENABLED test, no
 # search for a C compiler and no operating-system branch, because each of those is
 # a second rule about where the detector needs a compiler and macOS needs none.
@@ -89,7 +93,7 @@ deps-check:
 # find; that refusal is this failure, and the install names below are the ones
 # CLAUDE.md § Toolchain documents.
 test:
-	@go test -race -timeout 30m ./... || { \
+	@go test -race -parallel 4 -timeout 30m ./... || { \
 		refused=$$?; \
 		echo "test: the tests must pass under the race detector (docs/adr/2026-10-04-race-detector-in-the-gate.md)"; \
 		echo "  if the Go toolchain refused the detector above, it needs cgo and a C compiler:"; \

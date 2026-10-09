@@ -25,7 +25,7 @@ Each name below is defined in `internal/lab`, which stays the authority on what 
 
 **Givens**
 
-- `Given().Topology(lab.Zones, lab.NodesPerZone)`, with `.NodeCapacity(lab.CPU, lab.MemoryGi)` for the room each Node has, and a trailing `lab.Pods` where how many Pods a Node holds is what the Scenario is about
+- `Given().Topology(lab.Zones, lab.NodePool(lab.NodePoolName, lab.NodesPerZone), …)`, each NodePool naming the label its Nodes carry, with `.NodeCapacity(lab.CPU, lab.MemoryGi)` on a NodePool for the room each of its Nodes has, and a trailing `lab.Pods` where how many Pods a Node holds is what the Scenario is about. Zones holding Nodes of different kinds take one NodePool each
 - `Given().Workload(name, lab.Pods, specification)`, with `.RequiredCapacity(lab.Pods)` for the fewest Pods it keeps Running through a Failure
 - the Workload constants of `workloads.go`, business capabilities of the domain the Scenarios model
 
@@ -77,7 +77,7 @@ The function is named for the condition it runs under and the outcome it asserts
 
 ```go
 func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3))
+	s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)))
 	s.WaitFor().AllNodesReady()
 	s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())
 	s.WaitFor().AllPodsReady()
@@ -89,6 +89,6 @@ Every line is one Step opened on `s`, so a reader scans the Step kinds in one co
 
 The Scenario runs under the stem of its file, with hyphens for underscores, so renaming the file renames the Scenario. A new Scenario is a file here and one line in `scenarios.go`.
 
-A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `lab.NodesPerZone`, `lab.Pods`, `lab.WorkloadName` and the specification — so a swapped argument does not compile. An optional setting is a further call on the complete declaration, `.NodeCapacity` on the Topology and `.RequiredCapacity` on the Workload. `.NodeCapacity` carries an optional value of its own, the Pod count, which comes last and keeps the lab's own count where the line leaves it out.
+A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `lab.NodesPerZone`, `lab.Pods`, `lab.WorkloadName`, `lab.NodePoolName` and the specification — so a swapped argument does not compile. An optional setting is a further call on the complete declaration, `.NodeCapacity` on a NodePool and `.RequiredCapacity` on the Workload. `.NodeCapacity` carries an optional value of its own, the Pod count, which comes last and keeps the lab's own count where the line leaves it out.
 
 A Scenario has no test of its own: it is itself the check, and a test beside it could only repeat its own Then Steps. The lab's Scenarios run in `cmd/lab`'s own suite, which fails when one reports a Finding or ends at a Step.

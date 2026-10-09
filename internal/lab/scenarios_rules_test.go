@@ -193,6 +193,108 @@ func TestEveryScenarioOfTheLab_ShouldDeclareOnePredefinedPodSpecificationPerWork
 	}
 }
 
+// Every Scenario of the lab runs on one NodePool, and each names it general, so
+// the lab's reports read alike and a Scenario about NodePools is the one that
+// departs from it (docs/prd.md REQ-SIM-013).
+func TestEveryScenarioOfTheLab_ShouldNameItsOneNodePoolGeneral(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := scenariosNotNamingTheirOneNodePoolGeneral(filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("every Scenario of the lab declares one NodePool and names it %s, but:\n%s",
+			theLabsNodePoolName, strings.Join(offenders, "\n"))
+	}
+}
+
+// The rule's own decisions are read here, since the shipped sources all follow it.
+func TestTheNodePoolNameRule_ShouldAdmitOneNodePoolNamedGeneralAndReportAnythingElse(t *testing.T) {
+	written := map[string]struct {
+		line     string
+		admitted bool
+	}{
+		"one NodePool named general": {
+			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)))`,
+			admitted: true,
+		},
+		"a NodePool stating a capacity": {
+			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)).` +
+				`NodeCapacity(lab.CPU(4), lab.MemoryGi(16)))`,
+			admitted: true,
+		},
+		"a NodePool named otherwise": {
+			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("gpu", lab.NodesPerZone(3)))`,
+			admitted: false,
+		},
+		"two NodePools": {
+			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)), ` +
+				`lab.NodePool("general", lab.NodesPerZone(1)))`,
+			admitted: false,
+		},
+		"no NodePool": {
+			line:     `s.Given().Topology(lab.Zones(3))`,
+			admitted: false,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			offenders := scenariosNotNamingTheirOneNodePoolGeneral(aScenarioWhoseStepsAre(t, taken.line))
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// theNodePoolStep is how a NodePool's declaration names itself, and
+// theLabsNodePoolName is the name the lab's own Scenarios give their one.
+const (
+	theNodePoolStep     = "NodePool"
+	theLabsNodePoolName = `"general"`
+)
+
+// scenariosNotNamingTheirOneNodePoolGeneral names every Scenario of the place that
+// declares no NodePool, more than one, or one under another name. The NodePool
+// call is found wherever in a line it is written, since it is an argument of the
+// Topology line.
+func scenariosNotNamingTheirOneNodePoolGeneral(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, source := range files {
+		for _, declared := range source.Declarations {
+			if !isAScenario(declared) {
+				continue
+			}
+			var pools []modulerules.Statement
+			for _, line := range declared.Statements {
+				pools = append(pools, nodePoolCallsIn(line)...)
+			}
+			if len(pools) != onlyOnce || len(pools[0].Arguments) == 0 || pools[0].Arguments[0].Written != theLabsNodePoolName {
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: declares %d NodePools, and not one named %s",
+					source.Path, declared.Name, len(pools), theLabsNodePoolName))
+			}
+		}
+	}
+
+	return offenders
+}
+
+// nodePoolCallsIn is every call to the NodePool declaration inside one expression:
+// on the expression it is called on, and in the arguments of every call.
+func nodePoolCallsIn(expression modulerules.Statement) []modulerules.Statement {
+	var found []modulerules.Statement
+	if expression.Call && expression.Name == theNodePoolStep {
+		found = append(found, expression)
+	}
+	if expression.On != nil {
+		found = append(found, nodePoolCallsIn(*expression.On)...)
+	}
+	for _, argument := range expression.Arguments {
+		found = append(found, nodePoolCallsIn(argument)...)
+	}
+
+	return found
+}
+
 // The shapes a Workload line takes, read as a rule over the syntax tree rather
 // than over the text of the line: one predefined specification, customized or
 // not, and nothing besides. No Scenario of the lab writes a Customization yet, so
@@ -543,7 +645,7 @@ func TestTheWaitOrderingRule_ShouldReportEveryThenAndFailureNoWaitStandsBefore(t
 // Wait that fits it chained onto its line, each Wait written as a Step of its own,
 // the Failure that discards the Placement, and a Then that judges one.
 const (
-	theTopologyLine         = `s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3))`
+	theTopologyLine         = `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)))`
 	theTopologyWaitingLine  = theTopologyLine + `.WaitFor().AllNodesReady()`
 	theWorkloadWaitingLine  = theWorkloadLine + `.WaitFor().AllPodsReady()`
 	theWaitForEveryNodeLine = `s.WaitFor().AllNodesReady()`

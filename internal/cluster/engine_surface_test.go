@@ -502,6 +502,7 @@ func parsedWith(t *testing.T, files *token.FileSet) []*ast.File {
 // go through the lab's own code, and only for the cluster it created
 // (docs/system-design.md § Threat Model, the engine-socket row).
 func TestARun_ShouldTouchNoContainerBesidesItsOwnSimulatedCluster(t *testing.T) {
+	t.Parallel()
 	engine := requireEngine(t)
 	standingBy := containersOnTheEngine(t, engine)
 

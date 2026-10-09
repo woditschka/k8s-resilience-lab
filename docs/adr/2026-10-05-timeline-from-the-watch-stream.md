@@ -27,7 +27,7 @@ Each entry is mapped into an immutable `internal/scenario` value by the same ant
 
 A Timeline is filed as JSON Lines: one header line naming the Scenario and its cluster, then one line per entry, written as the entry arrives. The lines are a published format, so the later query path and the live view read a filed Timeline without the lab parsing its own prose. Writing as entries arrive is also what leaves a usable file behind when a Scenario fails part-way.
 
-The file is named for the Simulated Cluster the Timeline describes, in a `timelines` folder under the working directory. That name already carries the Scenario it serves and a suffix unique to the invocation, per [ADR: Each Scenario provisions its own Simulated Cluster](2026-10-04-cluster-per-scenario.md), so two runs at once need no further naming rule. The lab removes no Timeline file.
+The file is named for the Simulated Cluster the Timeline describes, in a `timelines` folder under the working directory. That name already carries the Scenario it serves and a random suffix drawn per provisioning, per [ADR: Each Scenario provisions its own Simulated Cluster](2026-10-04-cluster-per-scenario.md), so two runs at once need no further naming rule. The lab removes no Timeline file.
 
 A Timeline the lab cannot write is the lab's own failure, not the Scenario's: the file keeps its first write error, the Scenario's reported outcome stands, and the run names the Timeline it could not write.
 

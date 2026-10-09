@@ -67,7 +67,7 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-03 | [The lab provisions the Simulated Cluster it drives](2026-10-03-lab-provisioned-simulated-cluster.md) | Accepted |
 | 2026-10-03 | [Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) | Accepted |
 | 2026-10-04 | [A Scenario's Workload declares the spread of its own Pods](2026-10-04-scenario-declared-pod-spread.md) | Accepted |
-| 2026-10-04 | [Each Scenario provisions its own Simulated Cluster](2026-10-04-cluster-per-scenario.md) | Accepted |
+| 2026-10-04 | [Each Scenario provisions its own Simulated Cluster](2026-10-04-cluster-per-scenario.md) | Accepted, amended 2026-10-09 |
 | 2026-10-04 | [Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md) | Accepted |
 | 2026-10-04 | [The gate runs the tests under the race detector](2026-10-04-race-detector-in-the-gate.md) | Accepted |
 | 2026-10-04 | [The module-rule tests share one test-support package](2026-10-04-module-rule-test-support.md) | Accepted |
@@ -79,3 +79,5 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-07 | [A Scenario writes its own Wait, with its Given or as a Step of its own](2026-10-07-a-scenario-writes-its-own-wait.md) | Accepted |
 | 2026-10-07 | [The lab's Scenarios write one Step per line](2026-10-07-the-labs-scenarios-write-one-step-per-line.md) | Accepted |
 | 2026-10-08 | [The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md) | Accepted |
+| 2026-10-08 | [A Topology declares the NodePools every Zone holds](2026-10-08-a-topology-declares-the-nodepools-every-zone-holds.md) | Superseded by [ADR-2026-10-09](2026-10-09-every-nodepool-is-named-where-it-is-declared.md) |
+| 2026-10-09 | [Every NodePool is named where it is declared](2026-10-09-every-nodepool-is-named-where-it-is-declared.md) | Accepted |

@@ -58,7 +58,7 @@ func aTopologyOfOneNodeHoldingOnePod(t *testing.T) scenario.Topology {
 	t.Helper()
 
 	capacity := aCapacityOf(t, roomForOnePod, someCPUPerNode, someMemoryPerNode)
-	topology, err := scenario.NewTopology(theOneZone, theOneNodeInIt, capacity)
+	topology, err := topologyOfTheGeneralNodePool(theOneZone, theOneNodeInIt, capacity)
 	if err != nil {
 		t.Fatalf("build a Topology of one Node: %v", err)
 	}
@@ -89,6 +89,7 @@ func aRecordedScenario(t *testing.T, topology scenario.Topology, workload scenar
 }
 
 func TestAScenarioWithATopologyAndAWorkload_ShouldRecordEveryNodePodAndWorkloadChange(t *testing.T) {
+	t.Parallel()
 	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement())
 
 	recorded, delivered, settled := aRecordedScenario(t, topology, workload)
@@ -103,12 +104,14 @@ func TestAScenarioWithATopologyAndAWorkload_ShouldRecordEveryNodePodAndWorkloadC
 }
 
 func TestARecordedTimeline_ShouldHoldItsEntriesInTheOrderTheLabReceivedThem(t *testing.T) {
+	t.Parallel()
 	recorded, _, _ := aRecordedScenario(t, anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement()))
 
 	expect.Expect(t, slices.IsSortedFunc(recorded.Entries(), byReceipt)).To(expect.Equal(true))
 }
 
 func TestAPlacedPodAndAPendingPod_ShouldCarryTheReasonTheControlPlaneGave(t *testing.T) {
+	t.Parallel()
 	workload := aWorkloadDeclaring(t, twoPods, resilientPlacement())
 
 	recorded, _, settled := aRecordedScenario(t, aTopologyOfOneNodeHoldingOnePod(t), workload)
@@ -121,6 +124,7 @@ func TestAPlacedPodAndAPendingPod_ShouldCarryTheReasonTheControlPlaneGave(t *tes
 }
 
 func TestAClusterAlreadyRecording_ShouldRefuseASecondRecord(t *testing.T) {
+	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	delivered := &entriesDelivered{}
 	if err := provisioned.Record(t.Context(), delivered); err != nil {

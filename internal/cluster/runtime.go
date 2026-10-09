@@ -358,8 +358,8 @@ func engineMessageIn(body io.Reader) string {
 }
 
 // apiServerPort is the container port a KWOK control plane serves its API on. The
-// engine publishes it on a host port of its own choosing, so two invocations on
-// one machine cannot collide on a port
+// engine publishes it on a host port of its own choosing, so two Simulated
+// Clusters on one machine cannot collide on a port
 // (docs/adr/2026-10-04-cluster-per-scenario.md).
 const apiServerPort = "8080/tcp"
 
@@ -386,10 +386,10 @@ const removalTimeout = 30 * time.Second
 // the engine's own output can tell which containers came from a run.
 const containerNamePrefix = "k8s-resilience-lab"
 
-// invocationSuffixLength is how much of a random value a container name carries.
-// It makes the name unique to this invocation, so two runs on one machine never
-// name the same container (docs/adr/2026-10-04-cluster-per-scenario.md).
-const invocationSuffixLength = 8
+// containerSuffixLength is how much of a random value a container name carries.
+// It makes the name unique to its provisioning, so two clusters on one machine
+// never name the same container (docs/adr/2026-10-04-cluster-per-scenario.md).
+const containerSuffixLength = 8
 
 // NodeHeartbeatFactor is the factor the cluster's heartbeat timings run at under
 // the lab, and DefaultNodeHeartbeatFactor the image's own factor that it
@@ -498,15 +498,14 @@ func newEngine(endpoint Endpoint, scenarioName string) (Engine, error) {
 	return Engine{endpoint: endpoint, containerName: name}, nil
 }
 
-// containerNameFor is the name of the container serving scenarioName in this
-// invocation: the lab's own prefix, the Scenario it serves, and a suffix unique
-// to the invocation.
+// containerNameFor is the name of the container serving scenarioName: the lab's
+// own prefix, the Scenario it serves, and a suffix drawn per provisioning.
 func containerNameFor(scenarioName string) (string, error) {
 	if scenarioName == "" {
 		return "", errors.New("a Simulated Cluster's container carries the name of the Scenario it serves, so an unnamed Scenario is refused")
 	}
 
-	return fmt.Sprintf("%s-%s-%s", containerNamePrefix, scenarioName, strings.ToLower(rand.Text()[:invocationSuffixLength])), nil
+	return fmt.Sprintf("%s-%s-%s", containerNamePrefix, scenarioName, strings.ToLower(rand.Text()[:containerSuffixLength])), nil
 }
 
 // StartCluster pulls the pinned cluster image for version when the machine does
@@ -623,7 +622,7 @@ type ClusterContainer struct {
 }
 
 // Name is the name this run gave its container, carrying the Scenario it serves
-// and a suffix unique to the invocation.
+// and a suffix drawn per provisioning.
 func (c *ClusterContainer) Name() string {
 	return c.name
 }

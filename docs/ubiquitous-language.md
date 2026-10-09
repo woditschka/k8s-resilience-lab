@@ -38,9 +38,9 @@
 
 **Simulated Cluster**: A Kubernetes cluster whose control plane is genuine and whose Nodes and Pods are fake, so scheduling decisions are real and no container ever runs. Relationships: a Simulated Cluster holds one Topology and zero or more Workloads. Avoid: mock cluster, fake cluster, test cluster.
 
-**Zone**: One failure domain of a Simulated Cluster, holding the Nodes that are lost together. Relationships: a Zone holds one or more Nodes. Avoid: AZ, availability zone, region, datacenter.
+**Zone**: One failure domain of a Simulated Cluster, holding the Nodes that are lost together. Relationships: a Zone holds one or more NodePools, and through them one or more Nodes. Avoid: AZ, availability zone, region, datacenter.
 
-**Node**: One simulated machine that Pods are placed on. Relationships: a Node belongs to exactly one Zone and hosts zero or more Pods. Avoid: host, machine, worker, instance.
+**Node**: One simulated machine that Pods are placed on. Relationships: a Node belongs to exactly one Zone and exactly one NodePool, and hosts zero or more Pods. Avoid: host, machine, worker, instance.
 
 **Pod**: One replica of a Workload, either placed on a Node or left unplaced. Avoid: container, replica, task.
 
@@ -56,9 +56,11 @@
 
 **Full access**: The Customization that reaches every Kubernetes Pod setting, for a Scenario needing one the lab's own vocabulary does not name. Relationships: a Scenario writes it among its Customizations and names each Setting as Kubernetes names it, so that Scenario reads partly in Kubernetes' own vocabulary. What the lab itself depends on holds whatever Full access leaves out. The waiting time before Pods leave an unresponsive Node stands over it, whatever it names. Avoid: escape hatch, raw spec, passthrough, override.
 
-**Topology**: The arrangement of Zones and Nodes a Simulated Cluster starts from. Relationships: a Topology names a Zone count, a Node count per Zone, and the Node capacity every one of its Nodes has. Avoid: layout, cluster shape, setup.
+**Topology**: The arrangement of Zones and Nodes a Simulated Cluster starts from. Relationships: a Topology names a Zone count and the NodePools every Zone holds. Avoid: layout, cluster shape, setup.
 
-**Node capacity**: The room one Node has: how much cpu and memory, and how many Pods it holds. Relationships: a Topology states one for every Node it holds, and a Topology stating none gets the lab's own default. A stated capacity names the cpu and the memory, and the Pod count last or not at all, an omitted count keeping the lab's own. A Pod is placed on a Node whose room covers that Pod's Request. Avoid: node size, machine type, instance size; Required Capacity, which is a Workload's own minimum and not a Node's room.
+**NodePool**: A group of identical Nodes in a Zone sharing one Node capacity and one name, as the cloud providers' node pools do. Relationships: a Zone holds one or more NodePools, every Zone of a Topology holds the same ones, and every Node belongs to exactly one. Every NodePool states a name, and a Node carries its NodePool's name as a label. Avoid: pool, node group, machine set, instance group.
+
+**Node capacity**: The room one Node has: how much cpu and memory, and how many Pods it holds. Relationships: a NodePool states one for every Node it holds, and a NodePool stating none gets the lab's own default. A stated capacity names the cpu and the memory, and the Pod count last or not at all, an omitted count keeping the lab's own. A Pod is placed on a Node whose room covers that Pod's Request. Avoid: node size, machine type, instance size; Required Capacity, which is a Workload's own minimum and not a Node's room.
 
 **Startup time**: The time one placed Pod of a Simulated Cluster takes to become Ready. Relationships: every Pod takes the lab's own Startup time unless a Customization of its Pod specification states one. That Customization states one time or a shortest and a longest, and each Pod then takes its own time between them. A Pod inside its Startup time stands on its Node, Pending and not yet Running. Avoid: boot time, warm-up, startup delay, readiness delay, latency.
 

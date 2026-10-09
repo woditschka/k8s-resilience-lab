@@ -18,11 +18,22 @@ func aCapacity() NodeCapacity {
 	return DefaultNodeCapacity()
 }
 
+// topologyOfOneNodePool is a Topology of zones Zones each holding one NodePool of
+// nodesPerZone Nodes at capacity, or the refusal either constructor gave.
+func topologyOfOneNodePool(zones, nodesPerZone int, capacity NodeCapacity) (Topology, error) {
+	pool, err := NewNodePool("general", nodesPerZone, capacity)
+	if err != nil {
+		return Topology{}, err
+	}
+
+	return NewTopology(zones, pool)
+}
+
 func TestATopologyAtTheLabsZoneLimit_ShouldBeAdmitted(t *testing.T) {
 	const oneNodePerZone = 1
 	capacity := aCapacity()
 
-	topology, err := NewTopology(maxZones, oneNodePerZone, capacity)
+	topology, err := topologyOfOneNodePool(maxZones, oneNodePerZone, capacity)
 	if err != nil {
 		t.Fatalf("build a Topology of %d Zones: %v", maxZones, err)
 	}
@@ -46,7 +57,7 @@ func TestATopology_ShouldRefuseACountItCannotProvision(t *testing.T) {
 
 	for refused, refusal := range refusals {
 		t.Run(refused, func(t *testing.T) {
-			_, err := NewTopology(refusal.zones, refusal.nodesPerZone, aCapacity())
+			_, err := topologyOfOneNodePool(refusal.zones, refusal.nodesPerZone, aCapacity())
 
 			if err == nil {
 				t.Fatalf("a Topology of %d Zones of %d Nodes is refused, but it was admitted", refusal.zones, refusal.nodesPerZone)

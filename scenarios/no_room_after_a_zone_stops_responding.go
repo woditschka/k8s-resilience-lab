@@ -7,7 +7,7 @@ import "github.com/woditschka/k8s-resilience-lab/internal/lab"
 // longer fit anywhere stay Pending, and the capacity the Workload declared is
 // still met.
 func NoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3)).NodeCapacity(lab.CPU(4), lab.MemoryGi(16))
+	s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)).NodeCapacity(lab.CPU(4), lab.MemoryGi(16)))
 	s.WaitFor().AllNodesReady()
 	s.Given().Workload(Checkout, lab.Pods(9),
 		lab.ResilientPlacement().Customize(lab.Request(lab.CPU(3), lab.MemoryGi(12)))).

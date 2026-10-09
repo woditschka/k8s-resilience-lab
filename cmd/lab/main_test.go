@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -123,12 +127,16 @@ const (
 // left Pending.
 const (
 	noRoomAfterAZoneStopsRespondingReported = aScenarioHeading + "no-room-after-a-zone-stops-responding"
-	theNodeCapacityDeclared                 = "Given a Topology of 3 Zones of 3 Nodes holding 4 cpu and 16Gi memory each"
 	thePlacementSettledAwaited              = "Wait for the Placement Settled, reached in "
 	threePodsPendingJudged                  = "Then 3 Pods Pending"
 
 	capacityHeldWithNoRoomLeftJudged = theCapacityJudged + "6 at the moment of the Failure and 6 once Settled"
 )
+
+// theNodeCapacityDeclared is the Topology line of that Scenario: its one NodePool
+// general, stating the cpu and memory and keeping the lab's own Pod count.
+var theNodeCapacityDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Nodes holding " +
+	"4 cpu, 16Gi memory and " + strconv.Itoa(scenario.DefaultNodeCapacity().Pods()) + " Pods each"
 
 // The labels a run opens each of its control-plane settings with. What such a
 // line has to carry is the pair the declaring package holds — the value the lab
@@ -157,6 +165,14 @@ const (
 	noEntryPrinted     = 0
 )
 
+// theWorkloadOfEveryScenario opens the name of each Pod the control plane makes
+// for the Workload every Scenario of the lab deploys, named on its Given line.
+const theWorkloadOfEveryScenario = "checkout-"
+
+// noPodShared is how many Pods the Timelines of two Scenarios of one run hold
+// in common, each Scenario having a cluster of its own.
+const noPodShared = 0
+
 // requireEngine is the one guard every test that needs a container engine goes
 // through; on a machine where none answers the calling test fails here, naming
 // why, and it fails on its own, so every test that needs no engine still runs
@@ -179,6 +195,56 @@ func aRun(t *testing.T, arguments ...string) (string, error) {
 	err := run(t.Context(), arguments, t.TempDir(), &reported, &warned)
 
 	return reported.String(), err
+}
+
+// sharedRunTimelines is the folder the shared run below files its Timelines
+// under. TestMain makes it before the first test and removes it after the last,
+// so a suite run leaves nothing behind and no single test's lifetime owns it.
+var sharedRunTimelines string
+
+func TestMain(m *testing.M) {
+	folder, err := os.MkdirTemp("", "lab-shared-run-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "make the folder the shared run files its Timelines under: %v\n", err)
+		os.Exit(1)
+	}
+	sharedRunTimelines = folder
+
+	passed := m.Run()
+
+	if err := os.RemoveAll(folder); err != nil {
+		fmt.Fprintf(os.Stderr, "remove the folder the shared run filed its Timelines under: %v\n", err)
+	}
+	os.Exit(passed)
+}
+
+// aRunOfEveryScenario is one run of the lab with no arguments, carried out the
+// first time a test asks and shared by every test that judges such a run's
+// lines, so the suite provisions every Scenario's cluster once rather than once
+// per test. It is shared because it is immutable: a report, an error, and filed
+// Timelines no test writes (docs/testing-principles.md § Never Share Mutable
+// Fixtures). It runs under its own context, because it outlives the test that
+// starts it.
+var aRunOfEveryScenario = sync.OnceValues(func() (string, error) {
+	var reported, warned bytes.Buffer
+	err := run(context.Background(), nil, sharedRunTimelines, &reported, &warned)
+
+	return reported.String(), err
+})
+
+// theRunOfEveryScenario is what the shared run reported, for a test that judges
+// it. The test fails where no engine answers, and where a Scenario of the lab
+// reported a Finding, ended at a Step or could not be carried out.
+func theRunOfEveryScenario(t *testing.T) string {
+	t.Helper()
+
+	requireEngine(t)
+	reported, err := aRunOfEveryScenario()
+	if err != nil {
+		t.Fatalf("a Scenario of the lab reported a Finding, ended at a Step or could not be carried out: %v", err)
+	}
+
+	return reported
 }
 
 // reportShows and reportLacks are how a run's report is read: a line that is
@@ -260,12 +326,8 @@ func theLineOpeningWith(reported, label string) string {
 // so the command's suite is what fails when one reports a Finding or ends at a
 // Step (docs/adr/2026-10-03-scenarios-as-go-functions.md).
 func TestResilientPlacementWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNode(t *testing.T) {
-	requireEngine(t)
-
-	reported, err := aRun(t)
-	if err != nil {
-		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
-	}
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, resilientPlacementReported)
 	reportShows(t, reported, resilientPlacementDeclared)
@@ -282,12 +344,8 @@ func TestResilientPlacementWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNo
 // doing, and the Scenario is itself the check. Its When Step is read too,
 // because the Node the lab picked is something only the run can report.
 func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFailedNode(t *testing.T) {
-	requireEngine(t)
-
-	reported, err := aRun(t)
-	if err != nil {
-		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
-	}
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, nodeStopsRespondingReported)
 	reportShows(t, reported, theRequiredCapacityDeclared)
@@ -309,12 +367,8 @@ func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFai
 // hand and against the minimum its Workload declares (docs/prd.md REQ-SIM-008,
 // REQ-SIM-010).
 func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *testing.T) {
-	requireEngine(t)
-
-	reported, err := aRun(t)
-	if err != nil {
-		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
-	}
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, zoneStopsRespondingReported)
 	reportShows(t, reported, theRequiredCapacityDeclared)
@@ -334,12 +388,8 @@ func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *tes
 // Required Capacity of six is met at both moments it is judged at (docs/prd.md
 // REQ-SIM-011).
 func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending(t *testing.T) {
-	requireEngine(t)
-
-	reported, err := aRun(t)
-	if err != nil {
-		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
-	}
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, noRoomAfterAZoneStopsRespondingReported)
 	reportShows(t, reported, theNodeCapacityDeclared)
@@ -362,12 +412,8 @@ func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndTh
 // time, which every Pod of a Scenario stating none takes. One run is read for all
 // five, because each of them holds for the whole run.
 func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaitingAndStartupTimes(t *testing.T) {
-	requireEngine(t)
-
-	reported, err := aRun(t)
-	if err != nil {
-		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
-	}
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
 
 	reportLineNames(t, reported, unresponsiveNodeSetting,
 		scenario.UnresponsiveNodeWait.String(), scenario.DefaultUnresponsiveNodeWait.String())
@@ -380,6 +426,7 @@ func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaiting
 }
 
 func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(t *testing.T) {
+	t.Parallel()
 	requireEngine(t)
 
 	reported, err := aRun(t, wholeTimelineAsked)
@@ -397,12 +444,8 @@ func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(
 }
 
 func TestACollapsedSummary_ShouldLeaveEveryEntryInTheTimelineFile(t *testing.T) {
-	requireEngine(t)
-
-	reported, err := aRun(t)
-	if err != nil {
-		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
-	}
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
 
 	filed := theTimelineFiledBy(t, reported)
 	expect.Expect(t, theEntriesPrintedIn(t, reported)).To(expect.HaveLen[float64](noEntryPrinted))
@@ -424,14 +467,11 @@ func TestATimelineSummary_ShouldOpenWithTheEntryCountAndTheFileItWasFiledAt(t *t
 }
 
 func TestARemovedSimulatedCluster_ShouldLeaveItsTimelineFileReadable(t *testing.T) {
-	requireEngine(t)
+	t.Parallel()
 
 	// Every Simulated Cluster a run provisions is removed before the run returns,
 	// so by the time the file below is opened the cluster it describes is gone.
-	reported, err := aRun(t)
-	if err != nil {
-		t.Fatalf("a Scenario of the lab reported a Finding or ended at a Step: %v", err)
-	}
+	reported := theRunOfEveryScenario(t)
 
 	filed := theTimelineFiledBy(t, reported)
 	reportShows(t, filed[0], theScenarioRecorded)
@@ -475,18 +515,16 @@ func TestATimelineThatCannotBeWritten_ShouldBeNamedWhileTheScenarioOutcomeStands
 }
 
 func TestARunNamingNoVersion_ShouldReportThePinnedDefaultVersion(t *testing.T) {
-	requireEngine(t)
+	t.Parallel()
 	pinned := cluster.DefaultKubernetesVersion().String()
 
-	reported, err := aRun(t)
-	if err != nil {
-		t.Fatalf("run the lab with no version named: %v", err)
-	}
+	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, versionReported+pinned)
 }
 
 func TestARunNamingAVersion_ShouldMirrorAndReportThatVersion(t *testing.T) {
+	t.Parallel()
 	requireEngine(t)
 	named := cluster.DefaultKubernetesVersion().String()
 	// The version is named without its leading v, so the report also shows that
@@ -503,6 +541,7 @@ func TestARunNamingAVersion_ShouldMirrorAndReportThatVersion(t *testing.T) {
 }
 
 func TestAVersionTheLabCannotObtain_ShouldStopTheRunBeforeAnyScenario(t *testing.T) {
+	t.Parallel()
 	requireEngine(t)
 
 	reported, err := aRun(t, "--k8s-version", aVersionWithNoClusterImage)
@@ -513,10 +552,11 @@ func TestAVersionTheLabCannotObtain_ShouldStopTheRunBeforeAnyScenario(t *testing
 	if !strings.Contains(err.Error(), aVersionWithNoClusterImage) {
 		t.Errorf("the run names the version it could not obtain, but reads: %v", err)
 	}
-	reportLacks(t, reported, placementSettled)
+	reportLacks(t, reported, "\n"+aScenarioHeading)
 }
 
 func TestAValueThatIsNotAVersion_ShouldStopTheRunWithoutReachingTheEngine(t *testing.T) {
+	t.Parallel()
 	reported, err := aRun(t, "--k8s-version", aValueThatIsNotAVersion)
 
 	if err == nil {
@@ -525,7 +565,163 @@ func TestAValueThatIsNotAVersion_ShouldStopTheRunWithoutReachingTheEngine(t *tes
 	expect.Expect(t, reported).To(expect.Equal(""))
 }
 
-// The Outcomes the two tests above report are built here rather than run,
+func TestARunOfEveryScenario_ShouldReportEachScenariosLinesTogetherInDeclaredOrder(t *testing.T) {
+	t.Parallel()
+	declared := []string{
+		resilientPlacementReported, nodeStopsRespondingReported,
+		zoneStopsRespondingReported, noRoomAfterAZoneStopsRespondingReported,
+	}
+
+	reported := theRunOfEveryScenario(t)
+
+	expect.Expect(t, theHeadingsOf(t, reported)).To(expect.Equal(declared))
+}
+
+// Node names are derived from the Topology, and the lab names each Pod it probes
+// a Node with after that Node, so every cluster of a run names those alike. The
+// names of a Workload's Pods are each control plane's own, which makes them what
+// shows whether one Scenario's record reached into another's cluster.
+func TestScenariosCarriedOutAtOnce_ShouldEachNameOnlyTheirOwnNodesAndPods(t *testing.T) {
+	t.Parallel()
+
+	reported := theRunOfEveryScenario(t)
+
+	expect.Expect(t, theClustersFiledPerScenario(t, reported)).To(expect.Equal(theClustersReportedPerScenario(t, reported)))
+	expect.Expect(t, thePodsFiledByMoreThanOneScenario(t, reported)).To(expect.HaveLen[string](noPodShared))
+}
+
+// theHeadingsOf are the Scenario headings of a report, in the order printed.
+func theHeadingsOf(t *testing.T, reported string) []string {
+	t.Helper()
+
+	var headings []string
+	for _, section := range theScenarioSectionsOf(t, reported) {
+		headings = append(headings, aScenarioHeading+theScenarioNamedIn(section))
+	}
+
+	return headings
+}
+
+// theClustersReportedPerScenario is the Simulated Cluster each Scenario's heading
+// names, and theClustersFiledPerScenario the one its filed Timeline names.
+func theClustersReportedPerScenario(t *testing.T, reported string) map[string]string {
+	t.Helper()
+
+	clusters := map[string]string{}
+	for _, section := range theScenarioSectionsOf(t, reported) {
+		heading, _, _ := strings.Cut(section, "\n")
+		_, cluster, _ := strings.Cut(heading, onACluster)
+		clusters[theScenarioNamedIn(section)] = cluster
+	}
+
+	return clusters
+}
+
+func theClustersFiledPerScenario(t *testing.T, reported string) map[string]string {
+	t.Helper()
+
+	clusters := map[string]string{}
+	for _, section := range theScenarioSectionsOf(t, reported) {
+		var header struct {
+			Cluster string `json:"cluster"`
+		}
+		filed := theTimelineFiledBy(t, section)
+		if err := json.Unmarshal([]byte(filed[0]), &header); err != nil {
+			t.Fatalf("read the header of the Timeline of %s: %v", theScenarioNamedIn(section), err)
+		}
+		clusters[theScenarioNamedIn(section)] = header.Cluster
+	}
+
+	return clusters
+}
+
+// thePodsFiledByMoreThanOneScenario are the Workload's Pods whose changes the
+// filed Timeline of more than one Scenario holds.
+func thePodsFiledByMoreThanOneScenario(t *testing.T, reported string) []string {
+	t.Helper()
+
+	filedBy := map[string]map[string]bool{}
+	for _, section := range theScenarioSectionsOf(t, reported) {
+		for _, line := range theTimelineFiledBy(t, section)[1:] {
+			var entry struct {
+				Kind string `json:"kind"`
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal([]byte(line), &entry); err != nil {
+				t.Fatalf("read an entry of the Timeline of %s: %v", theScenarioNamedIn(section), err)
+			}
+			if entry.Kind != string(scenario.PodObject) || !strings.HasPrefix(entry.Name, theWorkloadOfEveryScenario) {
+				continue
+			}
+			if filedBy[entry.Name] == nil {
+				filedBy[entry.Name] = map[string]bool{}
+			}
+			filedBy[entry.Name][theScenarioNamedIn(section)] = true
+		}
+	}
+
+	var shared []string
+	for pod, scenarios := range filedBy {
+		if len(scenarios) > 1 {
+			shared = append(shared, pod)
+		}
+	}
+
+	return shared
+}
+
+func TestASimulatedClusterTheRuntimeCannotStart_ShouldEndOnlyItsOwnScenario(t *testing.T) {
+	carried := []lab.Carried{aScenarioThatHeld(), aScenarioWhoseClusterDidNotStart()}
+
+	reported, err := whatTheRunReportsForEach(t, carried)
+
+	reportShows(t, reported, aScenarioHeading+theScenarioReported)
+	reportShows(t, reported, aThenStep().String())
+	reportShows(t, reported, aScenarioHeading+theScenarioNotStarted)
+	reportShows(t, reported, whyTheClusterDidNotStart)
+	expectNamed(t, err, whyTheClusterDidNotStart)
+	reportLacks(t, err.Error(), theScenarioReported)
+}
+
+func TestARunNamingOneScenario_ShouldReportItAsARunOfEveryScenarioReportsIt(t *testing.T) {
+	alone, _ := whatTheRunReportsForEach(t, []lab.Carried{aScenarioThatHeld()})
+	amongOthers, _ := whatTheRunReportsForEach(t, []lab.Carried{aScenarioThatHeld(), aScenarioWhoseClusterDidNotStart()})
+
+	expect.Expect(t, theScenarioSectionsOf(t, alone)[0]).To(expect.Equal(theScenarioSectionsOf(t, amongOthers)[0]))
+}
+
+// aScenarioThatHeld and aScenarioWhoseClusterDidNotStart are two Scenarios of one
+// run as the Runner hands them back: one that reported, and one the engine could
+// not start a Simulated Cluster for, which reported nothing of its own.
+func aScenarioThatHeld() lab.Carried {
+	return lab.Carried{Outcome: lab.Outcome{
+		Name: theScenarioReported, Cluster: itsCluster,
+		Steps:    []lab.Step{aThenStep()},
+		Timeline: aTimelineOfTwoChanges(),
+		FiledAt:  someTimelinePath,
+	}}
+}
+
+func aScenarioWhoseClusterDidNotStart() lab.Carried {
+	return lab.Carried{
+		Outcome: lab.Outcome{Name: theScenarioNotStarted},
+		Err:     errors.New(whyTheClusterDidNotStart),
+	}
+}
+
+// whatTheRunReportsForEach is what a run writes about every Scenario it carried
+// out, and the failure it exits with.
+func whatTheRunReportsForEach(t *testing.T, carried []lab.Carried) (string, error) {
+	t.Helper()
+
+	var reported bytes.Buffer
+	err := writeRun(&runReport{to: &reported}, carried, theSummaryAlone())
+
+	return reported.String(), err
+}
+
+// The Outcomes that TestAScenarioThatFailsPartWay_ and
+// TestATimelineThatCannotBeWritten_ report are built here rather than run,
 // because a Scenario whose Steps fail part-way cannot be written as a Scenario
 // source: the Scenarios' place holds the lab's own experiments, which pass.
 const (
@@ -537,6 +733,9 @@ const (
 	whatEndedTheScenario      = "apply " + aTopologyStepName + ": create Node zone-1-node-1: already exists"
 	whyTheTimelineWasNotFiled = "create the Timeline folder /read-only/timelines: permission denied"
 	someTimelinePath          = "/tmp/a-run/timelines/k8s-resilience-lab-resilient-placement-7f3a9c.jsonl"
+
+	theScenarioNotStarted    = "node-stops-responding"
+	whyTheClusterDidNotStart = "the Scenario " + theScenarioNotStarted + ": start the Simulated Cluster: port already allocated"
 )
 
 // The changes the Timelines above hold: a Node the Topology brought up, and the
@@ -559,6 +758,7 @@ const theScenarioRecorded = `"scenario":"` + theScenarioReported + `"`
 // What a Timeline is read out of a report by: the line it is reported under, and
 // where that line names the file it was filed at.
 const (
+	onACluster       = ", on "
 	timelineReported = "Timeline, "
 	entriesReported  = " entries"
 	filedAt          = ", filed at "

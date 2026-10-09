@@ -27,6 +27,11 @@ const (
 	// one Workload's Pods and an observation reads one Workload's Pods.
 	workloadLabel = "k8s-resilience-lab/workload"
 
+	// nodePoolLabel carries the name of a Node's NodePool, so one selector names
+	// one NodePool's Nodes. Every Node carries it, per
+	// docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md.
+	nodePoolLabel = "k8s-resilience-lab/node-pool"
+
 	// fakeNodeAnnotation marks a Node as one KWOK simulates, and fakeNodeLabel is
 	// the marking the KWOK controller is started to select the Nodes it maintains
 	// by (runtime.go manageMarkedNodesArgument). A Failure takes the label off its
@@ -149,19 +154,23 @@ func nodesHoldingRunningProbe(observed []corev1.Pod) []string {
 
 // toNode is the Node the lab creates for one Node of a Topology: a fake Node,
 // Ready at creation, reporting the capacity the Topology declared, and carrying
-// the Zone and hostname labels a spread rule's domain is read from.
+// the Zone and hostname labels a spread rule's domain is read from, and its
+// NodePool's name.
 //
 // The capacity is reported allocatable as well as whole, because the scheduler
 // fits the requests of the Pods it places against what a Node reports allocatable
 // and nothing of a Simulated Cluster's Node is reserved.
 func toNode(node scenario.Node) *corev1.Node {
+	labelled := map[string]string{
+		zoneLabel:     node.Zone,
+		hostnameLabel: node.Name,
+		nodePoolLabel: node.NodePool,
+		fakeNodeLabel: fakeNodeLabelValue,
+	}
+
 	return &corev1.Node{
-		Name: node.Name,
-		Labels: map[string]string{
-			zoneLabel:     node.Zone,
-			hostnameLabel: node.Name,
-			fakeNodeLabel: fakeNodeLabelValue,
-		},
+		Name:        node.Name,
+		Labels:      labelled,
 		Annotations: map[string]string{fakeNodeAnnotation: fakeNodeAnnotationValue},
 		Status: corev1.NodeStatus{
 			Capacity:    toResourceList(node.Capacity),
@@ -455,9 +464,9 @@ func isPodReady(pod corev1.Pod) bool {
 	return false
 }
 
-// fromNodes reads the Nodes of one observation. A Node's Zone comes from its Zone
-// label rather than from its name, so an observation reports what the control
-// plane holds and not what the Topology asked for.
+// fromNodes reads the Nodes of one observation. A Node's Zone and NodePool come
+// from its labels rather than from its name, so an observation reports what the
+// control plane holds and not what the Topology asked for.
 func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 	nodes := make([]scenario.Node, 0, len(observed))
 	for _, node := range observed {
@@ -469,6 +478,7 @@ func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 		nodes = append(nodes, scenario.Node{
 			Name:     node.Name,
 			Zone:     node.Labels[zoneLabel],
+			NodePool: node.Labels[nodePoolLabel],
 			Capacity: capacity,
 		})
 	}

@@ -2,8 +2,8 @@
 // provisions itself, and reports where each Workload's Pods landed.
 //
 // It is the composition root: it parses the one flag, resolves the container
-// engine once, and provisions one Simulated Cluster per Scenario in turn,
-// removing each when that Scenario ends.
+// engine once, and carries out every Scenario at once, each on a Simulated
+// Cluster of its own that is removed when that Scenario ends.
 package main
 
 import (
@@ -86,22 +86,16 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	// command names no Scenario, so adding one touches the Scenarios' place alone.
 	// Selecting one by name is REQ-SIM-003.
 	//
-	// What a Scenario found stops the run at that Scenario; a Timeline the lab
-	// could not write does not, so every later Scenario still runs and the run
-	// names each record it lost.
+	// They run at once and every one reaches its own outcome, so what one Scenario
+	// found stops no other. The report is written here, after every Scenario has
+	// ended and from this goroutine alone, in the order they are declared.
 	runner := lab.NewRunner(engine, asked.version, timeline.NewFolder(timelinesRoot))
-	var failures []error
-	for _, steps := range scenarios.All() {
-		unfiled, found := runScenario(ctx, runner, steps, reported, asked)
-		failures = append(failures, unfiled)
-		if found != nil {
-			failures = append(failures, found)
-
-			break
-		}
+	carried, err := runner.RunAtOnce(ctx, scenarios.All())
+	if err != nil {
+		return errors.Join(err, reported.err)
 	}
 
-	return errors.Join(append(failures, reported.err)...)
+	return errors.Join(writeRun(reported, carried, asked), reported.err)
 }
 
 // runSetting is what the lab's arguments resolve to: the Kubernetes version
@@ -142,24 +136,33 @@ func resolveVersion(named string) (cluster.KubernetesVersion, error) {
 	return cluster.ParseKubernetesVersion(named)
 }
 
-// runScenario runs one Scenario through the runner and reports the name it ran
-// under, the Steps it carried out, what it found, the Placement it settled at and
-// the Timeline its Simulated Cluster left. The run name is the runner's to
-// derive, so the command names no Scenario.
-//
-// It reports two failures apart: the Timeline the lab could not write, which
-// leaves this Scenario's outcome and every later Scenario as they are, and what
-// this Scenario found, which stops the run, per
+// writeRun reports every Scenario the run carried out, in the order handed
+// over, with each Scenario's lines together. It names every failure among them,
+// so the run exits non-zero for any of these: a Scenario the lab could not carry
+// out, a Timeline it could not write, a Step left undone or a Finding. A Timeline
+// the lab could not write leaves its Scenario's outcome as reported, per
 // docs/adr/2026-10-05-timeline-from-the-watch-stream.md.
-func runScenario(ctx context.Context, runner *lab.Runner, steps func(*lab.Scenario), report *runReport, asked runSetting) (unfiled, found error) {
-	outcome, err := runner.Run(ctx, steps)
-	if err != nil {
-		return nil, err
+func writeRun(report *runReport, carried []lab.Carried, asked runSetting) error {
+	var failures []error
+	for _, each := range carried {
+		writeCarried(report, each, asked)
+		failures = append(failures, each.Err, notFiled(each.Outcome), didNotHold(each.Outcome))
 	}
 
-	writeOutcome(report, outcome, asked)
+	return errors.Join(failures...)
+}
 
-	return notFiled(outcome), didNotHold(outcome)
+// writeCarried reports one Scenario of the run: everything its Outcome holds
+// where it reported one, and why it ended where it ended before reporting, such
+// as a Simulated Cluster the engine could not start.
+func writeCarried(report *runReport, carried lab.Carried, asked runSetting) {
+	if !carried.Reported() {
+		report.printf("\nScenario %s, ended before it reported: %v\n", carried.Outcome.Name, carried.Err)
+
+		return
+	}
+
+	writeOutcome(report, carried.Outcome, asked)
 }
 
 // writeOutcome reports everything one Scenario left. A Scenario that ended at a

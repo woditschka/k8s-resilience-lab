@@ -79,8 +79,11 @@ const (
 // Scenario names a Zone by a string its Givens do not derive.
 type Zones int
 
-// NodesPerZone is how many Nodes a Topology Step declares in each of its Zones.
+// NodesPerZone is how many Nodes a NodePool holds in each Zone of a Topology Step.
 type NodesPerZone int
+
+// NodePoolName is the name a NodePool's Nodes carry as a label.
+type NodePoolName string
 
 // Pods is a count of Pods: what a Workload Step declares, or what one Node holds.
 type Pods int
@@ -488,17 +491,20 @@ type Given struct {
 	scenario *Scenario
 }
 
-// Topology declares the Zones the Scenario provisions and the Nodes in each of
-// them, every Node holding the lab's own default capacity. A further call names
-// another capacity.
-func (g Given) Topology(zones Zones, nodesPerZone NodesPerZone) DeclaredTopology {
-	declared := DeclaredTopology{scenario: g.scenario, zones: zones, nodesPerZone: nodesPerZone}
+// Topology declares the Zones the Scenario provisions and the NodePools every one
+// of them holds, in the order they are written, per
+// docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md.
+//
+// A line holding no NodePool is refused here and ends the Scenario at it, as does
+// any refusal a NodePool carries.
+func (g Given) Topology(zones Zones, pools ...DeclaredNodePool) DeclaredTopology {
+	declared := DeclaredTopology{scenario: g.scenario, zones: zones, pools: slices.Clone(pools)}
 	step, open := g.scenario.record(GivenStep, declared.named())
 	if !open {
 		return declared
 	}
 
-	return declared.declareHolding(step, scenario.DefaultNodeCapacity())
+	return declared.declareNodePools(step)
 }
 
 // Workload declares the Pod replicas the Scenario deploys: how many, under the
@@ -582,61 +588,17 @@ func (d DeclaredWorkload) named() string {
 }
 
 // DeclaredTopology is the Topology one Given line declared. It is complete as it
-// stands, and a further call declares the same line again at another capacity, so
-// no half-built Topology ever exists (docs/architecture-principles.md
+// stands, so no half-built Topology ever exists (docs/architecture-principles.md
 // § Construction and update).
 type DeclaredTopology struct {
-	scenario     *Scenario
-	zones        Zones
-	nodesPerZone NodesPerZone
+	scenario *Scenario
+	zones    Zones
+	pools    []DeclaredNodePool
 }
 
-// NodeCapacity declares this line's Topology again, with every Node holding the
-// cpu and memory named rather than the default. The scheduler places a Workload's
-// Pods by what they ask for against those two, so a Scenario states both. The Pod
-// count comes last and may be left out, which keeps the lab's own: a Scenario
-// states it where the room for Pods is the bound it is about.
-//
-// One count or none is a Pod count; two are a line that could not name itself, so
-// the Scenario ends at the Topology line as it was declared.
-func (d DeclaredTopology) NodeCapacity(cpu scenario.CPU, memory scenario.Memory, pods ...Pods) DeclaredTopology {
-	if d.scenario.cause != nil {
-		return d
-	}
-	if len(pods) > 1 {
-		d.scenario.end(d.scenario.rename(d.named()), fmt.Errorf(
-			"a Topology states one Pod count for its Nodes or none, so %d counts are refused", len(pods)))
-
-		return d
-	}
-
-	step := d.scenario.rename(d.holding(cpu, memory, pods))
-
-	capacity, err := scenario.NewNodeCapacity(podsHeld(pods), cpu, memory)
-	if err != nil {
-		d.scenario.end(step, err)
-
-		return d
-	}
-
-	return d.declareHolding(step, capacity)
-}
-
-// holding is how a Topology line reads once it states the capacity its Nodes
-// hold: the cpu, then the memory, then the Pod count where the line states one,
-// which is the order every reported capacity names (docs/system-design.md).
-func (d DeclaredTopology) holding(cpu scenario.CPU, memory scenario.Memory, pods []Pods) string {
-	if len(pods) == 0 {
-		return fmt.Sprintf("%s holding %s cpu and %s memory each", d.named(), cpu, memory)
-	}
-
-	return fmt.Sprintf("%s holding %s cpu, %s memory and %s each",
-		d.named(), cpu, memory, counted(int(pods[0]), "Pod", "Pods"))
-}
-
-// podsHeld is the Pod count a Topology line states its Nodes hold, or the lab's
-// own where the line states none. The default has one home, the domain's, so the
-// lab names no count of its own.
+// podsHeld is the Pod count a NodePool states its Nodes hold, or the lab's own
+// where it states none. The default has one home, the domain's, so the lab names
+// no count of its own.
 func podsHeld(pods []Pods) int {
 	if len(pods) == 0 {
 		return scenario.DefaultNodeCapacity().Pods()
@@ -645,12 +607,30 @@ func podsHeld(pods []Pods) int {
 	return int(pods[0])
 }
 
-// declareHolding constructs the Topology this line names, at the capacity its
-// Nodes hold, and ends the Scenario at step when that constructor refuses it.
-func (d DeclaredTopology) declareHolding(step Step, capacity scenario.NodeCapacity) DeclaredTopology {
-	topology, err := scenario.NewTopology(int(d.zones), int(d.nodesPerZone), capacity)
-	if err != nil {
-		d.scenario.end(step, err)
+// declareNodePools constructs the Topology of the NodePools this line names, and
+// ends the Scenario at step on the first refusal: a NodePool the domain refused
+// where it was written, or the Topology the domain refuses.
+func (d DeclaredTopology) declareNodePools(step Step) DeclaredTopology {
+	pools := make([]scenario.NodePool, 0, len(d.pools))
+	for _, pool := range d.pools {
+		if pool.refused != nil {
+			d.scenario.end(step, pool.refused)
+
+			return d
+		}
+		pools = append(pools, pool.declared)
+	}
+
+	topology, err := scenario.NewTopology(int(d.zones), pools...)
+
+	return d.declare(step, topology, err)
+}
+
+// declare makes topology the one this Scenario declared, or ends the Scenario at
+// step with the refusal its constructor gave.
+func (d DeclaredTopology) declare(step Step, topology scenario.Topology, refused error) DeclaredTopology {
+	if refused != nil {
+		d.scenario.end(step, refused)
 
 		return d
 	}
@@ -664,10 +644,107 @@ func (d DeclaredTopology) WaitFor() TopologyWait {
 	return TopologyWait{scenario: d.scenario}
 }
 
-// named is how this line reads in a report.
+// named is how this line reads in a report: its Zones, then each NodePool in
+// declaration order.
 func (d DeclaredTopology) named() string {
-	return fmt.Sprintf("a Topology of %s of %s",
-		counted(int(d.zones), "Zone", "Zones"), counted(int(d.nodesPerZone), "Node", "Nodes"))
+	if len(d.pools) == 0 {
+		return fmt.Sprintf("a Topology of %s of no NodePool", counted(int(d.zones), "Zone", "Zones"))
+	}
+
+	held := make([]string, 0, len(d.pools))
+	for _, pool := range d.pools {
+		held = append(held, pool.reads())
+	}
+
+	return fmt.Sprintf("a Topology of %s of %s", counted(int(d.zones), "Zone", "Zones"), strings.Join(held, "; "))
+}
+
+// NodePool declares one NodePool every Zone of a Topology holds: nodesPerZone
+// identical Nodes under name, which they carry as a label, at the lab's own
+// capacity until a further call names another. It is written as an argument of
+// the Topology line, which ends the Scenario with any refusal the NodePool
+// carries.
+func NodePool(name NodePoolName, nodesPerZone NodesPerZone) DeclaredNodePool {
+	labs := scenario.DefaultNodeCapacity()
+
+	return DeclaredNodePool{
+		name:         name,
+		nodesPerZone: nodesPerZone,
+		cpu:          labs.CPU(),
+		memory:       labs.Memory(),
+		pods:         Pods(labs.Pods()),
+	}.declare()
+}
+
+// DeclaredNodePool is one NodePool as a Topology line states it. It is complete
+// as it stands, and each further call declares it again with one more attribute,
+// so no half-built NodePool ever exists (docs/architecture-principles.md
+// § Construction and update).
+//
+// It carries the immutable domain value, or the first refusal the domain gave
+// it, since a further call returns no error of its own: the Topology line is
+// where the refusal ends the Scenario, as a refused Pod specification is carried
+// to its Workload line. The stated name and capacity are kept beside the value
+// so the line names what was written, refused or not.
+type DeclaredNodePool struct {
+	nodesPerZone NodesPerZone
+	name         NodePoolName
+	cpu          scenario.CPU
+	memory       scenario.Memory
+	pods         Pods
+
+	declared scenario.NodePool
+	refused  error
+}
+
+// NodeCapacity declares this NodePool again with every Node holding the cpu and
+// memory named, and the Pod count last or not at all, which keeps the lab's own.
+// The scheduler places a Workload's Pods by what they ask for against cpu and
+// memory, so a Scenario states both; it states the Pod count where the room for
+// Pods is the bound it is about.
+func (p DeclaredNodePool) NodeCapacity(cpu scenario.CPU, memory scenario.Memory, pods ...Pods) DeclaredNodePool {
+	stated := p
+	if len(pods) > 1 && stated.refused == nil {
+		stated.refused = fmt.Errorf("a NodePool states one Pod count for its Nodes or none, so %d counts are refused",
+			len(pods))
+
+		return stated
+	}
+	stated.cpu, stated.memory, stated.pods = cpu, memory, Pods(podsHeld(pods))
+
+	return stated.declare()
+}
+
+// declare constructs the domain NodePool this value states, keeping the first
+// refusal where one was already given.
+func (p DeclaredNodePool) declare() DeclaredNodePool {
+	if p.refused != nil {
+		return p
+	}
+
+	capacity, err := scenario.NewNodeCapacity(int(p.pods), p.cpu, p.memory)
+	if err != nil {
+		p.refused = err
+
+		return p
+	}
+	pool, err := scenario.NewNodePool(string(p.name), int(p.nodesPerZone), capacity)
+	if err != nil {
+		p.refused = err
+
+		return p
+	}
+	p.declared = pool
+
+	return p
+}
+
+// reads names the NodePool by its name, its Node count per Zone, and all three
+// dimensions of its capacity, cpu, memory and Pod count, the order every
+// reported capacity names (docs/system-design.md).
+func (p DeclaredNodePool) reads() string {
+	return fmt.Sprintf("a NodePool %s of %s holding %s cpu, %s memory and %s each", p.name,
+		counted(int(p.nodesPerZone), "Node", "Nodes"), p.cpu, p.memory, counted(int(p.pods), "Pod", "Pods"))
 }
 
 // TopologyWait is what the WaitFor of a Topology line opens, and WorkloadWait

@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -73,8 +75,23 @@ func (s *Scenario) outcome() Outcome {
 	}
 }
 
-// Runner runs the lab's Scenarios one at a time, on the engine a run resolved
-// once and for the Kubernetes version that run mirrors.
+// Carried is what carrying out one Scenario of a run left: the Outcome it
+// reported, and Err, the lab's own failure while carrying it out. That failure
+// is a cluster the lab could not provision, watch or remove, or a panic. A
+// Scenario that ended before it reported leaves an Outcome naming it alone.
+type Carried struct {
+	Outcome Outcome
+	Err     error
+}
+
+// Reported reports whether the Scenario ran on its Simulated Cluster far enough
+// to report an Outcome of its own.
+func (c Carried) Reported() bool {
+	return c.Outcome.Cluster != ""
+}
+
+// Runner runs the lab's Scenarios, each on its own Simulated Cluster, on the
+// engine a run resolved once and for the Kubernetes version that run mirrors.
 type Runner struct {
 	engine    cluster.Endpoint
 	version   cluster.KubernetesVersion
@@ -106,16 +123,101 @@ func NewRunner(engine cluster.Endpoint, version cluster.KubernetesVersion, timel
 // provisioned, so no Simulated Cluster is ever named after nothing. What the
 // Scenario found is the Outcome, which a caller reports whether or not the
 // removal succeeded.
-func (r *Runner) Run(ctx context.Context, steps func(*Scenario)) (reported Outcome, err error) {
+func (r *Runner) Run(ctx context.Context, steps func(*Scenario)) (Outcome, error) {
 	name, err := runNameOfScenario(steps)
 	if err != nil {
 		return Outcome{}, err
 	}
 
+	return r.runNamed(ctx, name, steps)
+}
+
+// RunAtOnce carries out every Scenario given at once, each through Run's own
+// steps in a goroutine of its own, and hands back what each left in the order
+// given once every one has ended, per
+// docs/adr/2026-10-04-cluster-per-scenario.md.
+//
+// It derives every run name before it provisions anything, so a name it cannot
+// derive stops the run before any Simulated Cluster exists, as it does for Run.
+// It then obtains the run's Kubernetes version once, so a version the lab cannot
+// obtain stops the run, naming it, before any Scenario starts (docs/prd.md
+// REQ-SIM-001 edge case 4). Past that, one Scenario's failure is its own: a
+// cluster the engine cannot start, a Step left undone or a panic ends that
+// Scenario alone.
+func (r *Runner) RunAtOnce(ctx context.Context, scenarios []func(*Scenario)) ([]Carried, error) {
+	names := make([]string, 0, len(scenarios))
+	for _, steps := range scenarios {
+		name, err := runNameOfScenario(steps)
+		if err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+
+	if err := cluster.ObtainVersion(ctx, r.engine, r.version); err != nil {
+		return nil, err
+	}
+
+	return carryOutAtOnce(names, func(declared int) (Outcome, error) {
+		return r.runNamed(ctx, names[declared], scenarios[declared])
+	}), nil
+}
+
+// carryOutAtOnce carries out each Scenario named in a goroutine of its own and
+// hands back what each left, in the order named, once every goroutine has
+// ended. Each goroutine writes only its own element, and the join is what makes
+// those writes visible to the caller, so the report is written after it from
+// one goroutine alone.
+func carryOutAtOnce(names []string, carryOut func(declared int) (Outcome, error)) []Carried {
+	carried := make([]Carried, len(names))
+
+	var each sync.WaitGroup
+	for declared, name := range names {
+		each.Go(func() {
+			defer recoverInto(&carried[declared], name)
+
+			outcome, err := carryOut(declared)
+			carried[declared] = Carried{Outcome: outcome, Err: err}
+		})
+	}
+	each.Wait()
+
+	return carried
+}
+
+// recoverInto turns a panic of the Scenario named into what that Scenario left.
+// It runs as the goroutine unwinds, after Run's own deferred removal, so the
+// Scenario's cluster is gone and the other Scenarios run on. A panic left to
+// cross the goroutine would end the process before their removals ran,
+// leaking their containers. The stack is kept, because a panic is a defect of
+// the lab or of a Scenario and the stack is where it is found.
+func recoverInto(carried *Carried, name string) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+
+	*carried = Carried{
+		Outcome: Outcome{Name: name},
+		Err:     fmt.Errorf("the Scenario %s panicked: %v\n%s", name, recovered, debug.Stack()),
+	}
+}
+
+// runNamed is Run for a Scenario whose run name is already derived. Every
+// Outcome it returns names the Scenario, including one it hands back with the
+// lab's own error before the Scenario reported.
+func (r *Runner) runNamed(ctx context.Context, name string, steps func(*Scenario)) (reported Outcome, err error) {
 	provisioned, err := cluster.Provision(ctx, r.engine, r.version, name)
 	if err != nil {
-		return Outcome{}, fmt.Errorf("the Scenario %s: %w", name, err)
+		return Outcome{Name: name}, fmt.Errorf("the Scenario %s: %w", name, err)
 	}
+
+	filed := r.timelines.Open(timeline.Header{
+		Scenario: name, Cluster: provisioned.Name(), Kubernetes: r.version.String(),
+	})
+	// Deferred before the removal below, so it runs after it: the removal stops the
+	// recording, and a recording that outlives the file would write into a closed one.
+	defer filed.Close()
 
 	// The removal is deferred here rather than left to the Scenario, so a Scenario
 	// that ends part-way through its Steps still loses its cluster, per
@@ -128,13 +230,8 @@ func (r *Runner) Run(ctx context.Context, steps func(*Scenario)) (reported Outco
 		}
 	}()
 
-	filed := r.timelines.Open(timeline.Header{
-		Scenario: name, Cluster: provisioned.Name(), Kubernetes: r.version.String(),
-	})
-	defer filed.Close()
-
 	if err := provisioned.Record(ctx, filed); err != nil {
-		return Outcome{}, err
+		return Outcome{Name: name}, err
 	}
 
 	running := newScenario(ctx, provisioned)

@@ -1,14 +1,19 @@
-// The tests in this file drive the name a Scenario runs under. It comes from the
-// file the Scenario's function is defined in, so no run input reaches it and no
-// Scenario carries a name of its own. They reach no engine: a name that cannot be
-// derived stops the run before a Simulated Cluster is provisioned, which is the
-// one path through the Runner that needs none.
+// The tests in this file drive the name a Scenario runs under, and how a run
+// carries out its Scenarios at once. The name comes from the file the
+// Scenario's function is defined in, so no run input reaches it and no Scenario
+// carries a name of its own. They reach no engine: a name that cannot be derived
+// stops the run before a Simulated Cluster is provisioned, and carrying out
+// Scenarios at once is driven with functions in memory, because a Scenario
+// defined beside a test has no run name (docs/system-design.md, lab.Runner).
 package lab
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
@@ -96,4 +101,167 @@ func TestAFunctionOfNoScenarioFile_ShouldStopTheRunNamingTheFunctionAndTheFile(t
 	if !strings.Contains(err.Error(), theTestFileHoldingIt) {
 		t.Errorf("the run names the file it could derive no name from, but reads: %v", err)
 	}
+}
+
+func TestARunListingAFunctionOfNoScenarioFile_ShouldStopBeforeCarryingOutAnyScenario(t *testing.T) {
+	running := aRunnerReachingNoEngine(t)
+
+	carried, err := running.RunAtOnce(t.Context(), []func(*Scenario){aScenarioDefinedBesideThisTest})
+
+	if err == nil {
+		t.Fatalf("a function the lab can locate no Scenario file for stops the run, but it carried out: %+v", carried)
+	}
+	if !strings.Contains(err.Error(), theScenarioOfATestFile) {
+		t.Errorf("the run names the function it could derive no name for, but reads: %v", err)
+	}
+}
+
+// threeScenariosOfARun are the run names the Scenarios carried out at once below
+// run under. Which names they are bears on nothing; that there are several, each
+// distinct, is what a run carrying them out at once is judged by.
+var threeScenariosOfARun = []string{"some-scenario", "another-scenario", "a-third-scenario"}
+
+// longerThanCarryingThemOutTakes bounds how long a Scenario below waits for the
+// others. Carried out at once they meet within milliseconds; carried out one
+// after another they never meet, and the deadline is what turns that into a
+// failing test rather than a hung one.
+const longerThanCarryingThemOutTakes = 10 * time.Second
+
+// noScenarioWentWrong is how many Scenarios a run that carried out every one to
+// its end names as having gone wrong.
+const noScenarioWentWrong = 0
+
+func TestARunOfEveryScenario_ShouldStartEachScenarioWithoutWaitingForAnotherToEnd(t *testing.T) {
+	t.Parallel()
+	eachWaitingForTheOthers := aMeetingOfEveryScenario(t, len(threeScenariosOfARun))
+
+	carried := carryOutAtOnce(threeScenariosOfARun, eachWaitingForTheOthers)
+
+	expect.Expect(t, theScenariosThatWentWrongIn(carried)).To(expect.HaveLen[string](noScenarioWentWrong))
+}
+
+func TestARunOfEveryScenario_ShouldHandBackEachOutcomeInDeclaredOrderWhateverOrderTheyFinishedIn(t *testing.T) {
+	t.Parallel()
+	lastDeclaredFinishingFirst := aRunFinishingInReverse(t, threeScenariosOfARun)
+
+	carried := carryOutAtOnce(threeScenariosOfARun, lastDeclaredFinishingFirst)
+
+	expect.Expect(t, theNamesReportedIn(carried)).To(expect.Equal(threeScenariosOfARun))
+}
+
+func TestAScenarioThatFailsPartWayAmongOthers_ShouldLeaveTheOthersToReachTheirOwnOutcome(t *testing.T) {
+	t.Parallel()
+	thePanickingScenario := threeScenariosOfARun[1]
+
+	carried := carryOutAtOnce(threeScenariosOfARun, oneOfThemPanicking(threeScenariosOfARun, thePanickingScenario))
+
+	expect.Expect(t, theNamesReportedIn(carried)).To(expect.Equal(threeScenariosOfARun))
+	expect.Expect(t, theScenariosThatWentWrongIn(carried)).To(expect.Equal([]string{thePanickingScenario}))
+	expect.Expect(t, strings.Contains(theFailureOf(carried, thePanickingScenario), whatThePanicSaid)).To(expect.Equal(true))
+}
+
+// whatThePanicSaid is the value a Scenario panics with above, which the run
+// names so a reader can find what panicked.
+const whatThePanicSaid = "a Step's own code panicked"
+
+// oneOfThemPanicking carries out the Scenario named panicking by panicking, and
+// every other Scenario by reporting an Outcome under its own name.
+func oneOfThemPanicking(named []string, panicking string) func(int) (Outcome, error) {
+	return func(declared int) (Outcome, error) {
+		if named[declared] == panicking {
+			panic(whatThePanicSaid)
+		}
+
+		return Outcome{Name: named[declared]}, nil
+	}
+}
+
+// aMeetingOfEveryScenario carries out a Scenario by waiting until every one of
+// the run has started, so it ends only when they all run at once. One that waits
+// past the deadline ends naming why.
+func aMeetingOfEveryScenario(t *testing.T, scenarios int) func(int) (Outcome, error) {
+	t.Helper()
+
+	ctx, stop := context.WithTimeout(t.Context(), longerThanCarryingThemOutTakes)
+	t.Cleanup(stop)
+
+	var started sync.WaitGroup
+	started.Add(scenarios)
+	everyOneStarted := make(chan struct{})
+	go func() {
+		started.Wait()
+		close(everyOneStarted)
+	}()
+
+	return func(int) (Outcome, error) {
+		started.Done()
+		select {
+		case <-everyOneStarted:
+			return Outcome{}, nil
+		case <-ctx.Done():
+			return Outcome{}, context.Cause(ctx)
+		}
+	}
+}
+
+// aRunFinishingInReverse carries out each Scenario by waiting for the one
+// declared after it to finish, so the last declared finishes first and the first
+// declared last.
+func aRunFinishingInReverse(t *testing.T, named []string) func(int) (Outcome, error) {
+	t.Helper()
+
+	ctx, stop := context.WithTimeout(t.Context(), longerThanCarryingThemOutTakes)
+	t.Cleanup(stop)
+
+	finished := make([]chan struct{}, len(named)+1)
+	for declared := range finished {
+		finished[declared] = make(chan struct{})
+	}
+	close(finished[len(named)])
+
+	return func(declared int) (Outcome, error) {
+		defer close(finished[declared])
+		select {
+		case <-finished[declared+1]:
+			return Outcome{Name: named[declared]}, nil
+		case <-ctx.Done():
+			return Outcome{Name: named[declared]}, context.Cause(ctx)
+		}
+	}
+}
+
+// theNamesReportedIn are the run names of what a run carried out, in the order
+// it handed them back.
+func theNamesReportedIn(carried []Carried) []string {
+	named := make([]string, 0, len(carried))
+	for _, each := range carried {
+		named = append(named, each.Outcome.Name)
+	}
+
+	return named
+}
+
+// theScenariosThatWentWrongIn are the run names of the Scenarios the lab could
+// not carry out to their end.
+func theScenariosThatWentWrongIn(carried []Carried) []string {
+	var wentWrong []string
+	for _, each := range carried {
+		if each.Err != nil {
+			wentWrong = append(wentWrong, each.Outcome.Name)
+		}
+	}
+
+	return wentWrong
+}
+
+// theFailureOf is what the run names as having gone wrong for the Scenario
+// named, and empty where nothing did.
+func theFailureOf(carried []Carried, named string) string {
+	for _, each := range carried {
+		if each.Outcome.Name == named && each.Err != nil {
+			return each.Err.Error()
+		}
+	}
+
+	return ""
 }
