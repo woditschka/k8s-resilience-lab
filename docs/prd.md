@@ -136,17 +136,33 @@ Customizations change a copy of the declared specification before deployment, in
 
 **ADR:** [ADR: A Workload declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md) · [ADR: A Scenario's Workload declares the spread of its own Pods](adr/2026-10-04-scenario-declared-pod-spread.md)  ·  **Design:** [system-design.md](system-design.md)
 
+### Stating what decides a Placement
+
+<a id="req-sim-015"></a>
+Every value that decides a Placement stands on a Scenario's own lines, stated there or named there `[REQ-SIM-015]`. A name stands for values the Scenarios define once, beside the Scenarios that use it, so a reader finds them next to the Scenario `[REQ-SIM-015]`. The lab holds no such value of its own and gives none silently `[REQ-SIM-015]`. A NodePool therefore states its Node capacity or names a Named Node capacity, as REQ-SIM-011 states `[REQ-SIM-015]`. The lab's Scenarios define one, Standard, and each further one arrives with the first Scenario that uses it `[REQ-SIM-015]`. The Topology's Given line reports what each name stands for, from the definition the Scenario hands the lab `[REQ-SIM-015]`. Every predefined Pod specification names its own Startup time, as REQ-SIM-012 states `[REQ-SIM-015]`. The lab keeps its own two waiting times, reported once when a run starts `[REQ-SIM-015]`. These are the waiting time of a Wait stating none and the waiting time before Pods leave an unresponsive Node `[REQ-SIM-015]`. A Pod stating no Request asks for nothing, as Kubernetes means it, and the lab picks no value for it `[REQ-SIM-015]`.
+
+**Done when:**
+
+- `[REQ-SIM-015]` given a NodePool stating no Node capacity, when it is declared, then it is refused where it is stated.
+- `[REQ-SIM-015]` given a Named Node capacity a Scenario defines under a name of its own, when a NodePool names it, then its Nodes get, and its Topology's Given line reports, the cpu, memory and Pod count that definition gives.
+- `[REQ-SIM-015]` given the Named Node capacities the lab's Scenarios name, when their sources are read, then each is defined once beside them and the lab defines none.
+- `[REQ-SIM-015]` given every Scenario of the lab, when it runs, then each NodePool states its Node capacity or names Standard, and the outcome stays as asserted before.
+- `[REQ-SIM-015]` given every predefined Pod specification, when its definition is read, then it names its own Startup time.
+- `[REQ-SIM-015]` given any run, when it starts, then it reports the lab's own two waiting times, and no Node capacity or Startup time of its own.
+
+**Design:** [system-design.md](system-design.md)
+
 ### Fitting a Workload's Pods onto the Nodes
 
 <a id="req-sim-011"></a>
-A Node has room for only so much, and a Pod asks for a share of it `[REQ-SIM-011]`. A NodePool states its Nodes' Node capacity, or keeps the lab's own default, and every run reports it `[REQ-SIM-011]`. A Pod specification may hold a Request; one stating none asks for nothing, as every Scenario of the lab does `[REQ-SIM-011]`. A Pod no Node has room for stays Pending `[REQ-SIM-011]`. A Failure therefore leaves a Workload the room on the Nodes still responding, not those Nodes alone `[REQ-SIM-011]`. No room after a Zone stops responding demonstrates it: losing a Zone costs the spare Pods and not the Required Capacity `[REQ-SIM-011]`.
+A Node has room for only so much, and a Pod asks for a share of it `[REQ-SIM-011]`. A NodePool states its Nodes' Node capacity, directly or by a Named Node capacity, and every run reports it `[REQ-SIM-011]`. A Pod specification may hold a Request; one stating none asks for nothing, as every Scenario of the lab does `[REQ-SIM-011]`. A Pod no Node has room for stays Pending `[REQ-SIM-011]`. A Failure therefore leaves a Workload the room on the Nodes still responding, not those Nodes alone `[REQ-SIM-011]`. No room after a Zone stops responding demonstrates it: losing a Zone costs the spare Pods and not the Required Capacity `[REQ-SIM-011]`.
 
 **Done when:**
 
 - `[REQ-SIM-011]` given a NodePool stating its Nodes' cpu, memory and Pod count, when it is provisioned, then every Node of it has that capacity and the run reports it in that order.
-- `[REQ-SIM-011]` given a NodePool stating the cpu and memory alone, when it is provisioned, then its Nodes hold the lab's own Pod count and the run reports it.
-- `[REQ-SIM-011]` given a NodePool stating no Pod count, when its Topology's Given line is reported, then that line names its cpu and memory alone.
-- `[REQ-SIM-011]` given a NodePool stating no Node capacity, when it is provisioned, then its Nodes have the lab's own default Pod count, cpu and memory.
+- `[REQ-SIM-011]` given a NodePool stating the cpu and memory alone, when it is declared, then it is refused where it is stated.
+- `[REQ-SIM-011]` given a NodePool naming Standard, when its Topology's Given line is reported, then that line names Standard and the cpu, memory and Pod count it stands for.
+- `[REQ-SIM-011]` given a NodePool naming Standard, when it is provisioned, then its Nodes have the cpu, memory and Pod count Standard stands for.
 - `[REQ-SIM-011]` given a Workload whose specification states a Request, when the settings its Pods were deployed with are read back, then that Request stands under the name Kubernetes gives it.
 - `[REQ-SIM-011]` given a Workload whose specification states no Request, when its Pods are placed, then they ask for no cpu and no memory and the spread alone decides the Placement.
 - `[REQ-SIM-011]` given a Workload requesting more cpu than its Topology has room for, when the Placement settles, then the Pods that fit are Running and the rest stay Pending.
@@ -156,7 +172,7 @@ A Node has room for only so much, and a Pod asks for a share of it `[REQ-SIM-011
 
 **Edge cases:**
 
-1. A NodePool states a Node capacity of no Pod, of no cpu, or of no memory. It is refused where it is stated, so a Node always has room for a Pod that asks for something. An omitted Pod count is no such statement, and keeps the lab's own count.
+1. A NodePool states a Node capacity of no Pod, of no cpu, or of no memory. It is refused where it is stated, so a Node always has room for a Pod that asks for something. A capacity omitting its Pod count is refused as well.
 2. A Workload's Request is larger than any one Node of its Topology has room for. Every Pod of that Workload stays Pending.
 3. A Request leaves a Node room for fewer Pods than its Node capacity names. The tighter of the two bounds decides, and the Pod count never comes into it.
 4. A Customization written after a Request states another one. The later Request stands, as a later setting of any kind does.
@@ -166,7 +182,7 @@ A Node has room for only so much, and a Pod asks for a share of it `[REQ-SIM-011
 ### Holding Nodes of different kinds in a Zone
 
 <a id="req-sim-013"></a>
-A real cluster seldom runs one kind of machine, so a Zone holds NodePools of identical Nodes, the same NodePools in every Zone `[REQ-SIM-013]`. A Topology states its Zone count and its NodePools, and nothing else `[REQ-SIM-013]`. Every NodePool states its name, its Node count and its Node capacity, the capacity defaulting as REQ-SIM-011 states `[REQ-SIM-013]`. Every Node belongs to exactly one NodePool and carries its name as a label `[REQ-SIM-013]`. Node names stay positional as REQ-SIM-001 states `[REQ-SIM-013]`. NodePools of different capacity decide where Pods land `[REQ-SIM-013]`.
+A real cluster seldom runs one kind of machine, so a Zone holds NodePools of identical Nodes, the same NodePools in every Zone `[REQ-SIM-013]`. A Topology states its Zone count and its NodePools, and nothing else `[REQ-SIM-013]`. Every NodePool states its name, its Node count and its Node capacity, as REQ-SIM-011 states `[REQ-SIM-013]`. Every Node belongs to exactly one NodePool and carries its name as a label `[REQ-SIM-013]`. Node names stay positional as REQ-SIM-001 states `[REQ-SIM-013]`. NodePools of different capacity decide where Pods land `[REQ-SIM-013]`.
 
 **Done when:**
 
@@ -182,7 +198,7 @@ A real cluster seldom runs one kind of machine, so a Zone holds NodePools of ide
 1. A NodePool of no Node. It is refused where it is stated.
 2. Two NodePools of one Topology under the same name. They are refused where they are stated, since one NodePool's Nodes could not be told from the other's.
 3. A NodePool name Kubernetes cannot hold as a label value. It is refused where it is stated.
-4. A NodePool stating no Node capacity. Its Nodes take the lab's own default, as REQ-SIM-011 states.
+4. A NodePool stating no Node capacity. It is refused where it is stated, as REQ-SIM-011 states.
 5. A NodePool stating no name, or a Topology stating no NodePool. It is refused where it is stated.
 
 **Design:** [system-design.md](system-design.md)
@@ -190,17 +206,17 @@ A real cluster seldom runs one kind of machine, so a Zone holds NodePools of ide
 ### Starting a Workload's Pods
 
 <a id="req-sim-012"></a>
-A real Pod takes time to become Ready, and a Workload replacing Pods after a Failure stays short of them meanwhile `[REQ-SIM-012]`. Every placed Pod therefore takes a Startup time, counted Pending on its Node until it is Ready `[REQ-SIM-012]`. A Pod replacing one lost in a Failure counts from its own placement `[REQ-SIM-012]`. The lab's own Startup time holds unless a Customization states another, in whole seconds `[REQ-SIM-012]`. It states one time, or a shortest and a longest between which each Pod takes its own, both included `[REQ-SIM-012]`. It is the one Customization that is no Kubernetes setting `[REQ-SIM-012]`.
+A real Pod takes time to become Ready, and a Workload replacing Pods after a Failure stays short of them meanwhile `[REQ-SIM-012]`. Every placed Pod therefore takes a Startup time, counted Pending on its Node until it is Ready `[REQ-SIM-012]`. A Pod replacing one lost in a Failure counts from its own placement `[REQ-SIM-012]`. Every predefined Pod specification names its own Startup time, a shortest and a longest both above zero, so each Pod takes its own and none is Ready at placement `[REQ-SIM-012]`. A Customization may state another, in whole seconds or whole milliseconds `[REQ-SIM-012]`. A Customization states one time, or a shortest and a longest between which each Pod takes its own, both included `[REQ-SIM-012]`. It is the one Customization that is no Kubernetes setting `[REQ-SIM-012]`.
 
 **Done when:**
 
-- `[REQ-SIM-012]` given a Workload whose specification states no Startup time, when its Pods are placed, then no Pod is Ready sooner than the lab's own Startup time after its placement.
-- `[REQ-SIM-012]` given a Workload customized with one Startup time, when its Pods are placed, then no Pod is Ready sooner than that time after its placement.
+- `[REQ-SIM-012]` given a Workload customizing no Startup time, when its Pods are placed, then each Pod is Ready between its specification's shortest and longest Startup time.
+- `[REQ-SIM-012]` given a Workload customized with one Startup time, in whole seconds or whole milliseconds, when its Pods are placed, then no Pod is Ready sooner than that time after its placement.
 - `[REQ-SIM-012]` given a Workload customized with a shortest and a longest Startup time, when its Pods are placed, then each Pod is Ready between the two after its placement.
 - `[REQ-SIM-012]` given a placed Pod inside its Startup time, when the Placement is reported, then that Pod is counted Pending on its Node, and the Placement is not yet Settled.
-- `[REQ-SIM-012]` given two Customizations of one Workload each stating a Startup time, when its Pods are placed, then they take the later one.
-- `[REQ-SIM-012]` given one Workload customized its Startup time, when a second Workload declares the same specification, then its Pods take the lab's own Startup time.
-- `[REQ-SIM-012]` given any run, when it starts, then it reports the lab's own Startup time.
+- `[REQ-SIM-012]` given two Customizations of one Workload each stating a Startup time, one in seconds and one in milliseconds, when its Pods are placed, then they take the later one.
+- `[REQ-SIM-012]` given one Workload customized its Startup time, when a second Workload declares the same specification, then its Pods take that specification's own Startup time.
+- `[REQ-SIM-012]` given a Workload declaring a predefined specification, when the run reports it, then it names the shortest and longest Startup time that specification holds.
 - `[REQ-SIM-012]` given every Scenario of the lab, when it runs, then it reaches the outcome it asserted before Pods took a Startup time.
 
 **Edge cases:**

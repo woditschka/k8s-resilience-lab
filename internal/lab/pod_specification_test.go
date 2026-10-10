@@ -10,6 +10,7 @@ package lab
 
 import (
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -307,23 +308,26 @@ func TestAPredefinedSpecificationCustomizedByOneWorkload_ShouldStayAsItWasForAno
 	expect.Expect(t, customized.Equal(ResilientPlacement())).To(expect.Equal(false))
 }
 
-// The Startup times a Customization below states, in the whole seconds a
-// Scenario writes them in: a shortest and a longest apart from each other and
-// from the lab's own, so the time a specification holds is read back as the
-// Scenario's and the later of two is told from the earlier.
+// The Startup times a Customization below states, in the whole seconds and the
+// whole milliseconds a Scenario writes them in: a shortest and a longest apart
+// from each other and from the lab's own, so the time a specification holds is
+// read back as the Scenario's and the later of two is told from the earlier. The
+// millisecond ones are no whole second, which no seconds form could state.
 const (
-	aShortStartup  = 3
-	aLongerStartup = 7
+	aShortStartup        = 3
+	aLongerStartup       = 7
+	aShortStartupMillis  = 300
+	aLongerStartupMillis = 1700
 )
 
 // theStartupTimeBetween is a Startup time as the domain holds it, which is what
 // a customized specification reads back as.
-func theStartupTimeBetween(t *testing.T, shortest, longest int) scenario.StartupTime {
+func theStartupTimeBetween(t *testing.T, shortest, longest time.Duration) scenario.StartupTime {
 	t.Helper()
 
-	stated, err := scenario.NewStartupTime(shortest, longest)
+	stated, err := scenario.NewStartupTime(int(shortest.Milliseconds()), int(longest.Milliseconds()))
 	if err != nil {
-		t.Fatalf("build a Startup time between %d and %d seconds: %v", shortest, longest, err)
+		t.Fatalf("build a Startup time between %s and %s: %v", shortest, longest, err)
 	}
 
 	return stated
@@ -334,11 +338,17 @@ func theStartupTimeBetween(t *testing.T, shortest, longest int) scenario.Startup
 func TestAStartupTimeAScenarioStates_ShouldBeTheOneItsWorkloadsPodsTake(t *testing.T) {
 	written := map[string]struct {
 		customization Customization
-		shortest      int
-		longest       int
+		shortest      time.Duration
+		longest       time.Duration
 	}{
-		"one time":                 {customization: StartupSeconds(aShortStartup), shortest: aShortStartup, longest: aShortStartup},
-		"a shortest and a longest": {customization: StartupSecondsBetween(aShortStartup, aLongerStartup), shortest: aShortStartup, longest: aLongerStartup},
+		"one time": {
+			customization: StartupSeconds(aShortStartup),
+			shortest:      aShortStartup * time.Second, longest: aShortStartup * time.Second,
+		},
+		"a shortest and a longest": {
+			customization: StartupSecondsBetween(aShortStartup, aLongerStartup),
+			shortest:      aShortStartup * time.Second, longest: aLongerStartup * time.Second,
+		},
 	}
 
 	for how, taken := range written {
@@ -351,10 +361,59 @@ func TestAStartupTimeAScenarioStates_ShouldBeTheOneItsWorkloadsPodsTake(t *testi
 	}
 }
 
-func TestTwoStartupTimeCustomizations_ShouldLeaveTheLaterOneStanding(t *testing.T) {
-	customized := DefaultPlacement().Customize(StartupSeconds(aShortStartup), StartupSeconds(aLongerStartup))
+// A Scenario states a Startup time under a second, or one that is no whole
+// second, in whole milliseconds (docs/prd.md REQ-SIM-012).
+func TestAStartupTimeInMilliseconds_ShouldBeTheOneItsWorkloadsPodsTake(t *testing.T) {
+	written := map[string]struct {
+		customization Customization
+		shortest      time.Duration
+		longest       time.Duration
+	}{
+		"one time": {
+			customization: StartupMillis(aShortStartupMillis),
+			shortest:      aShortStartupMillis * time.Millisecond, longest: aShortStartupMillis * time.Millisecond,
+		},
+		"a shortest and a longest": {
+			customization: StartupMillisBetween(aShortStartupMillis, aLongerStartupMillis),
+			shortest:      aShortStartupMillis * time.Millisecond, longest: aLongerStartupMillis * time.Millisecond,
+		},
+	}
 
-	expect.Expect(t, customized.declared.StartupTime()).To(expect.Equal(theStartupTimeBetween(t, aLongerStartup, aLongerStartup)))
+	for how, taken := range written {
+		t.Run(how, func(t *testing.T) {
+			customized := ResilientPlacement().Customize(taken.customization)
+
+			expect.Expect(t, customized.declared.StartupTime()).To(expect.Equal(theStartupTimeBetween(t, taken.shortest, taken.longest)))
+		})
+	}
+}
+
+// Every form states the one Startup time, so of two the later stands whichever
+// unit each was written in.
+func TestTwoStartupTimeCustomizations_ShouldLeaveTheLaterOneStanding(t *testing.T) {
+	written := map[string]struct {
+		customized PodSpecification
+		theLater   time.Duration
+	}{
+		"both in seconds": {
+			customized: DefaultPlacement().Customize(StartupSeconds(aShortStartup), StartupSeconds(aLongerStartup)),
+			theLater:   aLongerStartup * time.Second,
+		},
+		"seconds, then milliseconds": {
+			customized: DefaultPlacement().Customize(StartupSeconds(aLongerStartup), StartupMillis(aShortStartupMillis)),
+			theLater:   aShortStartupMillis * time.Millisecond,
+		},
+		"milliseconds, then seconds": {
+			customized: DefaultPlacement().Customize(StartupMillis(aShortStartupMillis), StartupSeconds(aShortStartup)),
+			theLater:   aShortStartup * time.Second,
+		},
+	}
+
+	for order, startup := range written {
+		t.Run(order, func(t *testing.T) {
+			expect.Expect(t, startup.customized.declared.StartupTime()).To(expect.Equal(theStartupTimeBetween(t, startup.theLater, startup.theLater)))
+		})
+	}
 }
 
 func TestAStartupTimeCustomizedForOneWorkload_ShouldLeaveTheSpecificationItCustomizedUnchanged(t *testing.T) {
@@ -364,5 +423,5 @@ func TestAStartupTimeCustomizedForOneWorkload_ShouldLeaveTheSpecificationItCusto
 
 	expect.Expect(t, declaredByTheFirstWorkload.Equal(ResilientPlacement())).To(expect.Equal(true))
 	expect.Expect(t, customized.Equal(ResilientPlacement())).To(expect.Equal(false))
-	expect.Expect(t, declaredByTheFirstWorkload.declared.StartupTime().Shortest()).To(expect.Equal(scenario.DefaultStartupTime))
+	expect.Expect(t, declaredByTheFirstWorkload.declared.StartupTime().Shortest()).To(expect.Equal(scenario.DefaultShortestStartupTime))
 }

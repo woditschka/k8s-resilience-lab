@@ -2,7 +2,7 @@
 
 The lab's experiments. A Scenario is one file here, holding one exported Go function over `*lab.Scenario` whose every line is one Step. Nothing of the machinery that runs them lives here: the Step surface and the runner are `internal/lab`.
 
-Two files sit beside them. `scenarios.go` holds `All`, the list of the Scenarios a run carries out. `workloads.go` holds the names of the Workloads they deploy, one constant each.
+Three files sit beside them. `scenarios.go` holds `All`, the list of the Scenarios a run carries out. `workloads.go` holds the names of the Workloads they deploy, one constant each. `nodes.go` holds the Named Node capacities they name, one function each, defined once with `lab.NamedNodeCapacity`. The lab defines no Node capacity of its own.
 
 Run them all with `make run`, or `go run ./cmd/lab`. The lab's flags pass through as `make run ARGS="--whole-timeline"`.
 
@@ -25,9 +25,10 @@ Each name below is defined in `internal/lab`, which stays the authority on what 
 
 **Givens**
 
-- `Given().Topology(lab.Zones, lab.NodePool(lab.NodePoolName, lab.NodesPerZone), …)`, each NodePool naming the label its Nodes carry, with `.NodeCapacity(lab.CPU, lab.MemoryGi)` on a NodePool for the room each of its Nodes has, and a trailing `lab.Pods` where how many Pods a Node holds is what the Scenario is about. Zones holding Nodes of different kinds take one NodePool each
+- `Given().Topology(lab.Zones, lab.NodePool(lab.NodePoolName, lab.NodesPerZone, capacity), …)`, each NodePool naming the label its Nodes carry and the room each of its Nodes has: `StandardNodes()` or another function of `nodes.go` naming a Named Node capacity, or `lab.NodeCapacity(lab.CPU, lab.MemoryGi, lab.Pods)` stating cpu, memory and Pod count, all three. Either way, the Topology's Given line reports the cpu, memory and Pod count, after the name where one is named. Zones holding Nodes of different kinds take one NodePool each
 - `Given().Workload(name, lab.Pods, specification)`, with `.RequiredCapacity(lab.Pods)` for the fewest Pods it keeps Running through a Failure
 - the Workload constants of `workloads.go`, business capabilities of the domain the Scenarios model
+- the Named Node capacity functions of `nodes.go`, each `lab.NamedNodeCapacity(name, lab.CPU, lab.MemoryGi, lab.Pods)` under a name of the Scenarios' own; a new one is a function there, never a call in a Scenario
 
 **Pod specifications**
 
@@ -35,8 +36,10 @@ Each name below is defined in `internal/lab`, which stays the authority on what 
 - `lab.DefaultPlacement()` — no spread, so where its Pods land is the scheduler's own choice
 - `.Customize(…)` on a specification — that specification with the lab's own settings changed
 - `lab.FullAccess(…)` — the Customization carrying a Scenario's own change to the Kubernetes Pod specification
-- `lab.StartupSeconds(n)` — the Customization stating the whole seconds each of its Pods takes to start; with none stated, every Pod takes the lab's own Startup time
+- `lab.StartupSeconds(n)` — the Customization stating the whole seconds each of its Pods takes to start; with none stated, each Pod takes its own time within the lab's own Startup time
 - `lab.StartupSecondsBetween(shortest, longest)` — the Customization stating that each Pod takes a time between the two, in whole seconds
+- `lab.StartupMillis(n)` — the Customization stating the whole milliseconds each of its Pods takes to start
+- `lab.StartupMillisBetween(shortest, longest)` — the Customization stating that each Pod takes a time between the two, in whole milliseconds
 
 **Failures**
 
@@ -77,7 +80,7 @@ The function is named for the condition it runs under and the outcome it asserts
 
 ```go
 func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)))
+	s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), StandardNodes()))
 	s.WaitFor().AllNodesReady()
 	s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())
 	s.WaitFor().AllPodsReady()
@@ -89,6 +92,6 @@ Every line is one Step opened on `s`, so a reader scans the Step kinds in one co
 
 The Scenario runs under the stem of its file, with hyphens for underscores, so renaming the file renames the Scenario. A new Scenario is a file here and one line in `scenarios.go`.
 
-A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `lab.NodesPerZone`, `lab.Pods`, `lab.WorkloadName`, `lab.NodePoolName` and the specification — so a swapped argument does not compile. An optional setting is a further call on the complete declaration, `.NodeCapacity` on a NodePool and `.RequiredCapacity` on the Workload. `.NodeCapacity` carries an optional value of its own, the Pod count, which comes last and keeps the lab's own count where the line leaves it out.
+A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `lab.NodesPerZone`, `lab.Pods`, `lab.WorkloadName`, `lab.NodePoolName`, the NodePool's capacity and the specification — so a swapped or missing argument does not compile. An optional setting is a further call on the complete declaration, `.RequiredCapacity` on the Workload.
 
 A Scenario has no test of its own: it is itself the check, and a test beside it could only repeat its own Then Steps. The lab's Scenarios run in `cmd/lab`'s own suite, which fails when one reports a Finding or ends at a Step.

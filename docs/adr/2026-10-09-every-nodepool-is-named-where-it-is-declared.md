@@ -1,6 +1,6 @@
 # Every NodePool is named where it is declared
 
-**Status:** Accepted
+**Status:** Accepted, amended 2026-10-09: a NodePool's capacity is its third mandatory argument, per [ADR: Every NodePool states its Node capacity or names one its Scenarios define](2026-10-09-every-nodepool-states-or-names-its-node-capacity.md)
 
 ## Context
 

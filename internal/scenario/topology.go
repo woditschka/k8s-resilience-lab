@@ -19,17 +19,6 @@ import (
 // docs/prd.md, so the count admitted stands until that question is settled.
 const maxZones = 26
 
-// The capacity a declared Node holds when a Scenario names none. It leaves room
-// for more than one Pod per Node, so an even Placement is the scheduler honouring
-// the Workload's declared spread rather than the Nodes running out of room, and
-// enough cpu and memory for every one of those Pods to ask for an ordinary share,
-// so the Pod count stays the tighter bound.
-const (
-	defaultPodsPerNode   = 10
-	defaultCPUPerNode    = CPU(16 * millicoresPerCore)
-	defaultMemoryPerNode = Memory(64 * mebibytesPerNextUnit)
-)
-
 // NodeCapacity is what one Node can hold: the Pods it has room for, and the cpu
 // and memory the scheduler fits their requests against. A Workload can therefore
 // declare more Pods, or ask for more of either, than its Topology has room for.
@@ -55,11 +44,37 @@ func NewNodeCapacity(pods int, cpu CPU, memory Memory) (NodeCapacity, error) {
 	return NodeCapacity{pods: pods, cpu: cpu, memory: memory}, nil
 }
 
-// DefaultNodeCapacity is the whole capacity a Node holds where its Topology
-// states none. It is built from the package's own literals, every one of them
-// above what NewNodeCapacity refuses, so it needs no error of its own.
-func DefaultNodeCapacity() NodeCapacity {
-	return NodeCapacity{pods: defaultPodsPerNode, cpu: defaultCPUPerNode, memory: defaultMemoryPerNode}
+// NamedNodeCapacity is a Node capacity a Scenario defines once under a name of
+// its own, so a NodePool names it instead of stating its cpu, memory and Pod
+// count. The package defines no name and holds no capacity of its own, per
+// docs/adr/2026-10-09-every-nodepool-states-or-names-its-node-capacity.md.
+type NamedNodeCapacity struct {
+	name     string
+	capacity NodeCapacity
+}
+
+// NewNamedNodeCapacity defines capacity under name, refusing an empty name and
+// the zero capacity no constructor builds, which is a definition stating none.
+func NewNamedNodeCapacity(name string, capacity NodeCapacity) (NamedNodeCapacity, error) {
+	if name == "" {
+		return NamedNodeCapacity{}, errors.New("a Named Node capacity states its name, so one without a name is refused")
+	}
+	if capacity == (NodeCapacity{}) {
+		return NamedNodeCapacity{}, fmt.Errorf("a Named Node capacity states its Node capacity, "+
+			"so %q without one is refused", name)
+	}
+
+	return NamedNodeCapacity{name: name, capacity: capacity}, nil
+}
+
+// Name is the name a NodePool names this capacity by.
+func (n NamedNodeCapacity) Name() string {
+	return n.name
+}
+
+// Capacity is the cpu, memory and Pod count this name stands for.
+func (n NamedNodeCapacity) Capacity() NodeCapacity {
+	return n.capacity
 }
 
 // Pods is how many Pods one Node with this capacity holds.
@@ -112,8 +127,9 @@ type NodePool struct {
 	capacity     NodeCapacity
 }
 
-// NewNodePool builds one NodePool, refusing a count of no Node, an empty name and
-// a name no Kubernetes label value can hold.
+// NewNodePool builds one NodePool, refusing a count of no Node, an empty name, a
+// name no Kubernetes label value can hold, and the zero capacity no constructor
+// builds, which is a NodePool stating none.
 func NewNodePool(name string, nodesPerZone int, capacity NodeCapacity) (NodePool, error) {
 	if nodesPerZone < 1 {
 		return NodePool{}, fmt.Errorf("a Zone holds at least one Node, so a count of %d Nodes per Zone is refused",
@@ -126,6 +142,9 @@ func NewNodePool(name string, nodesPerZone int, capacity NodeCapacity) (NodePool
 		return NodePool{}, fmt.Errorf("a NodePool name is a Kubernetes label value: at most %d letters, digits, "+
 			"'-', '_' or '.', opening and closing on a letter or digit, so the name %q is refused",
 			maxNodePoolNameLength, name)
+	}
+	if capacity == (NodeCapacity{}) {
+		return NodePool{}, errors.New("a NodePool states its Node capacity, so a NodePool without one is refused")
 	}
 
 	return NodePool{name: name, nodesPerZone: nodesPerZone, capacity: capacity}, nil

@@ -1,6 +1,6 @@
 # Scenarios are Go functions over immutable descriptions
 
-**Status:** Accepted
+**Status:** Accepted, amended 2026-10-09: a Node capacity's Pod count is a mandatory argument, per [ADR: Every NodePool states its Node capacity or names one its Scenarios define](2026-10-09-every-nodepool-states-or-names-its-node-capacity.md)
 
 ## Context
 

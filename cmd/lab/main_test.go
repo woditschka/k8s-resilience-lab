@@ -134,9 +134,19 @@ const (
 )
 
 // theNodeCapacityDeclared is the Topology line of that Scenario: its one NodePool
-// general, stating the cpu and memory and keeping the lab's own Pod count.
-var theNodeCapacityDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Nodes holding " +
-	"4 cpu, 16Gi memory and " + strconv.Itoa(scenario.DefaultNodeCapacity().Pods()) + " Pods each"
+// general, stating its cpu, memory and Pod count.
+const theNodeCapacityDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Nodes holding " +
+	"4 cpu, 16Gi memory and 10 Pods each"
+
+// theStandardNodesDeclared is the Topology line of the Scenarios naming
+// Standard: its one NodePool general, by the name and the cpu, memory and Pod
+// count the Scenarios' definition of Standard gives. aStandardNodeSetting is the
+// run-start line the lab reported Standard on while it defined Standard itself.
+const (
+	theStandardNodesDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Standard Nodes holding " +
+		"16 cpu, 64Gi memory and 10 Pods each"
+	aStandardNodeSetting = "Standard Node:"
+)
 
 // The labels a run opens each of its control-plane settings with. What such a
 // line has to carry is the pair the declaring package holds — the value the lab
@@ -409,7 +419,8 @@ func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndTh
 // the lab's doing and which are Kubernetes' own. The lab's own waiting time is
 // reported beside them, because a time a Wait states is refused against it and an
 // engineer writing one cannot otherwise see the number, and so is its own Startup
-// time, which every Pod of a Scenario stating none takes. One run is read for all
+// time, the shortest and the longest each Pod of a Scenario stating none takes
+// its own time between. One run is read for all
 // five, because each of them holds for the whole run.
 func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaitingAndStartupTimes(t *testing.T) {
 	t.Parallel()
@@ -422,7 +433,28 @@ func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaiting
 	reportLineNames(t, reported, nodeEvictionSetting,
 		cluster.NodeEvictionRate, cluster.DefaultNodeEvictionRate)
 	reportLineNames(t, reported, labWaitingTime, scenario.WaitingTime.String())
-	reportLineNames(t, reported, labStartupTime, scenario.DefaultStartupTime.String())
+	reportLineNames(t, reported, labStartupTime,
+		scenario.DefaultShortestStartupTime.String(), scenario.DefaultLongestStartupTime.String())
+}
+
+// The lab defines no Node capacity of its own, so a run's start reports none
+// beside its settings: the Scenarios define each Named Node capacity, and the
+// Given line naming one reports what it stands for (docs/prd.md REQ-SIM-015).
+func TestARunsStart_ShouldReportNoNodeCapacityOfTheLabsOwn(t *testing.T) {
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
+
+	reportLacks(t, reported, aStandardNodeSetting)
+}
+
+// A NodePool naming Standard reports, on the Given line declaring it, the name
+// and what Standard stands for: cpu, memory, then Pod count, the order every
+// reported capacity names (docs/prd.md REQ-SIM-011).
+func TestARunOfANodePoolNamingStandard_ShouldReportWhatStandardStandsForOnItsGivenLine(t *testing.T) {
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
+
+	reportShows(t, reported, theStandardNodesDeclared)
 }
 
 func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(t *testing.T) {

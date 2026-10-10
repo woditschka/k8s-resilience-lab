@@ -14,8 +14,16 @@ import (
 
 // aCapacity is the named default for a Node capacity no test in this file cares
 // about: what these tests turn on is the Zone count.
-func aCapacity() NodeCapacity {
-	return DefaultNodeCapacity()
+func aCapacity(t *testing.T) NodeCapacity {
+	t.Helper()
+
+	const somePodsPerNode, someCPUPerNode, someMemoryPerNode = 10, CPU(4000), Memory(16384)
+	capacity, err := NewNodeCapacity(somePodsPerNode, someCPUPerNode, someMemoryPerNode)
+	if err != nil {
+		t.Fatalf("build a Node capacity: %v", err)
+	}
+
+	return capacity
 }
 
 // topologyOfOneNodePool is a Topology of zones Zones each holding one NodePool of
@@ -31,7 +39,7 @@ func topologyOfOneNodePool(zones, nodesPerZone int, capacity NodeCapacity) (Topo
 
 func TestATopologyAtTheLabsZoneLimit_ShouldBeAdmitted(t *testing.T) {
 	const oneNodePerZone = 1
-	capacity := aCapacity()
+	capacity := aCapacity(t)
 
 	topology, err := topologyOfOneNodePool(maxZones, oneNodePerZone, capacity)
 	if err != nil {
@@ -57,7 +65,7 @@ func TestATopology_ShouldRefuseACountItCannotProvision(t *testing.T) {
 
 	for refused, refusal := range refusals {
 		t.Run(refused, func(t *testing.T) {
-			_, err := topologyOfOneNodePool(refusal.zones, refusal.nodesPerZone, aCapacity())
+			_, err := topologyOfOneNodePool(refusal.zones, refusal.nodesPerZone, aCapacity(t))
 
 			if err == nil {
 				t.Fatalf("a Topology of %d Zones of %d Nodes is refused, but it was admitted", refusal.zones, refusal.nodesPerZone)

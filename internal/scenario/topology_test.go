@@ -18,8 +18,15 @@ const (
 )
 
 // aCapacity is the named default for a Node capacity no test cares about.
-func aCapacity() scenario.NodeCapacity {
-	return scenario.DefaultNodeCapacity()
+func aCapacity(t *testing.T) scenario.NodeCapacity {
+	t.Helper()
+
+	capacity, err := scenario.NewNodeCapacity(somePodsPerNode, someCPUPerNode, someMemoryPerNode)
+	if err != nil {
+		t.Fatalf("build a Node capacity: %v", err)
+	}
+
+	return capacity
 }
 
 // theGeneralNodePool is the name of the one NodePool a test turns on nothing but
@@ -39,7 +46,7 @@ func topologyOfTheGeneralNodePool(zones, nodesPerZone int, capacity scenario.Nod
 
 func TestATopology_ShouldExpandToNodesNamedAfterTheirZoneAndTheirIndexInIt(t *testing.T) {
 	const twoZones, twoNodesPerZone = 2, 2
-	capacity := aCapacity()
+	capacity := aCapacity(t)
 
 	topology, err := topologyOfTheGeneralNodePool(twoZones, twoNodesPerZone, capacity)
 	if err != nil {
@@ -57,7 +64,7 @@ func TestATopology_ShouldExpandToNodesNamedAfterTheirZoneAndTheirIndexInIt(t *te
 func TestATopology_ShouldNameEachOfItsZonesOnceInZoneOrder(t *testing.T) {
 	const twoZones, twoNodesPerZone = 2, 2
 
-	topology, err := topologyOfTheGeneralNodePool(twoZones, twoNodesPerZone, aCapacity())
+	topology, err := topologyOfTheGeneralNodePool(twoZones, twoNodesPerZone, aCapacity(t))
 	if err != nil {
 		t.Fatalf("build a Topology of %d Zones of %d Nodes: %v", twoZones, twoNodesPerZone, err)
 	}
@@ -67,7 +74,7 @@ func TestATopology_ShouldNameEachOfItsZonesOnceInZoneOrder(t *testing.T) {
 
 func TestTwoRunsOfTheSameTopology_ShouldReportTheSameZoneAndNodeNames(t *testing.T) {
 	const threeZones, threeNodesPerZone = 3, 3
-	capacity := aCapacity()
+	capacity := aCapacity(t)
 
 	firstRun, err := topologyOfTheGeneralNodePool(threeZones, threeNodesPerZone, capacity)
 	if err != nil {
@@ -125,7 +132,7 @@ func aNodePool(t *testing.T, name string, nodesPerZone int, capacity scenario.No
 func TestTheNodesOfAZone_ShouldBeNumberedThroughItsNodePoolsInDeclarationOrder(t *testing.T) {
 	const twoZones, twoNodesPerZone, oneNodePerZone, gpu = 2, 2, 1, "gpu"
 	const aLargerNodeHoldsTwiceAsMuch = 2
-	generalCapacity := aCapacity()
+	generalCapacity := aCapacity(t)
 	gpuCapacity, err := scenario.NewNodeCapacity(somePodsPerNode,
 		aLargerNodeHoldsTwiceAsMuch*someCPUPerNode, aLargerNodeHoldsTwiceAsMuch*someMemoryPerNode)
 	if err != nil {
@@ -167,12 +174,69 @@ func TestANodePoolOfNoNodeNoNameOrANameNoLabelCanHold_ShouldBeRefused(t *testing
 
 	for pool, taken := range stated {
 		t.Run(pool, func(t *testing.T) {
-			_, err := scenario.NewNodePool(taken.name, taken.nodesPerZone, aCapacity())
+			_, err := scenario.NewNodePool(taken.name, taken.nodesPerZone, aCapacity(t))
 
 			if err == nil {
 				t.Fatalf("a NodePool of %s is refused, but it was admitted", pool)
 			}
 		})
+	}
+}
+
+// A Named Node capacity states its name and its capacity, so one without either
+// is refused where it is defined (docs/prd.md REQ-SIM-015). The package defines
+// no name of its own: every name is one a Scenario gives.
+func TestANamedNodeCapacityOfNoNameOrNoCapacity_ShouldBeRefusedWhereItIsDefined(t *testing.T) {
+	const someName, noName = "Large", ""
+	var noNodeCapacity scenario.NodeCapacity
+
+	defined := map[string]struct {
+		name     string
+		capacity scenario.NodeCapacity
+	}{
+		"no name":     {name: noName, capacity: aCapacity(t)},
+		"no capacity": {name: someName, capacity: noNodeCapacity},
+	}
+
+	for named, taken := range defined {
+		t.Run(named, func(t *testing.T) {
+			_, err := scenario.NewNamedNodeCapacity(taken.name, taken.capacity)
+
+			if err == nil {
+				t.Fatalf("a Named Node capacity of %s is refused, but it was admitted", named)
+			}
+		})
+	}
+}
+
+// A Named Node capacity stands for the capacity it is defined with, under the
+// name a Scenario gives it.
+func TestANamedNodeCapacity_ShouldStandForTheNameAndCapacityItIsDefinedWith(t *testing.T) {
+	const aNameOfItsOwn = "Large"
+	capacity := aCapacity(t)
+
+	named, err := scenario.NewNamedNodeCapacity(aNameOfItsOwn, capacity)
+	if err != nil {
+		t.Fatalf("define a Named Node capacity %q: %v", aNameOfItsOwn, err)
+	}
+
+	expect.Expect(t, named.Name()).To(expect.Equal(aNameOfItsOwn))
+	expect.Expect(t, named.Capacity()).To(expect.Equal(capacity))
+}
+
+// A NodePool states its Node capacity or names one its Scenarios define, so the zero
+// capacity no constructor builds is refused where it is stated. On the Step
+// surface a NodePool omitting its capacity, or a capacity omitting its Pod
+// count, does not compile, so this zero value is the one omission left to
+// refuse at run time.
+func TestANodePoolStatingNoCompleteNodeCapacity_ShouldBeRefusedWhereItIsStated(t *testing.T) {
+	const someName, someNodesPerZone = "general", 1
+	var noNodeCapacity scenario.NodeCapacity
+
+	_, err := scenario.NewNodePool(someName, someNodesPerZone, noNodeCapacity)
+
+	if err == nil {
+		t.Fatal("a NodePool stating no Node capacity is refused, but it was admitted")
 	}
 }
 
@@ -185,8 +249,8 @@ func TestATopologyOfNoNodePoolOrOfTwoNodePoolsUnderOneName_ShouldBeRefused(t *te
 	stated := map[string][]scenario.NodePool{
 		"no NodePool": nil,
 		"two NodePools under one name": {
-			aNodePool(t, someName, someNodesPerZone, aCapacity()),
-			aNodePool(t, someName, someNodesPerZone, aCapacity()),
+			aNodePool(t, someName, someNodesPerZone, aCapacity(t)),
+			aNodePool(t, someName, someNodesPerZone, aCapacity(t)),
 		},
 	}
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -664,7 +665,7 @@ const (
 func TestAPodSpecificationCustomizedWithOneStartupTime_ShouldHaveNoPodReadySoonerThanThatTime(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	workload := aWorkloadDeclaring(t, threePods, resilientPlacement().WithStartupTime(aStartupTimeBetween(t, oneStartupTime, oneStartupTime)))
+	workload := aWorkloadDeclaring(t, threePods, resilientPlacement().WithStartupTime(aStartupTimeBetween(t, oneStartupTime*time.Second, oneStartupTime*time.Second)))
 	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
 
 	if _, err := provisioned.AwaitPodsReady(t.Context(), workload); err != nil {
@@ -679,7 +680,7 @@ func TestAPodSpecificationCustomizedWithOneStartupTime_ShouldHaveNoPodReadySoone
 func TestAPodSpecificationCustomizedWithAStartupTimeRange_ShouldHaveEachPodReadyWithinTheRange(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement().WithStartupTime(aStartupTimeBetween(t, shortestStartup, longestStartup)))
+	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement().WithStartupTime(aStartupTimeBetween(t, shortestStartup*time.Second, longestStartup*time.Second)))
 	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
 
 	if _, err := provisioned.AwaitPodsReady(t.Context(), workload); err != nil {
@@ -689,6 +690,111 @@ func TestAPodSpecificationCustomizedWithAStartupTimeRange_ShouldHaveEachPodReady
 	taken := theTimesTakenToBeReady(t, provisioned, workload)
 	expect.Expect(t, takenSoonerThan(taken, shortestStartup*time.Second)).To(expect.HaveLen[time.Duration](0))
 	expect.Expect(t, takenLaterThan(taken, longestStartup*time.Second+pollInterval)).To(expect.HaveLen[time.Duration](0))
+}
+
+// The lab's own Startup time is under a second, finer than the whole seconds the
+// control plane records a condition's change in, so each Pod's time is read on
+// this test's own clock: a watch opened before the Workload is deployed records
+// the moment each Pod is first seen placed on a Node and first seen Ready. The
+// watch only records, and the test waits through AwaitPodsReady alone. The
+// longest is allowed one poll interval for the simulator's own round trip
+// (docs/prd.md REQ-SIM-012).
+func TestAWorkloadStatingNoStartupTime_ShouldHaveEachPodReadyWithinTheLabsOwnRange(t *testing.T) {
+	t.Parallel()
+	provisioned, _ := aProvisionedCluster(t)
+	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement())
+	watched := watchingTheStartupsOf(t, provisioned, workload)
+	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+
+	if _, err := provisioned.AwaitPodsReady(t.Context(), workload); err != nil {
+		t.Fatalf("await every Pod of the Workload reporting Ready: %v", err)
+	}
+
+	taken := watched.timesTaken(t, workload)
+	expect.Expect(t, takenSoonerThan(taken, scenario.DefaultShortestStartupTime)).To(expect.HaveLen[time.Duration](0))
+	expect.Expect(t, takenLaterThan(taken, scenario.DefaultLongestStartupTime+pollInterval)).To(expect.HaveLen[time.Duration](0))
+}
+
+// startupsWatched are the moments this test first saw each Pod of one Workload
+// placed on a Node and first saw it Ready, keyed by the Pod's name, as recorded
+// off a watch on the Workload's Pods.
+type startupsWatched struct {
+	stop    func()
+	stopped <-chan struct{}
+
+	mu     sync.Mutex
+	placed map[string]time.Time
+	ready  map[string]time.Time
+}
+
+// watchingTheStartupsOf opens a watch on this Workload's Pods and records, as
+// each change arrives, the first moment a Pod is bound to a Node and the first
+// moment it reports Ready. It never waits for either.
+func watchingTheStartupsOf(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) *startupsWatched {
+	t.Helper()
+
+	changes, err := provisioned.client.CoreV1().Pods(workloadNamespace).Watch(t.Context(), metav1.ListOptions{
+		LabelSelector: podSelectorOf(workload),
+	})
+	if err != nil {
+		t.Fatalf("watch the Pods of the Workload %s: %v", workload.Name(), err)
+	}
+	stopped := make(chan struct{})
+	watched := &startupsWatched{
+		stop: changes.Stop, stopped: stopped,
+		placed: map[string]time.Time{}, ready: map[string]time.Time{},
+	}
+	go func() {
+		defer close(stopped)
+		for change := range changes.ResultChan() {
+			if pod, isPod := change.Object.(*corev1.Pod); isPod {
+				watched.record(*pod, time.Now())
+			}
+		}
+	}()
+	t.Cleanup(watched.stop)
+
+	return watched
+}
+
+// record notes the moment seen against this Pod for whichever of placed and
+// Ready it shows for the first time.
+func (w *startupsWatched) record(pod corev1.Pod, seen time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if _, already := w.placed[pod.Name]; !already && pod.Spec.NodeName != "" {
+		w.placed[pod.Name] = seen
+	}
+	if _, already := w.ready[pod.Name]; !already && isPodReady(pod) {
+		w.ready[pod.Name] = seen
+	}
+}
+
+// timesTaken stops the watch and is the time each Pod of the Workload took from
+// first being seen placed to first being seen Ready. A Pod the watch did not see
+// both of fails the test by name, since its time cannot be judged.
+func (w *startupsWatched) timesTaken(t *testing.T, workload scenario.Workload) []time.Duration {
+	t.Helper()
+
+	w.stop()
+	<-w.stopped
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if len(w.ready) != workload.Pods() {
+		t.Fatalf("the Workload %s declares %d Pods, but the watch saw %d Ready", workload.Name(), workload.Pods(), len(w.ready))
+	}
+	taken := make([]time.Duration, 0, len(w.ready))
+	for pod, ready := range w.ready {
+		placed, seen := w.placed[pod]
+		if !seen {
+			t.Fatalf("the watch saw the Pod %s Ready but never saw it placed", pod)
+		}
+		taken = append(taken, ready.Sub(placed))
+	}
+
+	return taken
 }
 
 // theTimesTakenToBeReady are the times each Pod of this Workload took from the

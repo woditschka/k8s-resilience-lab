@@ -35,11 +35,12 @@ const (
 	podsPerZoneWhenEven = podsOverEveryNode / twoZones
 	podsPerNodeWhenEven = 1
 
-	// twoPodsPerNode is the Pod count of a Node capacity a Scenario names outright:
-	// below the default, so a Topology declared at it differs from one that named
-	// none. someCoresPerNode and someGibibytesPerNode are the other two dimensions
-	// such a line states, which no test here turns on, and someCPUSpelled and
-	// someMemorySpelled are how Kubernetes spells them on the renamed line.
+	// twoPodsPerNode is the Pod count of a Node capacity a Scenario states
+	// outright: below roomyPodsPerNode, so a Topology declared at it differs from
+	// one naming Roomy. someCoresPerNode and someGibibytesPerNode are the other
+	// two dimensions such a line states, which no test here turns on, and
+	// someCPUSpelled and someMemorySpelled are how Kubernetes spells them on the
+	// renamed line.
 	twoPodsPerNode       = 2
 	someCoresPerNode     = 4
 	someGibibytesPerNode = 16
@@ -217,12 +218,42 @@ func aScenarioAfterFailingAZone(placed scenario.Placement, stopped string) *Scen
 	return &Scenario{observed: placed, settled: true, failedZones: []string{stopped}}
 }
 
-// aTopologyOf is the Topology of the stated shape, at the capacity a Given
-// declares when a Scenario names none.
+// The Named Node capacity this suite defines under a name of its own, as a
+// Scenario's place defines Standard: the lab defines none, so a test needing one
+// defines it. Its Pod count leaves room for more than one Pod per Node, and its
+// cpu and memory are spelled as Kubernetes spells them on the line naming it.
+const roomyName NodeCapacityName = "Roomy"
+
+const (
+	roomyCoresPerNode     = 16
+	roomyGibibytesPerNode = 64
+	roomyPodsPerNode      = 10
+)
+
+// roomyNodes is that Named Node capacity as a NodePool names it.
+func roomyNodes() DeclaredNodeCapacity {
+	return NamedNodeCapacity(roomyName, CPU(roomyCoresPerNode), MemoryGi(roomyGibibytesPerNode), Pods(roomyPodsPerNode))
+}
+
+// aTopologyOf is the Topology of the stated shape, its Nodes holding the
+// capacity Roomy stands for, which theGeneralNodePool names.
 func aTopologyOf(t *testing.T, zones, nodesPerZone int) scenario.Topology {
 	t.Helper()
 
-	return aTopologyHolding(t, zones, nodesPerZone, scenario.DefaultNodeCapacity())
+	return aTopologyHolding(t, zones, nodesPerZone, theCapacityRoomyStandsFor(t))
+}
+
+// theCapacityRoomyStandsFor is the domain's capacity of the values Roomy's
+// definition gives.
+func theCapacityRoomyStandsFor(t *testing.T) scenario.NodeCapacity {
+	t.Helper()
+
+	capacity, err := scenario.NewNodeCapacity(roomyPodsPerNode, CPU(roomyCoresPerNode), MemoryGi(roomyGibibytesPerNode))
+	if err != nil {
+		t.Fatalf("build the capacity Roomy stands for: %v", err)
+	}
+
+	return capacity
 }
 
 // aTopologyAt is the Topology of the stated shape with every Node holding
@@ -440,24 +471,23 @@ func everyPodOnOneNodeOf(topology scenario.Topology) scenario.Placement {
 // topologyStepOf, workloadStepOf and the Then Steps below are the Steps the
 // Scenarios in this file record. A Step's name is what a report shows and what a
 // Finding points at, so this suite states it.
+//
+// topologyStepOf is the line of a NodePool naming Roomy, which it reads by that
+// name and the values Roomy stands for.
 func topologyStepOf(zones, nodesPerZone int) Step {
-	labs := scenario.DefaultNodeCapacity()
-
-	return topologyStepHoldingCapacity(zones, nodesPerZone,
-		fmt.Sprintf("%s cpu, %s memory and %d Pods", labs.CPU(), labs.Memory(), labs.Pods()))
+	return Step{
+		Kind: GivenStep,
+		Name: fmt.Sprintf("a Topology of %d Zones of a NodePool %s of %d %s Nodes holding %d cpu, %dGi memory and %d Pods each",
+			zones, generalNodePool, nodesPerZone, roomyName, roomyCoresPerNode, roomyGibibytesPerNode, roomyPodsPerNode),
+	}
 }
 
 // topologyStepHoldingOf is the Step a Topology line records once its NodePool
-// names the capacity its Nodes hold, and topologyStepHoldingOnePodOf is that line
-// at a capacity of one Pod, which reads in the singular as the counted Steps below
-// do. topologyStepHoldingCpuAndMemoryOf is the line where the NodePool states no
-// Pod count, which keeps the lab's own.
+// states the capacity its Nodes hold, and topologyStepHoldingOnePodOf is that
+// line at a capacity of one Pod, which reads in the singular as the counted Steps
+// below do.
 func topologyStepHoldingOf(zones, nodesPerZone, podsPerNode int) Step {
 	return topologyStepHolding(zones, nodesPerZone, fmt.Sprintf("%d Pods", podsPerNode))
-}
-
-func topologyStepHoldingCpuAndMemoryOf(zones, nodesPerZone int) Step {
-	return topologyStepHoldingOf(zones, nodesPerZone, scenario.DefaultNodeCapacity().Pods())
 }
 
 func topologyStepHoldingOnePodOf(zones, nodesPerZone int) Step {
@@ -830,12 +860,12 @@ func TestARequiredCapacityNoWorkloadCouldKeep_ShouldEndTheScenarioNamingThatGive
 // REQ-SIM-012 edge case 2. The times the domain refuses are its own suite's, this
 // one being the path through the Given Step.
 func TestARefusedStartupTime_ShouldEndTheScenarioAtTheGivenDeclaringItsWorkload(t *testing.T) {
-	const aShortestAboveItsLongest, itsLongest = 9, 4
+	const aShortestAboveItsLongestMillis, itsLongestMillis = 900, 400
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	ending := aScenarioOver(onePodPerNodeOf(declared))
 	ending.Given().Topology(Zones(twoZones), theGeneralNodePool())
 	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode),
-		ResilientPlacement().Customize(StartupSecondsBetween(aShortestAboveItsLongest, itsLongest)))
+		ResilientPlacement().Customize(StartupMillisBetween(aShortestAboveItsLongestMillis, itsLongestMillis)))
 
 	ending.Then().AllPodsRunning()
 
@@ -843,25 +873,33 @@ func TestARefusedStartupTime_ShouldEndTheScenarioAtTheGivenDeclaringItsWorkload(
 	refused := resilientPlacementWorkloadStepOf(podsOverEveryNode)
 	expect.Expect(t, ended.EndedAt).To(expect.Equal(refused))
 	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{topologyStepOf(twoZones, twoNodesPerZone), refused}))
-	causeNames(t, ended, fmt.Sprintf("shortest Startup time of %d seconds", aShortestAboveItsLongest))
+	causeNames(t, ended, fmt.Sprintf("shortest Startup time of %s", aShortestAboveItsLongestMillis*time.Millisecond))
 }
 
-// A Topology naming no capacity gets the lab's own, which is what keeps a
-// Scenario that states none running as it did.
-func TestATopologyStatingNoNodeCapacity_ShouldProvisionNodesWithTheLabsDefaultCapacity(t *testing.T) {
+// A NodePool naming a Named Node capacity holds the cpu, memory and Pod count
+// its definition gives, whatever name the definition gives it (docs/prd.md
+// REQ-SIM-015), and its line names it beside the values it stands for.
+func TestANodePoolNamingACapacityItsScenarioDefines_ShouldProvisionNodesWithThatDefinitionsCapacity(t *testing.T) {
 	declaring := aScenario()
 
-	declaring.Given().Topology(Zones(twoZones), theGeneralNodePool())
+	declaring.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone), roomyNodes()))
 
-	expect.Expect(t, declaring.topology.Nodes()).To(expect.Equal(
-		aTopologyHolding(t, twoZones, twoNodesPerZone, scenario.DefaultNodeCapacity()).Nodes()))
+	expect.Expect(t, declaring.topology.Nodes()).To(expect.Equal(aTopologyOf(t, twoZones, twoNodesPerZone).Nodes()))
+}
+
+func TestAGivenTopologyNamingANamedNodeCapacity_ShouldReportTheNameAndWhatItStandsFor(t *testing.T) {
+	declaring := aScenario()
+
+	declaring.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone), roomyNodes()))
+
+	expect.Expect(t, declaring.outcome().Steps).To(expect.Equal([]Step{topologyStepOf(twoZones, twoNodesPerZone)}))
 }
 
 func TestAGivenTopologyNamingItsNodeCapacity_ShouldDeclareThatCapacityAndRenameItsLine(t *testing.T) {
 	declaring := aScenario()
 
-	declaring.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone)).
-		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(twoPodsPerNode)))
+	declaring.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone),
+		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(twoPodsPerNode))))
 
 	declared := declaring.outcome()
 	expect.Expect(t, declaring.topology.Nodes()).
@@ -870,54 +908,32 @@ func TestAGivenTopologyNamingItsNodeCapacity_ShouldDeclareThatCapacityAndRenameI
 		To(expect.Equal([]Step{topologyStepHoldingOf(twoZones, twoNodesPerZone, twoPodsPerNode)}))
 }
 
-// A Topology stating the cpu and memory alone keeps the lab's own Pod count, so a
-// Scenario about what the Nodes have room for in cpu or memory states those two
-// and leaves the count to the lab.
-func TestATopologyStatingTheCpuAndMemoryAlone_ShouldProvisionNodesHoldingTheLabsDefaultPodCount(t *testing.T) {
-	declaring := aScenario()
-
-	declaring.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone)).
-		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode)))
-
-	expect.Expect(t, declaring.topology.Nodes()).To(expect.Equal(
-		aTopologyAt(t, twoZones, twoNodesPerZone, scenario.DefaultNodeCapacity().Pods()).Nodes()))
-}
-
-func TestAGivenTopologyStatingNoPodCount_ShouldNameTheCpuAndMemoryAloneInItsLine(t *testing.T) {
-	declaring := aScenario()
-
-	declaring.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone)).
-		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode)))
-
-	expect.Expect(t, declaring.outcome().Steps).
-		To(expect.Equal([]Step{topologyStepHoldingCpuAndMemoryOf(twoZones, twoNodesPerZone)}))
-}
-
-// The NodePools the Topology lines below declare: one named general stating no
-// capacity, and one named gpu of fewer, larger Nodes, in the shape of
+// The NodePools the Topology lines below declare: one named general naming
+// Roomy, and one named gpu of fewer, larger Nodes, in the shape of
 // docs/prd.md REQ-SIM-013's own example. The gpu NodePool's cpu and memory are
-// double what the lab's own capacity holds, so its Nodes differ from the other's
-// in both.
+// double what Roomy holds, so its Nodes differ from the other's in both, and
+// its Pod count is a value no test here turns on.
 const (
 	generalNodePool NodePoolName = "general"
 	gpuNodePool     NodePoolName = "gpu"
 )
 
 const (
-	oneGpuNodePerZone = 1
-	gpuCoresPerNode   = 32
-	gpuGibibytesNode  = 128
+	oneGpuNodePerZone  = 1
+	gpuCoresPerNode    = 32
+	gpuGibibytesNode   = 128
+	someGpuPodsPerNode = 10
 )
 
 // theGpuNodePool and theGeneralNodePool are those two NodePools as a Topology
 // line declares them.
 func theGpuNodePool() DeclaredNodePool {
-	return NodePool(gpuNodePool, NodesPerZone(oneGpuNodePerZone)).
-		NodeCapacity(CPU(gpuCoresPerNode), MemoryGi(gpuGibibytesNode))
+	return NodePool(gpuNodePool, NodesPerZone(oneGpuNodePerZone),
+		NodeCapacity(CPU(gpuCoresPerNode), MemoryGi(gpuGibibytesNode), Pods(someGpuPodsPerNode)))
 }
 
 func theGeneralNodePool() DeclaredNodePool {
-	return NodePool(generalNodePool, NodesPerZone(twoNodesPerZone))
+	return NodePool(generalNodePool, NodesPerZone(twoNodesPerZone), roomyNodes())
 }
 
 // aTopologyOfNodePools is the Topology of zones Zones each holding the two
@@ -926,12 +942,11 @@ func theGeneralNodePool() DeclaredNodePool {
 func aTopologyOfNodePools(t *testing.T, zones int) scenario.Topology {
 	t.Helper()
 
-	gpuCapacity, err := scenario.NewNodeCapacity(scenario.DefaultNodeCapacity().Pods(),
-		CPU(gpuCoresPerNode), MemoryGi(gpuGibibytesNode))
+	gpuCapacity, err := scenario.NewNodeCapacity(someGpuPodsPerNode, CPU(gpuCoresPerNode), MemoryGi(gpuGibibytesNode))
 	if err != nil {
 		t.Fatalf("build the gpu NodePool's capacity: %v", err)
 	}
-	general, err := scenario.NewNodePool(string(generalNodePool), twoNodesPerZone, scenario.DefaultNodeCapacity())
+	general, err := scenario.NewNodePool(string(generalNodePool), twoNodesPerZone, theCapacityRoomyStandsFor(t))
 	if err != nil {
 		t.Fatalf("build the general NodePool: %v", err)
 	}
@@ -949,21 +964,18 @@ func aTopologyOfNodePools(t *testing.T, zones int) scenario.Topology {
 
 // topologyStepOfNodePools is the Step a Topology line of those two NodePools
 // records: each NodePool in declaration order, by its name, its Node count per
-// Zone, and its cpu, memory and Pod count, the one stating no capacity naming the
-// lab's own.
+// Zone, and the capacity it names or states, a stated one by its cpu, memory and
+// Pod count.
 func topologyStepOfNodePools(zones int) Step {
-	labs := scenario.DefaultNodeCapacity()
-
 	return Step{Kind: GivenStep, Name: fmt.Sprintf(
-		"a Topology of %d Zones of a NodePool %s of %d Nodes holding %s cpu, %s memory and %d Pods each; "+
+		"a Topology of %d Zones of a NodePool %s of %d %s Nodes holding %d cpu, %dGi memory and %d Pods each; "+
 			"a NodePool %s of %d Node holding %d cpu, %dGi memory and %d Pods each",
-		zones, generalNodePool, twoNodesPerZone, labs.CPU(), labs.Memory(), labs.Pods(),
-		gpuNodePool, oneGpuNodePerZone, gpuCoresPerNode, gpuGibibytesNode, labs.Pods())}
+		zones, generalNodePool, twoNodesPerZone, roomyName, roomyCoresPerNode, roomyGibibytesPerNode, roomyPodsPerNode,
+		gpuNodePool, oneGpuNodePerZone, gpuCoresPerNode, gpuGibibytesNode, someGpuPodsPerNode)}
 }
 
-// A run reports each NodePool on the Topology line that declared it, and a
-// NodePool stating no capacity holds the lab's own (docs/prd.md REQ-SIM-013,
-// edge case 4).
+// A run reports each NodePool on the Topology line that declared it, by the
+// capacity it names or states.
 func TestARunOfNodePools_ShouldReportEachNodePoolByNameCountAndCapacity(t *testing.T) {
 	declaring := aScenario()
 
@@ -977,9 +989,11 @@ func TestARunOfNodePools_ShouldReportEachNodePoolByNameCountAndCapacity(t *testi
 // capacity, so a line holding none is refused there and the Scenario ends at it. A
 // NodePool the domain refuses is carried to the same line; the NodePools the
 // domain refuses are its own suite's, this one being the path through the Given
-// Step (docs/prd.md REQ-SIM-013 edge cases 1 to 5).
+// Step (docs/prd.md REQ-SIM-013 edge cases 1 to 5). A NodePool omitting its
+// capacity does not compile, so the zero capacity is the one written here.
 func TestARefusedNodePoolDeclaration_ShouldBeRefusedWhereItIsStated(t *testing.T) {
-	const noNodePerZone, aSecondCount, noName = 0, 1, ""
+	const noNodePerZone, noName, noCapacityName, noPod = 0, "", NodeCapacityName(""), 0
+	var noNodeCapacity DeclaredNodeCapacity
 
 	refused := map[string]struct {
 		declare func(Given)
@@ -990,23 +1004,38 @@ func TestARefusedNodePoolDeclaration_ShouldBeRefusedWhereItIsStated(t *testing.T
 			cause:   "a Topology of none is refused",
 		},
 		"a NodePool stating no name": {
-			declare: func(given Given) { given.Topology(Zones(twoZones), NodePool(noName, NodesPerZone(twoNodesPerZone))) },
-			cause:   "a NodePool states its name",
+			declare: func(given Given) {
+				given.Topology(Zones(twoZones), NodePool(noName, NodesPerZone(twoNodesPerZone), roomyNodes()))
+			},
+			cause: "a NodePool states its name",
 		},
 		"two NodePools under one name": {
 			declare: func(given Given) { given.Topology(Zones(twoZones), theGeneralNodePool(), theGeneralNodePool()) },
 			cause:   "two NodePools named \"general\" could not be told apart",
 		},
-		"two Pod counts for a NodePool's Nodes": {
+		"a NodePool stating no Node capacity": {
 			declare: func(given Given) {
-				given.Topology(Zones(twoZones), theGeneralNodePool().
-					NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(twoPodsPerNode), Pods(aSecondCount)))
+				given.Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone), noNodeCapacity))
 			},
-			cause: "a NodePool states one Pod count for its Nodes or none, so 2 counts are refused",
+			cause: "a NodePool states its Node capacity",
+		},
+		"a Named Node capacity defined without a name": {
+			declare: func(given Given) {
+				given.Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone),
+					NamedNodeCapacity(noCapacityName, CPU(roomyCoresPerNode), MemoryGi(roomyGibibytesPerNode), Pods(roomyPodsPerNode))))
+			},
+			cause: "a Named Node capacity states its name",
+		},
+		"a Named Node capacity of a value the domain refuses": {
+			declare: func(given Given) {
+				given.Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone),
+					NamedNodeCapacity(roomyName, CPU(roomyCoresPerNode), MemoryGi(roomyGibibytesPerNode), Pods(noPod))))
+			},
+			cause: fmt.Sprintf("a capacity of %d Pods is refused", noPod),
 		},
 		"a NodePool the domain refuses": {
 			declare: func(given Given) {
-				given.Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(noNodePerZone)))
+				given.Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(noNodePerZone), roomyNodes()))
 			},
 			cause: fmt.Sprintf("a count of %d Nodes per Zone is refused", noNodePerZone),
 		},
@@ -1339,7 +1368,7 @@ func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testi
 		{
 			name: "a Topology no Zone could be provisioned with",
 			declare: func(ending *Scenario) {
-				ending.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(noNodesPerZone)))
+				ending.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(noNodesPerZone), roomyNodes()))
 				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 			},
 			endedAt: topologyStepOf(twoZones, noNodesPerZone),
@@ -1349,8 +1378,8 @@ func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testi
 		{
 			name: "a Topology whose Nodes hold no Pod",
 			declare: func(ending *Scenario) {
-				ending.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone)).
-					NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(noPods)))
+				ending.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone),
+					NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(noPods))))
 				ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
 			},
 			endedAt: topologyStepHoldingOf(twoZones, twoNodesPerZone, noPods),

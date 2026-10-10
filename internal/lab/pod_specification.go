@@ -220,8 +220,8 @@ func Request(cpu scenario.CPU, memory scenario.Memory) Customization {
 // Ready once it is placed, and StartupSecondsBetween the shortest and the longest
 // each Pod takes its own time between. Both are written beside a Request, in the
 // whole seconds a Wait's time is stated in, and a Workload whose specification
-// states neither takes the lab's own, scenario.DefaultStartupTime (docs/prd.md
-// REQ-SIM-012).
+// states neither takes the lab's own, scenario.DefaultShortestStartupTime to
+// scenario.DefaultLongestStartupTime (docs/prd.md REQ-SIM-012).
 //
 // A Startup time the domain refuses ends the Scenario at the Given declaring the
 // Workload, because a Customization is written inside that Given's line.
@@ -230,10 +230,27 @@ func StartupSeconds(seconds int) Customization {
 }
 
 func StartupSecondsBetween(shortest, longest int) Customization {
+	return StartupMillisBetween(shortest*millisPerSecond, longest*millisPerSecond)
+}
+
+// StartupMillis and StartupMillisBetween state the same Startup time as the
+// seconds forms, in whole milliseconds, which is how a time under a second or one
+// that is no whole second is written. A range whose bounds would mix units is
+// written here. Every form states the one Startup time, so of two Customizations
+// stating one the later stands whichever unit each was written in.
+func StartupMillis(millis int) Customization {
+	return StartupMillisBetween(millis, millis)
+}
+
+func StartupMillisBetween(shortest, longest int) Customization {
 	stated, err := scenario.NewStartupTime(shortest, longest)
 
 	return startupTime{stated: stated, refused: err}
 }
+
+// millisPerSecond turns a time a Scenario states in whole seconds into the whole
+// milliseconds a Startup time is built from.
+const millisPerSecond = int(time.Second / time.Millisecond)
 
 func toleration(
 	key string,

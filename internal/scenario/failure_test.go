@@ -37,7 +37,7 @@ const (
 func aTopologyOfTwoZones(t *testing.T) scenario.Topology {
 	t.Helper()
 
-	topology, err := topologyOfTheGeneralNodePool(twoZones, twoNodesPerZone, aCapacity())
+	topology, err := topologyOfTheGeneralNodePool(twoZones, twoNodesPerZone, aCapacity(t))
 	if err != nil {
 		t.Fatalf("build a Topology of %d Zones of %d Nodes: %v", twoZones, twoNodesPerZone, err)
 	}

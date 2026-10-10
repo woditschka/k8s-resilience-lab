@@ -68,12 +68,16 @@ const (
 	DefaultUnresponsiveNodeWait = 300 * time.Second
 )
 
-// DefaultStartupTime is the lab's own Startup time: the one time every placed
-// Pod takes to become Ready where its specification states none. It is fixed,
-// the same for every Pod, so a Scenario's outcome does not vary between runs, and
-// every run prints it beside the other times the lab sets (docs/prd.md
-// REQ-SIM-012).
-const DefaultStartupTime = 2 * time.Second
+// DefaultShortestStartupTime and DefaultLongestStartupTime are the lab's own
+// Startup time: the range each placed Pod draws its own time from where its
+// specification states none. Both bounds are above zero, so no Pod is Ready at
+// its placement and the Pending-on-Node state stays visible, and they differ, so
+// two runs of one Scenario may record different Timelines. Every run prints both
+// beside the other times the lab sets (docs/prd.md REQ-SIM-012).
+const (
+	DefaultShortestStartupTime = 500 * time.Millisecond
+	DefaultLongestStartupTime  = time.Second
+)
 
 // StartupTime is the time one placed Pod takes to become Ready: each Pod takes
 // its own time between the shortest and the longest, both included, so equal
@@ -86,31 +90,32 @@ type StartupTime struct {
 }
 
 // NewStartupTime builds the Startup time of that shortest and that longest, in
-// the whole seconds a Wait's time is stated in.
+// whole milliseconds, the finest unit a Scenario states one in.
 //
 // A negative time is refused, because no Pod is Ready before it is placed, and so
 // is a shortest above its longest, which leaves no time to take between them. A
-// time of none is admitted: such a Pod is Ready as soon as it is placed.
-func NewStartupTime(shortestSeconds, longestSeconds int) (StartupTime, error) {
-	if shortestSeconds < 0 || longestSeconds < 0 {
-		return StartupTime{}, fmt.Errorf("no Pod is Ready before it is placed, so a Startup time between %d and %d seconds is refused",
-			shortestSeconds, longestSeconds)
+// time of none is admitted: such a Pod is Ready as soon as it is placed. A
+// refusal names the bounds as durations, since a Scenario reaches it from whole
+// seconds and from whole milliseconds alike.
+func NewStartupTime(shortestMillis, longestMillis int) (StartupTime, error) {
+	shortest := time.Duration(shortestMillis) * time.Millisecond
+	longest := time.Duration(longestMillis) * time.Millisecond
+	if shortest < 0 || longest < 0 {
+		return StartupTime{}, fmt.Errorf("no Pod is Ready before it is placed, so a Startup time between %s and %s is refused",
+			shortest, longest)
 	}
-	if shortestSeconds > longestSeconds {
-		return StartupTime{}, fmt.Errorf("a shortest Startup time of %d seconds above its longest of %d seconds leaves no time to take, so it is refused",
-			shortestSeconds, longestSeconds)
+	if shortest > longest {
+		return StartupTime{}, fmt.Errorf("a shortest Startup time of %s above its longest of %s leaves no time to take, so it is refused",
+			shortest, longest)
 	}
 
-	return StartupTime{
-		shortest: time.Duration(shortestSeconds) * time.Second,
-		longest:  time.Duration(longestSeconds) * time.Second,
-	}, nil
+	return StartupTime{shortest: shortest, longest: longest}, nil
 }
 
 // labsOwnStartupTime is the Startup time a specification stating none holds. It
 // is the lab's own rather than a Scenario's statement, so it is refused nothing.
 func labsOwnStartupTime() StartupTime {
-	return StartupTime{shortest: DefaultStartupTime, longest: DefaultStartupTime}
+	return StartupTime{shortest: DefaultShortestStartupTime, longest: DefaultLongestStartupTime}
 }
 
 // Shortest is the least time a Pod taking this Startup time takes to become Ready.

@@ -1,6 +1,6 @@
 // The two rules in this file govern the place the lab's Scenarios sit in: that
-// every declaration there is a Scenario, a Workload name or the list, each in the
-// file admitted for it; and that the place holds every Scenario under a name it
+// every declaration there is a Scenario, a Workload name, a Named Node capacity
+// or the list, each in the file admitted for it; and that the place holds every Scenario under a name it
 // can run, a README naming them, no test file and nothing of the machinery. They
 // live with the machinery that defines what a Step is rather than in the
 // prominent place itself, so the place stays Scenarios alone
@@ -9,10 +9,14 @@ package lab
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -45,6 +49,31 @@ const (
 	theWorkloadNames    = "workloads.go"
 	theWorkloadNameType = "lab.WorkloadName"
 )
+
+// theNamedNodeCapacities is the file of the place where the lab's own Scenarios
+// take the Named Node capacities they name from, the lab defining none. In it,
+// every declaration is an exported function taking nothing whose body is one
+// return of a call to the Step surface's theNamedNodeCapacityDefinition, the name
+// written first as a string literal, so the file holds definitions and no
+// machinery, and each name has the one definition a Scenario reaches it by.
+const (
+	theNamedNodeCapacities         = "nodes.go"
+	theNamedNodeCapacityDefinition = "NamedNodeCapacity"
+	theReturn                      = "return "
+)
+
+// theDomainsName and theDomainsNamedNodeCapacity are the package and the
+// constructor the Step surface's definition builds a Named Node capacity
+// through, and theLabsSourceRoots the directories under the module root whose
+// sources are the lab itself rather than its Scenarios. No source there defines
+// a Named Node capacity: only the Step surface's own definition calls the
+// domain's constructor.
+const (
+	theDomainsName              = "scenario"
+	theDomainsNamedNodeCapacity = "NewNamedNodeCapacity"
+)
+
+var theLabsSourceRoots = []string{"internal", "cmd"}
 
 // theList is the other file of the place that is not a Scenario: it holds the
 // one exported function naming every Scenario of the place, taking nothing,
@@ -114,6 +143,28 @@ func AWorkload_ShouldBeDeclared(s *lab.Scenario) {
 
 const theSourceFileMode = 0o600
 
+// theScenarioSource and theLabsSource are the names a scratch Scenario source
+// and a scratch source of the lab itself are written under.
+const (
+	theScenarioSource = "shape.go"
+	theLabsSource     = "source.go"
+)
+
+// theNamedNodeCapacitiesShape is a file of Named Node capacities holding its
+// definitions, and theStandardNodesDefinition the one definition the lab's own
+// place holds, which theTopologyLine names.
+const (
+	theNamedNodeCapacitiesShape = `package scenarios
+
+import "github.com/woditschka/k8s-resilience-lab/internal/lab"
+
+%s
+`
+	theStandardNodesDefinition = `func StandardNodes() lab.DeclaredNodeCapacity {
+	return lab.NamedNodeCapacity("Standard", lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+}`
+)
+
 // theScenarioNameShape is how a Scenario's function is named, and
 // theOutcomePrefix opens the half of it that states the outcome: the shape
 // docs/testing-principles.md § Test Naming gives a test name without its Test
@@ -176,7 +227,7 @@ func TestEveryScenarioSource_ShouldHoldOnlyGivenWhenWaitAndThenSteps(t *testing.
 	offenders := declarationsThatDoNotBelong(filesOfThePlace(t, place))
 
 	if len(offenders) > 0 {
-		t.Errorf("a Scenario source holds one exported Scenario function named %s whose every line is a Given, When, Wait or Then Step, and the two files beside them declare the Workload names and the list alone, but:\n%s",
+		t.Errorf("a Scenario source holds one exported Scenario function named %s whose every line is a Given, When, Wait or Then Step, and the three files beside them declare the Workload names, the Named Node capacities and the list alone, but:\n%s",
 			theScenarioNameShape,
 			strings.Join(offenders, "\n"))
 	}
@@ -214,21 +265,21 @@ func TestTheNodePoolNameRule_ShouldAdmitOneNodePoolNamedGeneralAndReportAnything
 		admitted bool
 	}{
 		"one NodePool named general": {
-			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)))`,
+			line:     theTopologyLine,
 			admitted: true,
 		},
 		"a NodePool stating a capacity": {
-			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)).` +
-				`NodeCapacity(lab.CPU(4), lab.MemoryGi(16)))`,
+			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
+				`lab.NodeCapacity(lab.CPU(4), lab.MemoryGi(16), lab.Pods(10))))`,
 			admitted: true,
 		},
 		"a NodePool named otherwise": {
-			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("gpu", lab.NodesPerZone(3)))`,
+			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("gpu", lab.NodesPerZone(3), lab.StandardNodes()))`,
 			admitted: false,
 		},
 		"two NodePools": {
-			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)), ` +
-				`lab.NodePool("general", lab.NodesPerZone(1)))`,
+			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), lab.StandardNodes()), ` +
+				`lab.NodePool("general", lab.NodesPerZone(1), lab.StandardNodes()))`,
 			admitted: false,
 		},
 		"no NodePool": {
@@ -293,6 +344,453 @@ func nodePoolCallsIn(expression modulerules.Statement) []modulerules.Statement {
 	}
 
 	return found
+}
+
+// Every NodePool of the lab's Scenarios states its Node capacity or names one the
+// place defines, so a reader of the Scenario sees every value its Nodes hold or
+// a name whose one definition sits beside it.
+func TestEveryScenarioOfTheLab_ShouldStateOrNameEachNodePoolsCapacity(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := nodePoolsNeitherStatingNorNamingTheirCapacity(filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("every NodePool of the lab's Scenarios writes lab.%s(...) or a function %s declares as its capacity, but:\n%s",
+			theStatedCapacity, theNamedNodeCapacities, strings.Join(offenders, "\n"))
+	}
+}
+
+// The rule's own decisions are read here, since the shipped sources write only
+// the shapes it admits.
+func TestTheNodeCapacityRule_ShouldAdmitAStatedOrNamedCapacityAndReportAnythingElse(t *testing.T) {
+	written := map[string]struct {
+		line     string
+		admitted bool
+	}{
+		"a NodePool naming a capacity the place defines": {
+			line:     theTopologyLine,
+			admitted: true,
+		},
+		"a NodePool stating its capacity": {
+			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
+				`lab.NodeCapacity(lab.CPU(4), lab.MemoryGi(16), lab.Pods(10))))`,
+			admitted: true,
+		},
+		"a NodePool naming a capacity of the lab's own": {
+			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), lab.StandardNodes()))`,
+			admitted: false,
+		},
+		"a NodePool naming a capacity the place does not define": {
+			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
+				`aCapacityOfItsOwn()))`,
+			admitted: false,
+		},
+		"a NodePool defining its capacity on its own line": {
+			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
+				`lab.NamedNodeCapacity("Standard", lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))))`,
+			admitted: false,
+		},
+		"a NodePool writing no capacity": {
+			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)))`,
+			admitted: false,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			offenders := nodePoolsNeitherStatingNorNamingTheirCapacity(aScenarioBesideTheNamedNodeCapacities(t, taken.line))
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// theStatedCapacity is the call the Step surface offers a NodePool stating its
+// capacity by, and theCapacityArgument is where the NodePool call takes its
+// capacity: after its name and its Node count.
+const (
+	theStatedCapacity   = "NodeCapacity"
+	theCapacityArgument = 2
+)
+
+// nodePoolsNeitherStatingNorNamingTheirCapacity names every NodePool of a Scenario
+// of the place whose capacity argument is neither a call to lab.NodeCapacity nor
+// a call of a function the place's file of Named Node capacities declares, or
+// which writes no capacity argument at all.
+func nodePoolsNeitherStatingNorNamingTheirCapacity(files []modulerules.GoFile) []string {
+	named := theNamedNodeCapacitiesDeclaredIn(files)
+
+	var offenders []string
+	for _, source := range files {
+		for _, declared := range source.Declarations {
+			if !isAScenario(declared) {
+				continue
+			}
+			for _, line := range declared.Statements {
+				for _, pool := range nodePoolCallsIn(line) {
+					if !statesOrNamesItsCapacity(pool, named) {
+						offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s", source.Path, declared.Name, pool.Written))
+					}
+				}
+			}
+		}
+	}
+
+	return offenders
+}
+
+// statesOrNamesItsCapacity reports whether a NodePool call takes its capacity as
+// the call the Step surface offers for stating one, or as an unqualified call of
+// one of the Named Node capacities the place defines.
+func statesOrNamesItsCapacity(pool modulerules.Statement, named map[string]bool) bool {
+	if len(pool.Arguments) <= theCapacityArgument {
+		return false
+	}
+	capacity := pool.Arguments[theCapacityArgument]
+	if !capacity.Call {
+		return false
+	}
+	if capacity.On == nil {
+		return named[capacity.Name]
+	}
+
+	return capacity.On.Name == theStepSurfaceName && capacity.Name == theStatedCapacity
+}
+
+// theNamedNodeCapacitiesDeclaredIn are the names the place's file of Named Node
+// capacities declares, which a NodePool names its capacity by.
+func theNamedNodeCapacitiesDeclaredIn(files []modulerules.GoFile) map[string]bool {
+	named := make(map[string]bool)
+	for _, file := range files {
+		if filepath.Base(file.Path) != theNamedNodeCapacities {
+			continue
+		}
+		for _, declared := range file.Declarations {
+			named[declared.Name] = true
+		}
+	}
+
+	return named
+}
+
+// Each Named Node capacity the lab's Scenarios name is defined once, in the
+// place's file of them, and nowhere else: no Scenario defines one on its own
+// line, and no source of the lab itself defines one, the Step surface's own
+// definition being the one call of the domain's constructor (docs/prd.md
+// REQ-SIM-015).
+func TestEveryNamedNodeCapacityOfTheScenarios_ShouldBeDefinedOnceBesideThem(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := slices.Concat(
+		namedNodeCapacitiesNotDefinedOnceBesideTheScenarios(filesOfThePlace(t, place)),
+		callsDefiningANamedNodeCapacityOfTheLabsOwn(theLabsOwnSources(t)))
+
+	if len(offenders) > 0 {
+		t.Errorf("each Named Node capacity is defined once in %s, by an exported function taking nothing that returns one lab.%s call, and the lab defines none, but:\n%s",
+			theNamedNodeCapacities, theNamedNodeCapacityDefinition, strings.Join(offenders, "\n"))
+	}
+}
+
+// The rule's own decisions over the place are read here, since the shipped file
+// writes only the shape it admits.
+func TestTheNamedNodeCapacitiesRule_ShouldAdmitOneDefinitionPerNameAndReportAnythingElse(t *testing.T) {
+	const (
+		theStandardDefinition = `func StandardNodes() lab.DeclaredNodeCapacity {
+	return lab.NamedNodeCapacity("Standard", lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+}`
+		aSecondDefinitionOfStandard = `func MoreStandardNodes() lab.DeclaredNodeCapacity {
+	return lab.NamedNodeCapacity("Standard", lab.CPU(32), lab.MemoryGi(128), lab.Pods(20))
+}`
+		aDefinitionTakingItsValues = `func SizedNodes(pods lab.Pods) lab.DeclaredNodeCapacity {
+	return lab.NamedNodeCapacity("Sized", lab.CPU(16), lab.MemoryGi(64), pods)
+}`
+		aDefinitionReturningAStatedCapacity = `func StatedNodes() lab.DeclaredNodeCapacity {
+	return lab.NodeCapacity(lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+}`
+		aDefinitionUnderAComputedName = `func ComputedNodes() lab.DeclaredNodeCapacity {
+	return lab.NamedNodeCapacity(lab.NodeCapacityName("Comp"+"uted"), lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+}`
+		aVariableOfACapacity = `var LargeNodes = lab.NamedNodeCapacity("Large", lab.CPU(32), lab.MemoryGi(128), lab.Pods(10))`
+	)
+
+	written := map[string]struct {
+		definitions []string
+		line        string
+		admitted    bool
+	}{
+		"one definition per name, named by a Scenario": {
+			definitions: []string{theStandardDefinition},
+			line:        theTopologyLine,
+			admitted:    true,
+		},
+		"two definitions under one name": {
+			definitions: []string{theStandardDefinition, aSecondDefinitionOfStandard},
+			line:        theTopologyLine,
+		},
+		"a definition taking a value": {
+			definitions: []string{aDefinitionTakingItsValues},
+			line:        theTopologyLine,
+		},
+		"a definition returning a stated capacity": {
+			definitions: []string{aDefinitionReturningAStatedCapacity},
+			line:        theTopologyLine,
+		},
+		"a definition under a name no literal writes": {
+			definitions: []string{aDefinitionUnderAComputedName},
+			line:        theTopologyLine,
+		},
+		"a variable in place of a function": {
+			definitions: []string{aVariableOfACapacity},
+			line:        theTopologyLine,
+		},
+		"a Scenario defining one on its own line": {
+			definitions: []string{theStandardDefinition},
+			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
+				`lab.NamedNodeCapacity("Large", lab.CPU(32), lab.MemoryGi(128), lab.Pods(10))))`,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			place := aPlaceHolding(t, map[string]string{
+				theScenarioSource:      aScenarioSourceWhoseStepsAre(taken.line),
+				theNamedNodeCapacities: aNamedNodeCapacitiesSourceOf(taken.definitions...),
+			})
+
+			offenders := namedNodeCapacitiesNotDefinedOnceBesideTheScenarios(place)
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// The rule's own decisions over the lab's sources are read here, since the
+// shipped sources hold only the Step surface's own definition.
+func TestTheLabDefinesNoNamedNodeCapacityRule_ShouldReportEveryDefinitionButTheStepSurfacesOwn(t *testing.T) {
+	written := map[string]struct {
+		source   string
+		admitted bool
+	}{
+		"the Step surface's own definition": {
+			source: `package lab
+
+func NamedNodeCapacity(name NodeCapacityName, cpu scenario.CPU, memory scenario.Memory, pods Pods) DeclaredNodeCapacity {
+	named, err := scenario.NewNamedNodeCapacity(string(name), NodeCapacity(cpu, memory, pods).declared)
+	return DeclaredNodeCapacity{declared: named.Capacity(), refused: err}
+}
+`,
+			admitted: true,
+		},
+		"the Step surface defining a capacity of its own": {
+			source: `package lab
+
+func StandardNodes() DeclaredNodeCapacity {
+	return NamedNodeCapacity("Standard", CPU(16), MemoryGi(64), Pods(10))
+}
+`,
+		},
+		"the Step surface reaching the domain's constructor elsewhere": {
+			source: `package lab
+
+func StandardNodes() scenario.NamedNodeCapacity {
+	named, _ := scenario.NewNamedNodeCapacity("Standard", scenario.NodeCapacity{})
+	return named
+}
+`,
+		},
+		"the domain defining a capacity of its own": {
+			source: `package scenario
+
+func StandardNodeCapacity() NamedNodeCapacity {
+	named, _ := NewNamedNodeCapacity("Standard", NodeCapacity{})
+	return named
+}
+`,
+		},
+		"the command defining a capacity of its own": {
+			source: `package main
+
+func standardNodes() lab.DeclaredNodeCapacity {
+	return lab.NamedNodeCapacity("Standard", lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+}
+`,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			sources := aPlaceHolding(t, map[string]string{theLabsSource: taken.source})
+
+			offenders := callsDefiningANamedNodeCapacityOfTheLabsOwn(sources)
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// namedNodeCapacitiesNotDefinedOnceBesideTheScenarios names every declaration of
+// the place's file of Named Node capacities that is not one definition, every
+// name defined more than once there, and every other file of the place calling
+// the Step surface's definition itself.
+func namedNodeCapacitiesNotDefinedOnceBesideTheScenarios(files []modulerules.GoFile) []string {
+	var offenders []string
+	defined := make(map[string]int)
+	for _, file := range files {
+		if filepath.Base(file.Path) != theNamedNodeCapacities {
+			offenders = append(offenders, definitionsOutsideTheNamedNodeCapacities(file)...)
+
+			continue
+		}
+		offenders = append(offenders, declarationsThatAreNotNamedNodeCapacities(file)...)
+		for _, declared := range file.Declarations {
+			if name, isADefinition := theNameDefinedBy(declared); isADefinition {
+				defined[name]++
+			}
+		}
+	}
+	for name, definitions := range defined {
+		if definitions > onlyOnce {
+			offenders = append(offenders, fmt.Sprintf("  %s defines the Named Node capacity %q %d times",
+				theNamedNodeCapacities, name, definitions))
+		}
+	}
+
+	return offenders
+}
+
+// declarationsThatAreNotNamedNodeCapacities names every declaration of the file
+// of Named Node capacities that is not one definition: the file holds the
+// capacities the lab's Scenarios name and nothing else.
+func declarationsThatAreNotNamedNodeCapacities(source modulerules.GoFile) []string {
+	var offenders []string
+	for _, declared := range source.Declarations {
+		if _, isADefinition := theNameDefinedBy(declared); !isADefinition {
+			offenders = append(offenders, fmt.Sprintf("  %s declares the %s %s, which is not an exported function "+
+				"taking nothing that returns one lab.%s call under a name it writes",
+				source.Path, declared.Kind, declared.Name, theNamedNodeCapacityDefinition))
+		}
+	}
+
+	return offenders
+}
+
+// definitionsOutsideTheNamedNodeCapacities names every declaration of another
+// file of the place that calls the Step surface's definition itself.
+func definitionsOutsideTheNamedNodeCapacities(source modulerules.GoFile) []string {
+	var offenders []string
+	for _, declared := range source.Declarations {
+		if slices.Contains(declared.Names, theStepSurfacesDefinition) {
+			offenders = append(offenders, fmt.Sprintf("  %s, in %s: defines a Named Node capacity outside %s",
+				source.Path, declared.Name, theNamedNodeCapacities))
+		}
+	}
+
+	return offenders
+}
+
+// theStepSurfacesDefinition is the definition as a source of the place names it.
+var theStepSurfacesDefinition = modulerules.UsedName{
+	Qualifier: theStepSurfaceName, Name: theNamedNodeCapacityDefinition,
+}
+
+// theNameDefinedBy is the name a declaration of the file of Named Node
+// capacities defines, and whether it is one definition at all: an exported
+// function taking nothing whose one statement returns a call of the Step
+// surface's definition, its first argument the name as a string literal.
+func theNameDefinedBy(declared modulerules.Declaration) (string, bool) {
+	if declared.Kind != modulerules.FuncDeclaration || !declared.Exported ||
+		len(declared.Parameters) != 0 || len(declared.Statements) != onlyOnce {
+		return "", false
+	}
+	returned, isAReturn := strings.CutPrefix(declared.Statements[0].Written, theReturn)
+	if !isAReturn {
+		return "", false
+	}
+	parsed, err := parser.ParseExpr(returned)
+	if err != nil {
+		return "", false
+	}
+	call, isACall := parsed.(*ast.CallExpr)
+	if !isACall || len(call.Args) == 0 || !callsTheStepSurfacesDefinition(call) {
+		return "", false
+	}
+	literal, isALiteral := call.Args[0].(*ast.BasicLit)
+	if !isALiteral || literal.Kind != token.STRING {
+		return "", false
+	}
+	name, err := strconv.Unquote(literal.Value)
+
+	return name, err == nil
+}
+
+// callsTheStepSurfacesDefinition reports whether call is lab.NamedNodeCapacity.
+func callsTheStepSurfacesDefinition(call *ast.CallExpr) bool {
+	selected, isSelected := call.Fun.(*ast.SelectorExpr)
+	if !isSelected || selected.Sel.Name != theNamedNodeCapacityDefinition {
+		return false
+	}
+	qualifier, isAName := selected.X.(*ast.Ident)
+
+	return isAName && qualifier.Name == theStepSurfaceName
+}
+
+// callsDefiningANamedNodeCapacityOfTheLabsOwn names every declaration of the
+// lab's own sources that defines a Named Node capacity: one calling the Step
+// surface's definition, from inside the Step surface or out of it, and one
+// calling the domain's constructor but the Step surface's definition itself.
+func callsDefiningANamedNodeCapacityOfTheLabsOwn(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, file := range files {
+		for _, declared := range file.Declarations {
+			for _, used := range declared.Names {
+				if definesANamedNodeCapacity(file.Package, declared, used) {
+					offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s defines a Named Node capacity of the lab's own",
+						file.Path, declared.Name, writtenAs(used)))
+				}
+			}
+		}
+	}
+
+	return offenders
+}
+
+// definesANamedNodeCapacity reports whether one name a declaration of package
+// uses is a call defining a Named Node capacity there.
+func definesANamedNodeCapacity(declaredIn string, declared modulerules.Declaration, used modulerules.UsedName) bool {
+	switch used.Name {
+	case theNamedNodeCapacityDefinition:
+		return used.Qualifier == theStepSurfaceName || (used.Qualifier == "" && declaredIn == theStepSurfaceName)
+	case theDomainsNamedNodeCapacity:
+		isTheStepSurfacesDefinition := declaredIn == theStepSurfaceName &&
+			declared.Name == theNamedNodeCapacityDefinition && used.Qualifier == theDomainsName
+
+		return !isTheStepSurfacesDefinition && (used.Qualifier == theDomainsName || declaredIn == theDomainsName)
+	default:
+		return false
+	}
+}
+
+// theLabsOwnSources are the production sources of the lab itself, every one under
+// theLabsSourceRoots, which is where a Named Node capacity of the lab's own would
+// be defined.
+func theLabsOwnSources(t *testing.T) []modulerules.GoFile {
+	t.Helper()
+
+	root, err := modulerules.Root(t.Context(), ownPackageDir)
+	if err != nil {
+		t.Fatalf("locate the root of the module: %v", err)
+	}
+
+	var sources []modulerules.GoFile
+	for _, under := range theLabsSourceRoots {
+		scanned, err := modulerules.ScanGoFiles(filepath.Join(root, under), modulerules.ProductionGoFilesOnly)
+		if err != nil {
+			t.Fatalf("read the lab's own sources under %s: %v", under, err)
+		}
+		sources = append(sources, scanned...)
+	}
+
+	return sources
 }
 
 // The shapes a Workload line takes, read as a rule over the syntax tree rather
@@ -411,21 +909,56 @@ func aScenarioAlsoImporting(t *testing.T, imported, line string) []modulerules.G
 }
 
 // aScenarioSourceThatImports is a Scenario source written with those imports and
-// that Workload line, scanned the way the rules scan the lab's own place. It is
-// written to a directory of its own and parsed, because what a rule reads is a
-// parsed source and not a string.
+// that Workload line, scanned the way the rules scan the lab's own place.
 func aScenarioSourceThatImports(t *testing.T, imported []string, line string) []modulerules.GoFile {
 	t.Helper()
 
+	return aPlaceHolding(t, map[string]string{
+		theScenarioSource: fmt.Sprintf(theScenarioSourceShape, anImportBlockOf(imported), line),
+	})
+}
+
+// aScenarioBesideTheNamedNodeCapacities is a Scenario source holding these Steps
+// beside a file of Named Node capacities defining StandardNodes, as the lab's own
+// place holds them.
+func aScenarioBesideTheNamedNodeCapacities(t *testing.T, steps ...string) []modulerules.GoFile {
+	t.Helper()
+
+	return aPlaceHolding(t, map[string]string{
+		theScenarioSource:      aScenarioSourceWhoseStepsAre(steps...),
+		theNamedNodeCapacities: aNamedNodeCapacitiesSourceOf(theStandardNodesDefinition),
+	})
+}
+
+// aScenarioSourceWhoseStepsAre is the text of a Scenario source holding these
+// Steps, one per line, importing the Step surface alone.
+func aScenarioSourceWhoseStepsAre(steps ...string) string {
+	return fmt.Sprintf(theScenarioSourceShape, anImportBlockOf([]string{theStepSurfaceImport}), strings.Join(steps, "\n\t"))
+}
+
+// aNamedNodeCapacitiesSourceOf is the text of a file of Named Node capacities
+// holding these definitions, importing the Step surface alone.
+func aNamedNodeCapacitiesSourceOf(definitions ...string) string {
+	return fmt.Sprintf(theNamedNodeCapacitiesShape, strings.Join(definitions, "\n\n"))
+}
+
+// aPlaceHolding is the files named, each holding the source given, scanned the
+// way the rules scan the lab's own place. They are written to a directory of
+// their own and parsed, because what a rule reads is a parsed source and not a
+// string.
+func aPlaceHolding(t *testing.T, sources map[string]string) []modulerules.GoFile {
+	t.Helper()
+
 	place := t.TempDir()
-	source := fmt.Sprintf(theScenarioSourceShape, anImportBlockOf(imported), line)
-	if err := os.WriteFile(filepath.Join(place, "shape.go"), []byte(source), theSourceFileMode); err != nil {
-		t.Fatalf("write the Scenario source the rule is read on: %v", err)
+	for name, source := range sources {
+		if err := os.WriteFile(filepath.Join(place, name), []byte(source), theSourceFileMode); err != nil {
+			t.Fatalf("write the source %s the rule is read on: %v", name, err)
+		}
 	}
 
 	scanned, err := modulerules.ScanGoFiles(place, modulerules.ProductionGoFilesOnly)
 	if err != nil {
-		t.Fatalf("scan the Scenario source under %s: %v", place, err)
+		t.Fatalf("scan the sources under %s: %v", place, err)
 	}
 
 	return scanned
@@ -645,7 +1178,7 @@ func TestTheWaitOrderingRule_ShouldReportEveryThenAndFailureNoWaitStandsBefore(t
 // Wait that fits it chained onto its line, each Wait written as a Step of its own,
 // the Failure that discards the Placement, and a Then that judges one.
 const (
-	theTopologyLine         = `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)))`
+	theTopologyLine         = `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), StandardNodes()))`
 	theTopologyWaitingLine  = theTopologyLine + `.WaitFor().AllNodesReady()`
 	theWorkloadWaitingLine  = theWorkloadLine + `.WaitFor().AllPodsReady()`
 	theWaitForEveryNodeLine = `s.WaitFor().AllNodesReady()`
@@ -1037,7 +1570,7 @@ func scenarioSourcesIn(files []modulerules.GoFile) []modulerules.GoFile {
 // every file of it does but the Workload names and the list.
 func isAScenarioSource(path string) bool {
 	switch filepath.Base(path) {
-	case theWorkloadNames, theList:
+	case theWorkloadNames, theNamedNodeCapacities, theList:
 		return false
 	default:
 		return true
@@ -1054,6 +1587,8 @@ func declarationsThatDoNotBelong(files []modulerules.GoFile) []string {
 		switch filepath.Base(file.Path) {
 		case theWorkloadNames:
 			offenders = append(offenders, declarationsThatAreNotWorkloadNames(file)...)
+		case theNamedNodeCapacities:
+			offenders = append(offenders, declarationsThatAreNotNamedNodeCapacities(file)...)
 		case theList:
 			offenders = append(offenders, declarationsThatAreNotTheList(file)...)
 		default:

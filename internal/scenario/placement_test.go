@@ -30,7 +30,7 @@ func twoZonesOfTwoNodes(t *testing.T) []scenario.Node {
 	t.Helper()
 
 	const twoZones, twoNodesPerZone = 2, 2
-	topology, err := topologyOfTheGeneralNodePool(twoZones, twoNodesPerZone, aCapacity())
+	topology, err := topologyOfTheGeneralNodePool(twoZones, twoNodesPerZone, aCapacity(t))
 	if err != nil {
 		t.Fatalf("build a Topology of %d Zones of %d Nodes: %v", twoZones, twoNodesPerZone, err)
 	}
@@ -61,7 +61,7 @@ func TestAPlacement_ShouldCountEveryNodeOfTheObservationIncludingTheEmptyOnes(t 
 
 func TestAPlacement_ShouldCountEveryZoneOfTheObservationIncludingTheEmptyOnes(t *testing.T) {
 	const oneZoneOfOneNode, oneNodePerZone = 1, 1
-	emptyZoneTopology, err := topologyOfTheGeneralNodePool(oneZoneOfOneNode, oneNodePerZone, aCapacity())
+	emptyZoneTopology, err := topologyOfTheGeneralNodePool(oneZoneOfOneNode, oneNodePerZone, aCapacity(t))
 	if err != nil {
 		t.Fatalf("build a Topology whose only Zone stays empty: %v", err)
 	}

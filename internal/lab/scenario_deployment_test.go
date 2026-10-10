@@ -215,8 +215,8 @@ func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testin
 	t.Parallel()
 	waiting := aScenarioOnAClusterFor(t, theSettlingScenario)
 
-	waiting.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone)).
-		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(roomForOnePodPerNode)))
+	waiting.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone),
+		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(roomForOnePodPerNode))))
 	waiting.WaitFor().AllNodesReady()
 	waiting.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), ResilientPlacement())
 	waiting.WaitFor().PlacementSettled()
@@ -326,12 +326,12 @@ func TestARequestOnlyOneNodePoolHasRoomFor_ShouldPlacePodsOnThatNodePoolAlone(t 
 	t.Parallel()
 	const onePodPerGpuNode = 1
 	podsTheGpuNodesHold := twoZones * oneGpuNodePerZone * onePodPerGpuNode
-	aboveTheLabsOwnCapacity := Request(
-		scenario.DefaultNodeCapacity().CPU()+CPU(1), scenario.DefaultNodeCapacity().Memory()+MemoryGi(1))
+	roomy := theCapacityRoomyStandsFor(t)
+	aboveRoomy := Request(roomy.CPU()+CPU(1), roomy.Memory()+MemoryGi(1))
 	placing := aScenarioOnAClusterFor(t, theGpuRequestScenario)
 
 	placing.Given().Topology(Zones(twoZones), theGeneralNodePool(), theGpuNodePool())
-	placing.Given().Workload(someWorkloadName, Pods(podsTheGpuNodesHold), DefaultPlacement().Customize(aboveTheLabsOwnCapacity))
+	placing.Given().Workload(someWorkloadName, Pods(podsTheGpuNodesHold), DefaultPlacement().Customize(aboveRoomy))
 	placing.WaitFor().PlacementSettled()
 
 	settled := placing.outcome()
