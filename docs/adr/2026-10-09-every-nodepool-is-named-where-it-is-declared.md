@@ -1,6 +1,6 @@
 # Every NodePool is named where it is declared
 
-**Status:** Accepted, amended 2026-10-09: a NodePool's capacity is its third mandatory argument, per [ADR: Every NodePool states its Node capacity or names one its Scenarios define](2026-10-09-every-nodepool-states-or-names-its-node-capacity.md)
+**Status:** Accepted, amended 2026-10-09: a NodePool's capacity is its third mandatory argument, per [ADR: Every NodePool states its Node capacity or names one its Scenarios define](2026-10-09-every-nodepool-states-or-names-its-node-capacity.md); amended 2026-10-18: `lab.NodePool`, `lab.NodePoolName` and `lab.NodesPerZone` are now `node.Pool`, `node.PoolName` and `node.PerZone`, and `lab.DeclaredNodePool` is now `node.DeclaredPool`, per [ADR: Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given](2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md)
 
 ## Context
 

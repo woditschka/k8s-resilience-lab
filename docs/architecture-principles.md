@@ -123,6 +123,7 @@ An interface is declared in the package that consumes it, sized to the methods t
 | **Errors as values** | Wrap with context, `fmt.Errorf("context: %w", err)`. A caller that must branch gets a sentinel or a typed error and inspects it with `errors.Is` or `errors.As`. | The error-flow rule in Go's own form; no string matching. |
 | **Standard library first** | `slices`, `maps`, `cmp`, `errors`, `log/slog`, and `net/http` before a dependency or a hand-written equivalent. | Fewer dependencies; idioms every Go reader knows. |
 | **Packages over helper types** | A stateless function set over a type the project does not own is a subject-named package (`slug`). No `Helper` type, and no `util`, `common`, or `misc` package. | The package is Go's native form of the utility class (§ Naming). |
+| **Names read by subject** | An exported name sits in a package named for its subject and does not repeat it; no dot import. A value of several fields is written as a keyed composite literal whose field names are the external model's own. No function exists only to label an argument's position. | Go qualifies every identifier with its package name, so the qualifier reads as the noun (§ Naming). |
 
 These principles apply equally to production code and test code. Tests are first-class code: they use the same constructors, `With` copies, and keyed literals as production.
 

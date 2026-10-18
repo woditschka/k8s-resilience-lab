@@ -6,13 +6,13 @@
 
 package scenarios
 
-import "github.com/woditschka/k8s-resilience-lab/internal/lab"
+import "github.com/woditschka/k8s-resilience-lab/internal/lab/node"
 
 // StandardNodes are Nodes of Standard capacity. They leave room for more than
 // one Pod per Node, so an even Placement is the scheduler honouring the
 // Workload's declared spread rather than the Nodes running out of room, and
 // enough cpu and memory for every one of those Pods to ask for an ordinary
 // share, so the Pod count stays the tighter bound.
-func StandardNodes() lab.DeclaredNodeCapacity {
-	return lab.NamedNodeCapacity("Standard", lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+func StandardNodes() node.Capacity {
+	return node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
 }

@@ -90,7 +90,7 @@ func aRecordedScenario(t *testing.T, topology scenario.Topology, workload scenar
 
 func TestAScenarioWithATopologyAndAWorkload_ShouldRecordEveryNodePodAndWorkloadChange(t *testing.T) {
 	t.Parallel()
-	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement())
+	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
 
 	recorded, delivered, settled := aRecordedScenario(t, topology, workload)
 
@@ -105,14 +105,14 @@ func TestAScenarioWithATopologyAndAWorkload_ShouldRecordEveryNodePodAndWorkloadC
 
 func TestARecordedTimeline_ShouldHoldItsEntriesInTheOrderTheLabReceivedThem(t *testing.T) {
 	t.Parallel()
-	recorded, _, _ := aRecordedScenario(t, anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement()))
+	recorded, _, _ := aRecordedScenario(t, anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement(t)))
 
 	expect.Expect(t, slices.IsSortedFunc(recorded.Entries(), byReceipt)).To(expect.Equal(true))
 }
 
 func TestAPlacedPodAndAPendingPod_ShouldCarryTheReasonTheControlPlaneGave(t *testing.T) {
 	t.Parallel()
-	workload := aWorkloadDeclaring(t, twoPods, resilientPlacement())
+	workload := aWorkloadDeclaring(t, twoPods, resilientPlacement(t))
 
 	recorded, _, settled := aRecordedScenario(t, aTopologyOfOneNodeHoldingOnePod(t), workload)
 

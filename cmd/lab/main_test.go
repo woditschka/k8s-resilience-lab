@@ -52,9 +52,11 @@ const (
 	aFindingReported           = "Finding"
 
 	// resilientPlacementDeclared is the Workload's own Given line, which names the
-	// predefined Pod specification its Pods are deployed with: the Step's name is
-	// derived from that specification's name, so a run is where the two meet.
-	resilientPlacementDeclared = "Given a Workload checkout of 9 Pods declaring Resilient placement"
+	// predefined Pod specification its Pods are deployed with and the Startup time
+	// that specification's definition in the Scenarios' place names: the Step's name
+	// is derived from both, so a run is where the definition and the line meet.
+	resilientPlacementDeclared = "Given a Workload checkout of 9 Pods declaring Resilient placement, " +
+		"each Pod starting in 500ms to 1s"
 )
 
 // The two Wait lines every Scenario of the lab reports, read by the prefix each
@@ -81,6 +83,35 @@ const (
 	theRequiredCapacityDeclared = resilientPlacementDeclared + ", keeping at least 6 Pods Running"
 	theCapacityJudged           = "Then the Required Capacity held: a minimum of 6 Pods, "
 )
+
+// aSettingCarried opens each line a Workload's Given reports a setting its Pods
+// carry on: one level deeper than the Given it belongs to.
+const aSettingCarried = "\n    "
+
+// resilientPlacementCarries are the lines the Given declaring Resilient placement
+// reports under it, one per setting its Pods carry under its Kubernetes name: the
+// two tolerations the Named setting for leaving an unresponsive Node stands for,
+// at the lab's waiting time, then the Even spread its definition names over
+// Zones and over Nodes, each in full (docs/prd.md REQ-SIM-016).
+func resilientPlacementCarries() string {
+	return theLabsTolerationCarried("node.kubernetes.io/not-ready") +
+		theLabsTolerationCarried("node.kubernetes.io/unreachable") +
+		aSettingCarried + "topologySpreadConstraints: {topologyKey: topology.kubernetes.io/zone, maxSkew: 1, " +
+		"whenUnsatisfiable: DoNotSchedule, nodeTaintsPolicy: Honor}" +
+		aSettingCarried + "topologySpreadConstraints: {topologyKey: kubernetes.io/hostname, maxSkew: 1, " +
+		"whenUnsatisfiable: DoNotSchedule, nodeTaintsPolicy: Honor}"
+}
+
+// theLabsTolerationCarried is the line reporting a toleration of that taint at
+// the lab's waiting time, read from the constant that sets it.
+func theLabsTolerationCarried(taint string) string {
+	return aSettingCarried + "tolerations: {key: " + taint + ", operator: Exists, effect: NoExecute, tolerationSeconds: " +
+		strconv.FormatInt(int64(scenario.UnresponsiveNodeWait/time.Second), 10) + "}"
+}
+
+// theRequestCarried is the line reporting the request the No room Scenario
+// customizes Resilient placement with, after the settings its definition sets.
+const theRequestCarried = aSettingCarried + "resources.requests: {cpu: 3, memory: 12Gi}"
 
 // The lines a run of the Node stops responding Scenario is read by: its heading
 // under the run name derived for it, the When Step naming the Node the lab
@@ -161,10 +192,10 @@ const (
 	// on the control plane.
 	labWaitingTime = "lab waiting time:"
 
-	// The lab's own Startup time is reported under a label of its own as well: it
-	// is the time every Pod of a Scenario stating none takes to become Ready
-	// (docs/prd.md REQ-SIM-012).
-	labStartupTime = "Pod startup time:"
+	// aPodStartupTimeSetting is the label a Startup time of the lab's own was
+	// reported under, which a run no longer opens a line with: every Pod
+	// specification names its own (docs/prd.md REQ-SIM-015).
+	aPodStartupTimeSetting = "Pod startup time:"
 )
 
 // wholeTimelineAsked is the argument an engineer asks a run for every entry of
@@ -330,6 +361,17 @@ func theLineOpeningWith(reported, label string) string {
 	return ""
 }
 
+// Resilient placement names the Even spread over Zones and over Nodes, and the
+// Given declaring a Workload of it reports both spreads in full beneath its line,
+// each value under its Kubernetes name, so a reader of the run sees what the
+// Named setting stands for (docs/prd.md REQ-SIM-016 edge case 5).
+func TestAWorkloadDeclaringResilientPlacement_ShouldReportBothSpreadsInFullBeneathItsGivenLine(t *testing.T) {
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
+
+	reportShows(t, reported, resilientPlacementDeclared+resilientPlacementCarries())
+}
+
 // This is where the lab's own Scenarios run: on a Simulated Cluster the run
 // provisions for each of them, which is what makes the Placement the control
 // plane's own doing. A Scenario has no test of its own — it is itself the check —
@@ -340,7 +382,6 @@ func TestResilientPlacementWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNo
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, resilientPlacementReported)
-	reportShows(t, reported, resilientPlacementDeclared)
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, threePodsPerZoneJudged)
@@ -358,7 +399,7 @@ func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFai
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, nodeStopsRespondingReported)
-	reportShows(t, reported, theRequiredCapacityDeclared)
+	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries())
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneNodeFailsReported)
@@ -381,7 +422,7 @@ func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *tes
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, zoneStopsRespondingReported)
-	reportShows(t, reported, theRequiredCapacityDeclared)
+	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries())
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneZoneFailsReported)
@@ -403,7 +444,7 @@ func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndTh
 
 	reportShows(t, reported, noRoomAfterAZoneStopsRespondingReported)
 	reportShows(t, reported, theNodeCapacityDeclared)
-	reportShows(t, reported, theRequiredCapacityDeclared)
+	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries()+theRequestCarried)
 	reportShows(t, reported, onePodPerNodeJudged)
 	reportShows(t, reported, oneZoneFailsReported)
 	reportShows(t, reported, thePlacementSettledAwaited)
@@ -418,11 +459,9 @@ func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndTh
 // replaces, so a reader of a run can tell which of the timings it watched are
 // the lab's doing and which are Kubernetes' own. The lab's own waiting time is
 // reported beside them, because a time a Wait states is refused against it and an
-// engineer writing one cannot otherwise see the number, and so is its own Startup
-// time, the shortest and the longest each Pod of a Scenario stating none takes
-// its own time between. One run is read for all
-// five, because each of them holds for the whole run.
-func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaitingAndStartupTimes(t *testing.T) {
+// engineer writing one cannot otherwise see the number. One run is read for all
+// four, because each of them holds for the whole run.
+func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaitingTime(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
 
@@ -433,8 +472,16 @@ func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaiting
 	reportLineNames(t, reported, nodeEvictionSetting,
 		cluster.NodeEvictionRate, cluster.DefaultNodeEvictionRate)
 	reportLineNames(t, reported, labWaitingTime, scenario.WaitingTime.String())
-	reportLineNames(t, reported, labStartupTime,
-		scenario.DefaultShortestStartupTime.String(), scenario.DefaultLongestStartupTime.String())
+}
+
+// The lab holds no Startup time of its own, so a run's start reports none beside
+// its settings: each Pod specification names its own, and the Given line
+// declaring a Workload reports it (docs/prd.md REQ-SIM-015).
+func TestARunsStart_ShouldReportNoStartupTimeOfTheLabsOwn(t *testing.T) {
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
+
+	reportLacks(t, reported, aPodStartupTimeSetting)
 }
 
 // The lab defines no Node capacity of its own, so a run's start reports none
@@ -449,7 +496,7 @@ func TestARunsStart_ShouldReportNoNodeCapacityOfTheLabsOwn(t *testing.T) {
 
 // A NodePool naming Standard reports, on the Given line declaring it, the name
 // and what Standard stands for: cpu, memory, then Pod count, the order every
-// reported capacity names (docs/prd.md REQ-SIM-011).
+// reported capacity names (docs/prd.md REQ-SIM-015).
 func TestARunOfANodePoolNamingStandard_ShouldReportWhatStandardStandsForOnItsGivenLine(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)

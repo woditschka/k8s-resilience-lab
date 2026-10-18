@@ -1,7 +1,8 @@
 // The two rules in this file govern the place the lab's Scenarios sit in: that
-// every declaration there is a Scenario, a Workload name, a Named Node capacity
-// or the list, each in the file admitted for it; and that the place holds every Scenario under a name it
-// can run, a README naming them, no test file and nothing of the machinery. They
+// every declaration there is a Scenario, a Workload name, a Named Node capacity,
+// a predefined Pod specification, a Named setting or the list, each in the file
+// admitted for it; and that the place holds every Scenario under a name it can
+// run, a README naming them, no test file and nothing of the machinery. They
 // live with the machinery that defines what a Step is rather than in the
 // prominent place itself, so the place stays Scenarios alone
 // (docs/architecture-principles.md § Module Boundaries).
@@ -53,27 +54,77 @@ const (
 // theNamedNodeCapacities is the file of the place where the lab's own Scenarios
 // take the Named Node capacities they name from, the lab defining none. In it,
 // every declaration is an exported function taking nothing whose body is one
-// return of a call to the Step surface's theNamedNodeCapacityDefinition, the name
+// return of a call to the node package's theNamedNodeCapacityDefinition, the name
 // written first as a string literal, so the file holds definitions and no
 // machinery, and each name has the one definition a Scenario reaches it by.
 const (
 	theNamedNodeCapacities         = "nodes.go"
-	theNamedNodeCapacityDefinition = "NamedNodeCapacity"
+	theNamedNodeCapacityDefinition = "Named"
 	theReturn                      = "return "
 )
 
 // theDomainsName and theDomainsNamedNodeCapacity are the package and the
-// constructor the Step surface's definition builds a Named Node capacity
-// through, and theLabsSourceRoots the directories under the module root whose
-// sources are the lab itself rather than its Scenarios. No source there defines
-// a Named Node capacity: only the Step surface's own definition calls the
-// domain's constructor.
+// constructor the node package builds a Named Node capacity through, and
+// theLabsSourceRoots the directories under the module root whose sources are the
+// lab itself rather than its Scenarios. No source there defines a Named Node
+// capacity: only theNamedCapacitysDomainValue, the node package's one
+// declaration building the domain value of a capacity a Scenario named, calls
+// the domain's constructor.
 const (
-	theDomainsName              = "scenario"
-	theDomainsNamedNodeCapacity = "NewNamedNodeCapacity"
+	theDomainsName               = "scenario"
+	theDomainsNamedNodeCapacity  = "NewNamedNodeCapacity"
+	theNamedCapacitysDomainValue = "declared"
 )
 
 var theLabsSourceRoots = []string{"internal", "cmd"}
+
+// thePodSpecifications is the file of the place where the lab's own Scenarios
+// take the predefined Pod specifications they declare from, the lab defining
+// none. In it, every declaration is an exported function taking nothing whose
+// body is one return of a call to the pod package's thePodSpecificationDefinition,
+// the name written first as a string literal and the Startup time second, or one
+// of theNamedSettings, so the file holds definitions and no machinery.
+// theDomainsPodSpecification is the constructor that definition builds the
+// domain value through, which no other source of the lab calls.
+const (
+	thePodSpecifications          = "pods.go"
+	thePodSpecificationDefinition = "Predefined"
+	theDomainsPodSpecification    = "NewPodSpecification"
+	theStartupTimeArgument        = 1
+	theFirstSettingArgument       = 2
+	theNamedSetting               = "LeaveUnresponsiveNodes"
+	theGroupingMeans              = "Settings"
+	theTolerationSetting          = "Toleration"
+	theTolerationsKey             = "Key"
+	theTolerationFields           = 4
+)
+
+// theEvenSpread is the Named setting for one spread the Scenarios define beside
+// their specifications, theSpreadSetting the setting it holds, and theSpreadFields
+// how many fields that setting writes. theResilientPlacement is the definition
+// naming it once over each of theSpreadSubjects, the node package's labels for
+// a Zone and for a Node.
+const (
+	theEvenSpread          = "EvenSpreadOver"
+	theSpreadSetting       = "TopologySpreadConstraint"
+	theSpreadFields        = 4
+	theEvenSkew            = "1"
+	theResilientPlacement  = "ResilientPlacement"
+	theSpreadSubjectOfZone = "Zone"
+	theSpreadSubjectOfNode = "Hostname"
+)
+
+// theNamedSettings are the functions the file of Pod specifications holds beside
+// them; theLabsTaints are the two taints, as the node package names them, that
+// the Named setting every definition names tolerates by the lab's waiting time,
+// and that no definition writes a toleration of itself; theStartupForms are the
+// four calls a definition names its Startup time with.
+var (
+	theNamedSettings  = []string{theNamedSetting, theEvenSpread}
+	theSpreadSubjects = []string{theSpreadSubjectOfZone, theSpreadSubjectOfNode}
+	theLabsTaints     = []string{"NotReady", "Unreachable"}
+	theStartupForms   = []string{"StartupSeconds", "StartupSecondsBetween", "StartupMillis", "StartupMillisBetween"}
+)
 
 // theList is the other file of the place that is not a Scenario: it holds the
 // one exported function naming every Scenario of the place, taking nothing,
@@ -86,27 +137,40 @@ const (
 	onlyOnce        = 1
 )
 
-// theStepSurface is the one package a Scenario source imports: the lab's own
-// Step surface, this package.
-const theStepSurface = "github.com/woditschka/k8s-resilience-lab/internal/lab"
+// theStepSurface is the package a Scenario's Steps are written against: the lab's
+// own Step surface, this package. thePodPackage and theNodePackage are the two
+// beneath it a Scenario imports beside it, holding what a Pod carries and what a
+// Node is, per docs/adr/2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md.
+const (
+	theStepSurface = "github.com/woditschka/k8s-resilience-lab/internal/lab"
+	thePodPackage  = theStepSurface + "/pod"
+	theNodePackage = theStepSurface + "/node"
+)
 
-// theStepSurfaceName is the name a Scenario source reaches that surface under,
-// which is the one prefix every name it writes carries, and theScenarioParameter
-// is what a Scenario function takes and its every Step is called on, as a source
-// writes it. A source reaching the surface under another name is reported as
-// holding no Scenario, which is the same finding by a different route.
+// theStepSurfaceName, thePodName and theNodeName are the names a Scenario source
+// reaches those three packages under, the subjects every name it writes reads
+// by, and theScenarioParameter is what a Scenario function takes and its every
+// Step is called on, as a source writes it. A source reaching the surface under
+// another name is reported as holding no Scenario, which is the same finding by
+// a different route.
 const (
 	theStepSurfaceName   = "lab"
+	thePodName           = "pod"
+	theNodeName          = "node"
 	theScenarioParameter = "*" + theStepSurfaceName + ".Scenario"
 )
 
-// theLabsOwnPackageDir is where this package's own sources sit under the module
-// root, which the names it offers Scenarios are read off.
+// theSubjects are the names of the three packages a Scenario reaches the lab
+// through.
+var theSubjects = []string{theStepSurfaceName, thePodName, theNodeName}
+
+// theLabsOwnPackageDir is where the three packages' own sources sit under the
+// module root, which the names they offer Scenarios are read off.
 const theLabsOwnPackageDir = "internal/lab"
 
 // thePodSettingsPackage is the one Kubernetes package a Scenario may import
-// beside the Step surface: the one naming the Pod settings a Scenario reaches
-// through full access, where the lab's own vocabulary names none. It is the single
+// beside the lab's three: the one naming the Pod settings a Scenario reaches
+// through full access, where the lab names none. It is the single
 // stated exception to the one-vocabulary rule, carried by the depguard rule
 // scenarios-hold-steps-alone and by the import rule below together.
 // thePodSettingsName is the name the lab's own sources reach it under.
@@ -116,13 +180,19 @@ const (
 )
 
 // The imports a scratch Scenario source is written with, each as a source writes
-// it: the Step surface, the Pod settings package, and a Kubernetes package that is
-// neither.
+// it: the lab's three packages, the Pod settings package, a Kubernetes package
+// that is neither, and the domain package the lab's packages keep behind them.
 const (
 	theStepSurfaceImport      = `"` + theStepSurface + `"`
+	thePodImport              = `"` + thePodPackage + `"`
+	theNodeImport             = `"` + theNodePackage + `"`
 	thePodSettingsImport      = thePodSettingsName + ` "` + thePodSettingsPackage + `"`
 	theKubernetesClientImport = `"k8s.io/client-go/kubernetes"`
+	theDomainImport           = `"github.com/woditschka/k8s-resilience-lab/internal/scenario"`
 )
+
+// theScenarioImports are the imports a Scenario of the lab writes.
+var theScenarioImports = []string{theStepSurfaceImport, theNodeImport, thePodImport}
 
 // theScenarioSourceShape is a Scenario source holding its imports and one Workload
 // line, which the shapes the Workload-line, name and import rules admit are read
@@ -150,18 +220,55 @@ const (
 	theLabsSource     = "source.go"
 )
 
-// theNamedNodeCapacitiesShape is a file of Named Node capacities holding its
-// definitions, and theStandardNodesDefinition the one definition the lab's own
-// place holds, which theTopologyLine names.
+// aFileOfDefinitionsShape is a file of Named Node capacities or of predefined
+// Pod specifications holding its definitions, and theStandardNodesDefinition the
+// one Named Node capacity the lab's own place holds, which theTopologyLine names.
 const (
-	theNamedNodeCapacitiesShape = `package scenarios
+	aFileOfDefinitionsShape = `package scenarios
 
-import "github.com/woditschka/k8s-resilience-lab/internal/lab"
+import (
+	"github.com/woditschka/k8s-resilience-lab/internal/lab/node"
+	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
+)
 
 %s
 `
-	theStandardNodesDefinition = `func StandardNodes() lab.DeclaredNodeCapacity {
-	return lab.NamedNodeCapacity("Standard", lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+	theStandardNodesDefinition = `func StandardNodes() node.Capacity {
+	return node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
+}`
+)
+
+// theResilientPlacementDefinition is the one definition of a predefined Pod
+// specification the scratch places below hold, which every Workload line written
+// there declares, naming the Even spread over Zones and over Nodes, and
+// theNamedSettingWritten the Named setting every definition names for its Pods
+// leaving an unresponsive Node.
+const (
+	theNamedSettingWritten          = `LeaveUnresponsiveNodes()`
+	theResilientPlacementDefinition = `func ResilientPlacement() pod.Specification {
+	return pod.Predefined("Resilient placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		EvenSpreadOver(node.Zone),
+		EvenSpreadOver(node.Hostname),
+	)
+}`
+)
+
+// theNamedSettingDefinition and theEvenSpreadDefinition are the two functions of
+// the place's file of Pod specifications that are no specification: the Named
+// setting every definition names, one pod.Settings call of the two tolerations,
+// and the Even spread Resilient placement names over Zones and over Nodes.
+const (
+	theNamedSettingDefinition = `func LeaveUnresponsiveNodes() pod.Customization {
+	return pod.Settings(
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+	)
+}`
+	theEvenSpreadDefinition = `func EvenSpreadOver(topologyKey string) pod.TopologySpreadConstraint {
+	return pod.TopologySpreadConstraint{
+		TopologyKey: topologyKey, MaxSkew: 1, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor,
+	}
 }`
 )
 
@@ -227,7 +334,7 @@ func TestEveryScenarioSource_ShouldHoldOnlyGivenWhenWaitAndThenSteps(t *testing.
 	offenders := declarationsThatDoNotBelong(filesOfThePlace(t, place))
 
 	if len(offenders) > 0 {
-		t.Errorf("a Scenario source holds one exported Scenario function named %s whose every line is a Given, When, Wait or Then Step, and the three files beside them declare the Workload names, the Named Node capacities and the list alone, but:\n%s",
+		t.Errorf("a Scenario source holds one exported Scenario function named %s whose every line is a Given, When, Wait or Then Step, and the four files beside them declare the Workload names, the Named Node capacities, the predefined Pod specifications and the list alone, but:\n%s",
 			theScenarioNameShape,
 			strings.Join(offenders, "\n"))
 	}
@@ -239,7 +346,8 @@ func TestEveryScenarioOfTheLab_ShouldDeclareOnePredefinedPodSpecificationPerWork
 	offenders := workloadLinesDeclaringNoPredefinedSpecification(filesOfThePlace(t, place))
 
 	if len(offenders) > 0 {
-		t.Errorf("every Workload line of a Scenario declares one of the lab's predefined Pod specifications and no setting of its own, but:\n%s",
+		t.Errorf("every Workload line of a Scenario declares one predefined Pod specification of %s and no setting of its own, but:\n%s",
+			thePodSpecifications,
 			strings.Join(offenders, "\n"))
 	}
 }
@@ -269,17 +377,17 @@ func TestTheNodePoolNameRule_ShouldAdmitOneNodePoolNamedGeneralAndReportAnything
 			admitted: true,
 		},
 		"a NodePool stating a capacity": {
-			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
-				`lab.NodeCapacity(lab.CPU(4), lab.MemoryGi(16), lab.Pods(10))))`,
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), ` +
+				`node.Capacity{CPU: 4, Memory: 16 * node.Gi, Pods: 10}))`,
 			admitted: true,
 		},
 		"a NodePool named otherwise": {
-			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("gpu", lab.NodesPerZone(3), lab.StandardNodes()))`,
+			line:     `s.Given().Topology(lab.Zones(3), node.Pool("gpu", node.PerZone(3), StandardNodes()))`,
 			admitted: false,
 		},
 		"two NodePools": {
-			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), lab.StandardNodes()), ` +
-				`lab.NodePool("general", lab.NodesPerZone(1), lab.StandardNodes()))`,
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()), ` +
+				`node.Pool("general", node.PerZone(1), StandardNodes()))`,
 			admitted: false,
 		},
 		"no NodePool": {
@@ -297,10 +405,11 @@ func TestTheNodePoolNameRule_ShouldAdmitOneNodePoolNamedGeneralAndReportAnything
 	}
 }
 
-// theNodePoolStep is how a NodePool's declaration names itself, and
-// theLabsNodePoolName is the name the lab's own Scenarios give their one.
+// theNodePoolStep is how a NodePool's declaration names itself under the node
+// package, and theLabsNodePoolName is the name the lab's own Scenarios give their
+// one.
 const (
-	theNodePoolStep     = "NodePool"
+	theNodePoolStep     = "Pool"
 	theLabsNodePoolName = `"general"`
 )
 
@@ -329,11 +438,12 @@ func scenariosNotNamingTheirOneNodePoolGeneral(files []modulerules.GoFile) []str
 	return offenders
 }
 
-// nodePoolCallsIn is every call to the NodePool declaration inside one expression:
-// on the expression it is called on, and in the arguments of every call.
+// nodePoolCallsIn is every call to the NodePool declaration, node.Pool, inside one
+// expression: on the expression it is called on, and in the arguments of every
+// call.
 func nodePoolCallsIn(expression modulerules.Statement) []modulerules.Statement {
 	var found []modulerules.Statement
-	if expression.Call && expression.Name == theNodePoolStep {
+	if expression.Call && expression.Name == theNodePoolStep && expression.On != nil && expression.On.Name == theNodeName {
 		found = append(found, expression)
 	}
 	if expression.On != nil {
@@ -355,7 +465,7 @@ func TestEveryScenarioOfTheLab_ShouldStateOrNameEachNodePoolsCapacity(t *testing
 	offenders := nodePoolsNeitherStatingNorNamingTheirCapacity(filesOfThePlace(t, place))
 
 	if len(offenders) > 0 {
-		t.Errorf("every NodePool of the lab's Scenarios writes lab.%s(...) or a function %s declares as its capacity, but:\n%s",
+		t.Errorf("every NodePool of the lab's Scenarios writes %s...} or a function %s declares as its capacity, but:\n%s",
 			theStatedCapacity, theNamedNodeCapacities, strings.Join(offenders, "\n"))
 	}
 }
@@ -372,26 +482,31 @@ func TestTheNodeCapacityRule_ShouldAdmitAStatedOrNamedCapacityAndReportAnythingE
 			admitted: true,
 		},
 		"a NodePool stating its capacity": {
-			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
-				`lab.NodeCapacity(lab.CPU(4), lab.MemoryGi(16), lab.Pods(10))))`,
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), ` +
+				`node.Capacity{CPU: 4, Memory: 16 * node.Gi, Pods: 10}))`,
 			admitted: true,
 		},
+		"a NodePool stating its capacity as a value of another type": {
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), ` +
+				`pod.Request{CPU: 4, Memory: 16 * pod.Gi}))`,
+			admitted: false,
+		},
 		"a NodePool naming a capacity of the lab's own": {
-			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), lab.StandardNodes()))`,
+			line:     `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), node.StandardNodes()))`,
 			admitted: false,
 		},
 		"a NodePool naming a capacity the place does not define": {
-			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), ` +
 				`aCapacityOfItsOwn()))`,
 			admitted: false,
 		},
 		"a NodePool defining its capacity on its own line": {
-			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
-				`lab.NamedNodeCapacity("Standard", lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))))`,
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), ` +
+				`node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})))`,
 			admitted: false,
 		},
 		"a NodePool writing no capacity": {
-			line:     `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3)))`,
+			line:     `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3)))`,
 			admitted: false,
 		},
 	}
@@ -405,17 +520,17 @@ func TestTheNodeCapacityRule_ShouldAdmitAStatedOrNamedCapacityAndReportAnythingE
 	}
 }
 
-// theStatedCapacity is the call the Step surface offers a NodePool stating its
-// capacity by, and theCapacityArgument is where the NodePool call takes its
-// capacity: after its name and its Node count.
+// theStatedCapacity opens the literal the node package offers a NodePool
+// stating its capacity by, and theCapacityArgument is where the NodePool call
+// takes its capacity: after its name and its Node count.
 const (
-	theStatedCapacity   = "NodeCapacity"
+	theStatedCapacity   = theNodeName + ".Capacity{"
 	theCapacityArgument = 2
 )
 
 // nodePoolsNeitherStatingNorNamingTheirCapacity names every NodePool of a Scenario
-// of the place whose capacity argument is neither a call to lab.NodeCapacity nor
-// a call of a function the place's file of Named Node capacities declares, or
+// of the place whose capacity argument is neither a node.Capacity literal nor a
+// call of a function the place's file of Named Node capacities declares, or
 // which writes no capacity argument at all.
 func nodePoolsNeitherStatingNorNamingTheirCapacity(files []modulerules.GoFile) []string {
 	named := theNamedNodeCapacitiesDeclaredIn(files)
@@ -440,21 +555,18 @@ func nodePoolsNeitherStatingNorNamingTheirCapacity(files []modulerules.GoFile) [
 }
 
 // statesOrNamesItsCapacity reports whether a NodePool call takes its capacity as
-// the call the Step surface offers for stating one, or as an unqualified call of
-// one of the Named Node capacities the place defines.
+// the literal the node package offers for stating one, or as an unqualified call
+// of one of the Named Node capacities the place defines.
 func statesOrNamesItsCapacity(pool modulerules.Statement, named map[string]bool) bool {
 	if len(pool.Arguments) <= theCapacityArgument {
 		return false
 	}
 	capacity := pool.Arguments[theCapacityArgument]
-	if !capacity.Call {
-		return false
-	}
-	if capacity.On == nil {
-		return named[capacity.Name]
+	if strings.HasPrefix(capacity.Written, theStatedCapacity) {
+		return true
 	}
 
-	return capacity.On.Name == theStepSurfaceName && capacity.Name == theStatedCapacity
+	return capacity.Call && capacity.On == nil && named[capacity.Name]
 }
 
 // theNamedNodeCapacitiesDeclaredIn are the names the place's file of Named Node
@@ -475,9 +587,9 @@ func theNamedNodeCapacitiesDeclaredIn(files []modulerules.GoFile) map[string]boo
 
 // Each Named Node capacity the lab's Scenarios name is defined once, in the
 // place's file of them, and nowhere else: no Scenario defines one on its own
-// line, and no source of the lab itself defines one, the Step surface's own
-// definition being the one call of the domain's constructor (docs/prd.md
-// REQ-SIM-015).
+// line, and no source of the lab itself defines one, the node package's own
+// building of a named capacity being the one call of the domain's constructor
+// (docs/prd.md REQ-SIM-015).
 func TestEveryNamedNodeCapacityOfTheScenarios_ShouldBeDefinedOnceBesideThem(t *testing.T) {
 	place := theScenariosPlace(t)
 
@@ -486,7 +598,7 @@ func TestEveryNamedNodeCapacityOfTheScenarios_ShouldBeDefinedOnceBesideThem(t *t
 		callsDefiningANamedNodeCapacityOfTheLabsOwn(theLabsOwnSources(t)))
 
 	if len(offenders) > 0 {
-		t.Errorf("each Named Node capacity is defined once in %s, by an exported function taking nothing that returns one lab.%s call, and the lab defines none, but:\n%s",
+		t.Errorf("each Named Node capacity is defined once in %s, by an exported function taking nothing that returns one node.%s call, and the lab defines none, but:\n%s",
 			theNamedNodeCapacities, theNamedNodeCapacityDefinition, strings.Join(offenders, "\n"))
 	}
 }
@@ -495,22 +607,20 @@ func TestEveryNamedNodeCapacityOfTheScenarios_ShouldBeDefinedOnceBesideThem(t *t
 // writes only the shape it admits.
 func TestTheNamedNodeCapacitiesRule_ShouldAdmitOneDefinitionPerNameAndReportAnythingElse(t *testing.T) {
 	const (
-		theStandardDefinition = `func StandardNodes() lab.DeclaredNodeCapacity {
-	return lab.NamedNodeCapacity("Standard", lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+		theStandardDefinition       = theStandardNodesDefinition
+		aSecondDefinitionOfStandard = `func MoreStandardNodes() node.Capacity {
+	return node.Named("Standard", node.Capacity{CPU: 32, Memory: 128 * node.Gi, Pods: 20})
 }`
-		aSecondDefinitionOfStandard = `func MoreStandardNodes() lab.DeclaredNodeCapacity {
-	return lab.NamedNodeCapacity("Standard", lab.CPU(32), lab.MemoryGi(128), lab.Pods(20))
+		aDefinitionTakingItsValues = `func SizedNodes(pods int) node.Capacity {
+	return node.Named("Sized", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: pods})
 }`
-		aDefinitionTakingItsValues = `func SizedNodes(pods lab.Pods) lab.DeclaredNodeCapacity {
-	return lab.NamedNodeCapacity("Sized", lab.CPU(16), lab.MemoryGi(64), pods)
+		aDefinitionReturningAStatedCapacity = `func StatedNodes() node.Capacity {
+	return node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10}
 }`
-		aDefinitionReturningAStatedCapacity = `func StatedNodes() lab.DeclaredNodeCapacity {
-	return lab.NodeCapacity(lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+		aDefinitionUnderAComputedName = `func ComputedNodes() node.Capacity {
+	return node.Named(node.CapacityName("Comp"+"uted"), node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
 }`
-		aDefinitionUnderAComputedName = `func ComputedNodes() lab.DeclaredNodeCapacity {
-	return lab.NamedNodeCapacity(lab.NodeCapacityName("Comp"+"uted"), lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
-}`
-		aVariableOfACapacity = `var LargeNodes = lab.NamedNodeCapacity("Large", lab.CPU(32), lab.MemoryGi(128), lab.Pods(10))`
+		aVariableOfACapacity = `var LargeNodes = node.Named("Large", node.Capacity{CPU: 32, Memory: 128 * node.Gi, Pods: 10})`
 	)
 
 	written := map[string]struct {
@@ -545,8 +655,8 @@ func TestTheNamedNodeCapacitiesRule_ShouldAdmitOneDefinitionPerNameAndReportAnyt
 		},
 		"a Scenario defining one on its own line": {
 			definitions: []string{theStandardDefinition},
-			line: `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), ` +
-				`lab.NamedNodeCapacity("Large", lab.CPU(32), lab.MemoryGi(128), lab.Pods(10))))`,
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), ` +
+				`node.Named("Large", node.Capacity{CPU: 32, Memory: 128 * node.Gi, Pods: 10})))`,
 		},
 	}
 
@@ -565,32 +675,32 @@ func TestTheNamedNodeCapacitiesRule_ShouldAdmitOneDefinitionPerNameAndReportAnyt
 }
 
 // The rule's own decisions over the lab's sources are read here, since the
-// shipped sources hold only the Step surface's own definition.
-func TestTheLabDefinesNoNamedNodeCapacityRule_ShouldReportEveryDefinitionButTheStepSurfacesOwn(t *testing.T) {
+// shipped sources hold only the node package's own building of a named capacity.
+func TestTheLabDefinesNoNamedNodeCapacityRule_ShouldReportEveryDefinitionButTheNodePackagesOwn(t *testing.T) {
 	written := map[string]struct {
 		source   string
 		admitted bool
 	}{
-		"the Step surface's own definition": {
-			source: `package lab
+		"the node package's own building of a named capacity": {
+			source: `package node
 
-func NamedNodeCapacity(name NodeCapacityName, cpu scenario.CPU, memory scenario.Memory, pods Pods) DeclaredNodeCapacity {
-	named, err := scenario.NewNamedNodeCapacity(string(name), NodeCapacity(cpu, memory, pods).declared)
-	return DeclaredNodeCapacity{declared: named.Capacity(), refused: err}
+func (c Capacity) declared() (scenario.NodeCapacity, error) {
+	named, err := scenario.NewNamedNodeCapacity(string(c.name), scenario.NodeCapacity{})
+	return named.Capacity(), err
 }
 `,
 			admitted: true,
 		},
-		"the Step surface defining a capacity of its own": {
-			source: `package lab
+		"the node package defining a capacity of its own": {
+			source: `package node
 
-func StandardNodes() DeclaredNodeCapacity {
-	return NamedNodeCapacity("Standard", CPU(16), MemoryGi(64), Pods(10))
+func StandardNodes() Capacity {
+	return Named("Standard", Capacity{CPU: 16, Memory: 64 * Gi, Pods: 10})
 }
 `,
 		},
-		"the Step surface reaching the domain's constructor elsewhere": {
-			source: `package lab
+		"the node package reaching the domain's constructor elsewhere": {
+			source: `package node
 
 func StandardNodes() scenario.NamedNodeCapacity {
 	named, _ := scenario.NewNamedNodeCapacity("Standard", scenario.NodeCapacity{})
@@ -607,11 +717,19 @@ func StandardNodeCapacity() NamedNodeCapacity {
 }
 `,
 		},
+		"the Step surface defining a capacity of its own": {
+			source: `package lab
+
+func standardNodes() node.Capacity {
+	return node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
+}
+`,
+		},
 		"the command defining a capacity of its own": {
 			source: `package main
 
-func standardNodes() lab.DeclaredNodeCapacity {
-	return lab.NamedNodeCapacity("Standard", lab.CPU(16), lab.MemoryGi(64), lab.Pods(10))
+func standardNodes() node.Capacity {
+	return node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
 }
 `,
 		},
@@ -631,7 +749,7 @@ func standardNodes() lab.DeclaredNodeCapacity {
 // namedNodeCapacitiesNotDefinedOnceBesideTheScenarios names every declaration of
 // the place's file of Named Node capacities that is not one definition, every
 // name defined more than once there, and every other file of the place calling
-// the Step surface's definition itself.
+// the node package's definition itself.
 func namedNodeCapacitiesNotDefinedOnceBesideTheScenarios(files []modulerules.GoFile) []string {
 	var offenders []string
 	defined := make(map[string]int)
@@ -643,7 +761,7 @@ func namedNodeCapacitiesNotDefinedOnceBesideTheScenarios(files []modulerules.GoF
 		}
 		offenders = append(offenders, declarationsThatAreNotNamedNodeCapacities(file)...)
 		for _, declared := range file.Declarations {
-			if name, isADefinition := theNameDefinedBy(declared); isADefinition {
+			if name, _, isADefinition := theNameDefinedBy(declared, theNodeName, theNamedNodeCapacityDefinition); isADefinition {
 				defined[name]++
 			}
 		}
@@ -664,9 +782,9 @@ func namedNodeCapacitiesNotDefinedOnceBesideTheScenarios(files []modulerules.GoF
 func declarationsThatAreNotNamedNodeCapacities(source modulerules.GoFile) []string {
 	var offenders []string
 	for _, declared := range source.Declarations {
-		if _, isADefinition := theNameDefinedBy(declared); !isADefinition {
+		if _, _, isADefinition := theNameDefinedBy(declared, theNodeName, theNamedNodeCapacityDefinition); !isADefinition {
 			offenders = append(offenders, fmt.Sprintf("  %s declares the %s %s, which is not an exported function "+
-				"taking nothing that returns one lab.%s call under a name it writes",
+				"taking nothing that returns one node.%s call under a name it writes",
 				source.Path, declared.Kind, declared.Name, theNamedNodeCapacityDefinition))
 		}
 	}
@@ -675,11 +793,11 @@ func declarationsThatAreNotNamedNodeCapacities(source modulerules.GoFile) []stri
 }
 
 // definitionsOutsideTheNamedNodeCapacities names every declaration of another
-// file of the place that calls the Step surface's definition itself.
+// file of the place that calls the node package's definition itself.
 func definitionsOutsideTheNamedNodeCapacities(source modulerules.GoFile) []string {
 	var offenders []string
 	for _, declared := range source.Declarations {
-		if slices.Contains(declared.Names, theStepSurfacesDefinition) {
+		if slices.Contains(declared.Names, theNameOf(theNodeName, theNamedNodeCapacityDefinition)) {
 			offenders = append(offenders, fmt.Sprintf("  %s, in %s: defines a Named Node capacity outside %s",
 				source.Path, declared.Name, theNamedNodeCapacities))
 		}
@@ -688,56 +806,97 @@ func definitionsOutsideTheNamedNodeCapacities(source modulerules.GoFile) []strin
 	return offenders
 }
 
-// theStepSurfacesDefinition is the definition as a source of the place names it.
-var theStepSurfacesDefinition = modulerules.UsedName{
-	Qualifier: theStepSurfaceName, Name: theNamedNodeCapacityDefinition,
+// theNameOf is a name one of the lab's packages offers, as a source of the place
+// writes it.
+func theNameOf(qualifier, name string) modulerules.UsedName {
+	return modulerules.UsedName{Qualifier: qualifier, Name: name}
 }
 
-// theNameDefinedBy is the name a declaration of the file of Named Node
-// capacities defines, and whether it is one definition at all: an exported
-// function taking nothing whose one statement returns a call of the Step
-// surface's definition, its first argument the name as a string literal.
-func theNameDefinedBy(declared modulerules.Declaration) (string, bool) {
+// theNameDefinedBy is the name a declaration of a file of definitions defines,
+// the call defining it, and whether it is one definition at all: an exported
+// function taking nothing whose one statement returns a call of the definition
+// the package qualified offers, its first argument the name as a string literal.
+func theNameDefinedBy(declared modulerules.Declaration, qualifier, definition string) (string, *ast.CallExpr, bool) {
 	if declared.Kind != modulerules.FuncDeclaration || !declared.Exported ||
 		len(declared.Parameters) != 0 || len(declared.Statements) != onlyOnce {
-		return "", false
+		return "", nil, false
 	}
 	returned, isAReturn := strings.CutPrefix(declared.Statements[0].Written, theReturn)
 	if !isAReturn {
-		return "", false
+		return "", nil, false
 	}
 	parsed, err := parser.ParseExpr(returned)
 	if err != nil {
-		return "", false
+		return "", nil, false
 	}
 	call, isACall := parsed.(*ast.CallExpr)
-	if !isACall || len(call.Args) == 0 || !callsTheStepSurfacesDefinition(call) {
-		return "", false
+	if !isACall || len(call.Args) == 0 || !callsThe(call, qualifier, definition) {
+		return "", nil, false
 	}
 	literal, isALiteral := call.Args[0].(*ast.BasicLit)
 	if !isALiteral || literal.Kind != token.STRING {
-		return "", false
+		return "", nil, false
 	}
 	name, err := strconv.Unquote(literal.Value)
 
-	return name, err == nil
+	return name, call, err == nil
 }
 
-// callsTheStepSurfacesDefinition reports whether call is lab.NamedNodeCapacity.
-func callsTheStepSurfacesDefinition(call *ast.CallExpr) bool {
-	selected, isSelected := call.Fun.(*ast.SelectorExpr)
-	if !isSelected || selected.Sel.Name != theNamedNodeCapacityDefinition {
+// callsThe reports whether call is the function of that name the package
+// qualified offers, as a source of the place writes it: <qualifier>.<name>.
+func callsThe(call *ast.CallExpr, qualifier, name string) bool {
+	return namesThe(call.Fun, qualifier, name)
+}
+
+// namesThe reports whether an expression is the name of that name the package
+// qualified offers, <qualifier>.<name>, qualified by nothing else.
+func namesThe(expression ast.Expr, qualifier, name string) bool {
+	selected, isSelected := expression.(*ast.SelectorExpr)
+	if !isSelected || selected.Sel.Name != name {
 		return false
 	}
-	qualifier, isAName := selected.X.(*ast.Ident)
+	written, isAName := selected.X.(*ast.Ident)
 
-	return isAName && qualifier.Name == theStepSurfaceName
+	return isAName && written.Name == qualifier
+}
+
+// keyedFieldsOf is every field a literal of the type the package qualified
+// offers under that name sets, by its key, and whether written is such a literal
+// with a key beside every value.
+func keyedFieldsOf(written ast.Expr, qualifier, name string) (map[string]ast.Expr, bool) {
+	literal, isALiteral := written.(*ast.CompositeLit)
+	if !isALiteral || !namesThe(literal.Type, qualifier, name) {
+		return nil, false
+	}
+
+	fields := make(map[string]ast.Expr, len(literal.Elts))
+	for _, element := range literal.Elts {
+		keyed, isKeyed := element.(*ast.KeyValueExpr)
+		if !isKeyed {
+			return nil, false
+		}
+		key, isAName := keyed.Key.(*ast.Ident)
+		if !isAName {
+			return nil, false
+		}
+		fields[key.Name] = keyed.Value
+	}
+
+	return fields, true
+}
+
+// isALiteralOf reports whether written is a literal of the type the package
+// qualified offers under that name, keyed or not.
+func isALiteralOf(written ast.Expr, qualifier, name string) bool {
+	literal, isALiteral := written.(*ast.CompositeLit)
+
+	return isALiteral && namesThe(literal.Type, qualifier, name)
 }
 
 // callsDefiningANamedNodeCapacityOfTheLabsOwn names every declaration of the
-// lab's own sources that defines a Named Node capacity: one calling the Step
-// surface's definition, from inside the Step surface or out of it, and one
-// calling the domain's constructor but the Step surface's definition itself.
+// lab's own sources that defines a Named Node capacity: one calling the node
+// package's definition, from inside that package or out of it, and one calling
+// the domain's constructor but the node package's building of a named capacity.
 func callsDefiningANamedNodeCapacityOfTheLabsOwn(files []modulerules.GoFile) []string {
 	var offenders []string
 	for _, file := range files {
@@ -759,20 +918,717 @@ func callsDefiningANamedNodeCapacityOfTheLabsOwn(files []modulerules.GoFile) []s
 func definesANamedNodeCapacity(declaredIn string, declared modulerules.Declaration, used modulerules.UsedName) bool {
 	switch used.Name {
 	case theNamedNodeCapacityDefinition:
-		return used.Qualifier == theStepSurfaceName || (used.Qualifier == "" && declaredIn == theStepSurfaceName)
+		return used.Qualifier == theNodeName || (used.Qualifier == "" && declaredIn == theNodeName)
 	case theDomainsNamedNodeCapacity:
-		isTheStepSurfacesDefinition := declaredIn == theStepSurfaceName &&
-			declared.Name == theNamedNodeCapacityDefinition && used.Qualifier == theDomainsName
+		isTheNodePackagesOwn := declaredIn == theNodeName &&
+			declared.Name == theNamedCapacitysDomainValue && used.Qualifier == theDomainsName
 
-		return !isTheStepSurfacesDefinition && (used.Qualifier == theDomainsName || declaredIn == theDomainsName)
+		return !isTheNodePackagesOwn && (used.Qualifier == theDomainsName || declaredIn == theDomainsName)
+	default:
+		return false
+	}
+}
+
+// Each predefined Pod specification the lab's Scenarios declare is defined
+// once, in the place's file of them, and nowhere else: no Scenario defines one on
+// its own line, and no source of the lab itself defines one, the pod package's
+// own mechanism being the one call of the domain's constructor (docs/prd.md
+// REQ-SIM-015, edge case 3 included).
+func TestEveryPodSpecificationOfTheScenarios_ShouldBeDefinedOnceBesideThem(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := slices.Concat(
+		podSpecificationsNotDefinedOnceBesideTheScenarios(filesOfThePlace(t, place)),
+		callsDefiningAPodSpecificationOfTheLabsOwn(theLabsOwnSources(t)))
+
+	if len(offenders) > 0 {
+		t.Errorf("each predefined Pod specification is defined once in %s, by an exported function taking nothing that returns one pod.%s call, and the lab defines none, but:\n%s",
+			thePodSpecifications, thePodSpecificationDefinition, strings.Join(offenders, "\n"))
+	}
+}
+
+// Every definition shows the whole of what it holds: the Startup time its Pods
+// take, named by one of the four Startup forms, and the Named setting standing
+// for both tolerations the lab holds, in place of writing either itself, so a
+// reader of the definition sees that its Pods leave an unresponsive Node after the
+// lab's waiting time (docs/prd.md REQ-SIM-009, REQ-SIM-015 and REQ-SIM-016).
+// Leaving the Startup time out does not compile, since it is the mechanism's
+// second argument.
+func TestEveryPredefinedPodSpecification_ShouldNameTheSettingForLeavingAnUnresponsiveNodeAndWriteNeitherToleration(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := podSpecificationsNotShowingWhatTheyHold(filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("each definition of %s names its Startup time with one of pod.%s, names %s() and writes no pod.%s of the lab's taints, but:\n%s",
+			thePodSpecifications, strings.Join(theStartupForms, ", pod."), theNamedSetting, theTolerationSetting,
+			strings.Join(offenders, "\n"))
+	}
+}
+
+// The rule's own decisions over the place are read here, since the shipped file
+// writes only the shape it admits.
+func TestThePodSpecificationsRule_ShouldAdmitOneDefinitionPerNameAndReportAnythingElse(t *testing.T) {
+	const (
+		aSecondDefinitionOfResilientPlacement = `func EvenPlacement() pod.Specification {
+	return pod.Predefined("Resilient placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+	)
+}`
+		aDefinitionTakingItsValues = `func TimedPlacement(startup pod.StartupTime) pod.Specification {
+	return pod.Predefined("Timed placement", startup,
+		` + theNamedSettingWritten + `,
+	)
+}`
+		aDefinitionUnderAComputedName = `func ComputedPlacement() pod.Specification {
+	return pod.Predefined(pod.SpecificationName("Comp"+"uted"), pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+	)
+}`
+		aVariableOfASpecification = `var LoosePlacement = pod.Predefined("Loose placement", pod.StartupMillisBetween(500, 1000),
+	` + theNamedSettingWritten + `,
+)`
+		aDefinitionNamingNoNamedSetting = `func BarePlacement() pod.Specification {
+	return pod.Predefined("Bare placement", pod.StartupMillisBetween(500, 1000))
+}`
+		aDefinitionWritingTheNotReadyToleration = `func PatientPlacement() pod.Specification {
+	return pod.Predefined("Patient placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: 300},
+	)
+}`
+		aDefinitionWritingTheUnreachableToleration = `func StubbornPlacement() pod.Specification {
+	return pod.Predefined("Stubborn placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+	)
+}`
+		aDefinitionNamingAZeroStartupTime = `func TimelessPlacement() pod.Specification {
+	return pod.Predefined("Timeless placement", pod.StartupTime{},
+		` + theNamedSettingWritten + `,
+	)
+}`
+	)
+
+	written := map[string]struct {
+		definitions []string
+		line        string
+		admitted    bool
+	}{
+		"one definition per name, declared by a Scenario": {
+			definitions: []string{theResilientPlacementDefinition},
+			line:        theWorkloadLine,
+			admitted:    true,
+		},
+		"two definitions under one name": {
+			definitions: []string{theResilientPlacementDefinition, aSecondDefinitionOfResilientPlacement},
+			line:        theWorkloadLine,
+		},
+		"a definition taking a value": {
+			definitions: []string{theResilientPlacementDefinition, aDefinitionTakingItsValues},
+			line:        theWorkloadLine,
+		},
+		"a definition under a name no literal writes": {
+			definitions: []string{theResilientPlacementDefinition, aDefinitionUnderAComputedName},
+			line:        theWorkloadLine,
+		},
+		"a variable in place of a function": {
+			definitions: []string{theResilientPlacementDefinition, aVariableOfASpecification},
+			line:        theWorkloadLine,
+		},
+		"a definition not naming the Named setting": {
+			definitions: []string{theResilientPlacementDefinition, aDefinitionNamingNoNamedSetting},
+			line:        theWorkloadLine,
+		},
+		"a definition writing a toleration of the not-ready taint besides it": {
+			definitions: []string{theResilientPlacementDefinition, aDefinitionWritingTheNotReadyToleration},
+			line:        theWorkloadLine,
+		},
+		"a definition writing a toleration of the unreachable taint besides it": {
+			definitions: []string{theResilientPlacementDefinition, aDefinitionWritingTheUnreachableToleration},
+			line:        theWorkloadLine,
+		},
+		"a definition naming its Startup time by no Startup form": {
+			definitions: []string{theResilientPlacementDefinition, aDefinitionNamingAZeroStartupTime},
+			line:        theWorkloadLine,
+		},
+		"a Scenario defining one on its own line": {
+			definitions: []string{theResilientPlacementDefinition},
+			line: `s.Given().Workload(Checkout, lab.Pods(9), pod.Predefined("Inline placement", ` +
+				`pod.StartupMillisBetween(500, 1000)))`,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			place := aPlaceHolding(t, map[string]string{
+				theScenarioSource: aScenarioSourceWhoseStepsAre(taken.line),
+				thePodSpecifications: aPodSpecificationsSourceOf(
+					append([]string{theNamedSettingDefinition, theEvenSpreadDefinition}, taken.definitions...)...),
+			})
+
+			offenders := slices.Concat(
+				podSpecificationsNotDefinedOnceBesideTheScenarios(place), podSpecificationsNotShowingWhatTheyHold(place))
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// The rule's own decisions over the lab's sources are read here, since the
+// shipped sources hold only the mechanism's own call of the domain's constructor.
+func TestTheLabDefinesNoPodSpecificationRule_ShouldReportEveryDefinitionButTheMechanismsOwn(t *testing.T) {
+	written := map[string]struct {
+		source   string
+		admitted bool
+	}{
+		"the mechanism's own declaration": {
+			source: `package pod
+
+func Predefined(name SpecificationName, startup StartupTime, settings ...Customization) Specification {
+	declared, err := scenario.NewPodSpecification(string(name), startup.taken)
+	return Specification{declared: declared, refused: err}.Customize(settings...)
+}
+`,
+			admitted: true,
+		},
+		"the domain re-entering its own constructor": {
+			source: `package scenario
+
+func (s PodSpecification) Renamed(name string) (PodSpecification, error) {
+	return NewPodSpecification(name, s.startupTime, s.settings...)
+}
+`,
+			admitted: true,
+		},
+		"the pod package defining a specification of its own": {
+			source: `package pod
+
+func ResilientPlacement() Specification {
+	return Predefined("Resilient placement", StartupMillisBetween(500, 1000))
+}
+`,
+		},
+		"the pod package reaching the domain's constructor elsewhere": {
+			source: `package pod
+
+func ResilientPlacement() scenario.PodSpecification {
+	declared, _ := scenario.NewPodSpecification("Resilient placement", scenario.StartupTime{})
+	return declared
+}
+`,
+		},
+		"the command defining a specification of its own": {
+			source: `package main
+
+func resilientPlacement() pod.Specification {
+	return pod.Predefined("Resilient placement", pod.StartupMillisBetween(500, 1000))
+}
+`,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			sources := aPlaceHolding(t, map[string]string{theLabsSource: taken.source})
+
+			offenders := callsDefiningAPodSpecificationOfTheLabsOwn(sources)
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// podSpecificationsNotDefinedOnceBesideTheScenarios names every declaration of
+// the place's file of predefined Pod specifications that is not one definition,
+// every name defined more than once there, and every other file of the place
+// calling the pod package's mechanism itself.
+func podSpecificationsNotDefinedOnceBesideTheScenarios(files []modulerules.GoFile) []string {
+	var offenders []string
+	defined := make(map[string]int)
+	for _, file := range files {
+		if filepath.Base(file.Path) != thePodSpecifications {
+			offenders = append(offenders, definitionsOutsideThePodSpecifications(file)...)
+
+			continue
+		}
+		offenders = append(offenders, declarationsThatAreNotPodSpecifications(file)...)
+		for _, declared := range file.Declarations {
+			if name, _, isADefinition := theNameDefinedBy(declared, thePodName, thePodSpecificationDefinition); isADefinition {
+				defined[name]++
+			}
+		}
+	}
+	for name, definitions := range defined {
+		if definitions > onlyOnce {
+			offenders = append(offenders, fmt.Sprintf("  %s defines the Pod specification %q %d times",
+				thePodSpecifications, name, definitions))
+		}
+	}
+
+	return offenders
+}
+
+// declarationsThatAreNotPodSpecifications names every declaration of the file
+// of predefined Pod specifications that is not one definition: the file holds
+// the specifications the lab's Scenarios declare and nothing else.
+func declarationsThatAreNotPodSpecifications(source modulerules.GoFile) []string {
+	var offenders []string
+	for _, declared := range source.Declarations {
+		if _, _, isADefinition := theNameDefinedBy(declared, thePodName, thePodSpecificationDefinition); !isADefinition &&
+			!isANamedSetting(declared) {
+			offenders = append(offenders, fmt.Sprintf("  %s declares the %s %s, which is not an exported function "+
+				"taking nothing that returns one pod.%s call under a name it writes",
+				source.Path, declared.Kind, declared.Name, thePodSpecificationDefinition))
+		}
+	}
+
+	return offenders
+}
+
+// isTheNamedSetting reports whether a declaration is the Named setting for
+// leaving an unresponsive Node, and isANamedSetting whether it is one of the
+// functions the file of Pod specifications holds beside them, by its name. Their
+// shape is the Named setting rule's and the Even spread rule's to read.
+func isTheNamedSetting(declared modulerules.Declaration) bool {
+	return declared.Kind == modulerules.FuncDeclaration && declared.Name == theNamedSetting
+}
+
+func isANamedSetting(declared modulerules.Declaration) bool {
+	return declared.Kind == modulerules.FuncDeclaration && slices.Contains(theNamedSettings, declared.Name)
+}
+
+// definitionsOutsideThePodSpecifications names every declaration of another
+// file of the place that calls the pod package's mechanism itself, a Workload
+// line writing one inline included.
+func definitionsOutsideThePodSpecifications(source modulerules.GoFile) []string {
+	var offenders []string
+	for _, declared := range source.Declarations {
+		if slices.Contains(declared.Names, theNameOf(thePodName, thePodSpecificationDefinition)) {
+			offenders = append(offenders, fmt.Sprintf("  %s, in %s: defines a Pod specification outside %s",
+				source.Path, declared.Name, thePodSpecifications))
+		}
+	}
+
+	return offenders
+}
+
+// podSpecificationsNotShowingWhatTheyHold names every definition of the place's
+// file of predefined Pod specifications that does not name its Startup time by a
+// Startup form, does not name the Named setting for leaving an unresponsive Node,
+// or writes a toleration of one of the lab's taints itself.
+func podSpecificationsNotShowingWhatTheyHold(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, file := range files {
+		if filepath.Base(file.Path) != thePodSpecifications {
+			continue
+		}
+		for _, declared := range file.Declarations {
+			name, call, isADefinition := theNameDefinedBy(declared, thePodName, thePodSpecificationDefinition)
+			if !isADefinition {
+				continue
+			}
+			if !namesAStartupForm(call) {
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: %q names its Startup time by no Startup form",
+					file.Path, declared.Name, name))
+			}
+			if !slices.ContainsFunc(call.Args, namesTheNamedSetting) {
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: %q names no %s()",
+					file.Path, declared.Name, name, theNamedSetting))
+			}
+			for _, taint := range theLabsTaints {
+				if slices.ContainsFunc(call.Args, func(setting ast.Expr) bool { return tolerates(setting, taint) }) {
+					offenders = append(offenders, fmt.Sprintf("  %s, in %s: %q writes a pod.%s of node.%s itself",
+						file.Path, declared.Name, name, theTolerationSetting, taint))
+				}
+			}
+		}
+	}
+
+	return offenders
+}
+
+// The Named setting stands beside the specifications that name it, as one
+// exported function taking nothing whose body is one return of pod.Settings over
+// exactly the two tolerations of the lab's taints, each keyed by its taint,
+// matching any value, with the effect that moves a Pod off a Node, at the lab's
+// waiting time, and nothing else. The lab defines no group of its own, and no
+// source of it calls pod.Settings (docs/prd.md REQ-SIM-016).
+func TestTheNamedSettingForLeavingAnUnresponsiveNode_ShouldHoldExactlyTheNotReadyAndUnreachableTolerationsAtTheLabsWaitingTime(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := slices.Concat(namedSettingsNotAsDefined(filesOfThePlace(t, place)), callsGroupingSettingsOfTheLabsOwn(theLabsOwnSources(t)))
+
+	if len(offenders) > 0 {
+		t.Errorf("%s holds one exported function %s taking nothing, whose body is one return of pod.%s of the pod.%s of node.%s, "+
+			"at node.UnresponsiveWait, and nothing else calls pod.%s, but:\n%s",
+			thePodSpecifications, theNamedSetting, theGroupingMeans, theTolerationSetting, strings.Join(theLabsTaints, " and node."),
+			theGroupingMeans, strings.Join(offenders, "\n"))
+	}
+}
+
+// The rule's own decisions over the Named setting are read here, since the
+// shipped file writes only the shape it admits.
+func TestTheNamedSettingRule_ShouldAdmitTheOneGroupOfTheTwoTolerationsAndReportAnythingElse(t *testing.T) {
+	const (
+		aGroupWithAThirdSetting = `func LeaveUnresponsiveNodes() pod.Customization {
+	return pod.Settings(
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+		pod.Request{CPU: 1, Memory: 1 * pod.Gi},
+	)
+}`
+		aGroupWithAWrongWait = `func LeaveUnresponsiveNodes() pod.Customization {
+	return pod.Settings(
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: 300},
+		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+	)
+}`
+		aGroupOfOneToleration = `func LeaveUnresponsiveNodes() pod.Customization {
+	return pod.Settings(
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+	)
+}`
+		aGroupOfTheSameTaintTwice = `func LeaveUnresponsiveNodes() pod.Customization {
+	return pod.Settings(
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+	)
+}`
+		aGroupOfATolerationLeavingOutAField = `func LeaveUnresponsiveNodes() pod.Customization {
+	return pod.Settings(
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute},
+		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+	)
+}`
+		aGroupOfATolerationWrittenByPosition = `func LeaveUnresponsiveNodes() pod.Customization {
+	return pod.Settings(
+		pod.Toleration{node.NotReady, pod.Exists, pod.NoExecute, node.UnresponsiveWait},
+		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+	)
+}`
+		aNamedSettingNotGrouping = `func LeaveUnresponsiveNodes() pod.Customization {
+	return pod.StartupSeconds(1)
+}`
+		aNamedSettingTakingAValue = `func LeaveUnresponsiveNodes(wait int64) pod.Customization {
+	return pod.Settings(
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: wait},
+		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: wait},
+	)
+}`
+		aSecondGroup = `func SpreadEvenly() pod.Customization {
+	return pod.Settings(EvenSpreadOver(node.Zone))
+}`
+	)
+
+	written := map[string]struct {
+		source   string
+		admitted bool
+	}{
+		"the one group of the two tolerations": {
+			source:   aPodSpecificationsSourceOf(theNamedSettingDefinition, theResilientPlacementDefinition),
+			admitted: true,
+		},
+		"no Named setting at all": {
+			source: aPodSpecificationsSourceOf(theResilientPlacementDefinition),
+		},
+		"a group with a third setting": {
+			source: aPodSpecificationsSourceOf(aGroupWithAThirdSetting, theResilientPlacementDefinition),
+		},
+		"a group with a wrong waiting time": {
+			source: aPodSpecificationsSourceOf(aGroupWithAWrongWait, theResilientPlacementDefinition),
+		},
+		"a group of one toleration": {
+			source: aPodSpecificationsSourceOf(aGroupOfOneToleration, theResilientPlacementDefinition),
+		},
+		"a group of one taint twice": {
+			source: aPodSpecificationsSourceOf(aGroupOfTheSameTaintTwice, theResilientPlacementDefinition),
+		},
+		"a group of a toleration leaving out a field": {
+			source: aPodSpecificationsSourceOf(aGroupOfATolerationLeavingOutAField, theResilientPlacementDefinition),
+		},
+		"a group of a toleration written by position": {
+			source: aPodSpecificationsSourceOf(aGroupOfATolerationWrittenByPosition, theResilientPlacementDefinition),
+		},
+		"a Named setting that groups nothing": {
+			source: aPodSpecificationsSourceOf(aNamedSettingNotGrouping, theResilientPlacementDefinition),
+		},
+		"a Named setting taking a value": {
+			source: aPodSpecificationsSourceOf(aNamedSettingTakingAValue, theResilientPlacementDefinition),
+		},
+		"a second group besides it": {
+			source: aPodSpecificationsSourceOf(theNamedSettingDefinition, aSecondGroup, theResilientPlacementDefinition),
+		},
+		"the Named setting defined twice": {
+			source: aPodSpecificationsSourceOf(theNamedSettingDefinition, theNamedSettingDefinition, theResilientPlacementDefinition),
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			place := aPlaceHolding(t, map[string]string{thePodSpecifications: taken.source})
+
+			offenders := namedSettingsNotAsDefined(place)
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// The rule's own decisions over the lab's sources are read here, since no shipped
+// source calls the grouping means.
+func TestTheLabDefinesNoNamedSettingRule_ShouldReportEveryCallOfTheGroupingMeans(t *testing.T) {
+	written := map[string]struct {
+		source   string
+		admitted bool
+	}{
+		"the mechanism's own declaration": {
+			source: `package pod
+
+func Settings(settings ...Setting) Customization {
+	return settingGroup{}
+}
+`,
+			admitted: true,
+		},
+		"a field named Settings read off a value": {
+			source: `package lab
+
+func (s Step) all() []string {
+	return s.Settings
+}
+`,
+			admitted: true,
+		},
+		"the pod package grouping settings itself": {
+			source: `package pod
+
+func LeaveUnresponsiveNodes() Customization {
+	return Settings(Toleration{Key: "node.kubernetes.io/not-ready", Operator: Exists, Effect: NoExecute, TolerationSeconds: 2})
+}
+`,
+		},
+		"the Step surface grouping settings": {
+			source: `package lab
+
+func leaving() pod.Customization {
+	return pod.Settings()
+}
+`,
+		},
+		"the command grouping settings": {
+			source: `package main
+
+func leaving() pod.Customization {
+	return pod.Settings()
+}
+`,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			sources := aPlaceHolding(t, map[string]string{theLabsSource: taken.source})
+
+			offenders := callsGroupingSettingsOfTheLabsOwn(sources)
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// namedSettingsNotAsDefined names every way the place's file of Pod
+// specifications fails to hold the Named setting as defined: not exactly one,
+// not one return of pod.Settings over exactly the two tolerations of the lab's
+// taints at the lab's waiting time, or another declaration of the place calling
+// pod.Settings.
+func namedSettingsNotAsDefined(files []modulerules.GoFile) []string {
+	var offenders []string
+	held := 0
+	for _, file := range files {
+		for _, declared := range file.Declarations {
+			if filepath.Base(file.Path) == thePodSpecifications && isTheNamedSetting(declared) {
+				held++
+				if why := whyNotTheNamedSetting(declared); why != "" {
+					offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s", file.Path, declared.Name, why))
+				}
+
+				continue
+			}
+			if slices.Contains(declared.Names, theNameOf(thePodName, theGroupingMeans)) {
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: calls pod.%s besides %s",
+					file.Path, declared.Name, theGroupingMeans, theNamedSetting))
+			}
+		}
+	}
+	if held != onlyOnce {
+		offenders = append(offenders, fmt.Sprintf("  %s defines %s %d times", thePodSpecifications, theNamedSetting, held))
+	}
+
+	return offenders
+}
+
+// whyNotTheNamedSetting is why a declaration named LeaveUnresponsiveNodes is not
+// the Named setting, or the empty string where it is.
+func whyNotTheNamedSetting(declared modulerules.Declaration) string {
+	if !declared.Exported || len(declared.Parameters) != 0 || len(declared.Statements) != onlyOnce {
+		return "is not an exported function taking nothing whose body is one statement"
+	}
+	returned, isAReturn := strings.CutPrefix(declared.Statements[0].Written, theReturn)
+	if !isAReturn {
+		return "does not return its group"
+	}
+	parsed, err := parser.ParseExpr(returned)
+	if err != nil {
+		return "does not return an expression"
+	}
+	group, isACall := parsed.(*ast.CallExpr)
+	if !isACall || !callsThe(group, thePodName, theGroupingMeans) {
+		return fmt.Sprintf("does not return one pod.%s call", theGroupingMeans)
+	}
+	if len(group.Args) != len(theLabsTaints) {
+		return fmt.Sprintf("groups %d settings, not the %d tolerations of the lab's taints", len(group.Args), len(theLabsTaints))
+	}
+	for position, taint := range theLabsTaints {
+		if !isTheLabsTolerationOf(group.Args[position], taint) {
+			return fmt.Sprintf("does not hold, as setting %d, pod.%s keyed node.%s, pod.Exists, pod.NoExecute at node.UnresponsiveWait",
+				position+1, theTolerationSetting, taint)
+		}
+	}
+
+	return ""
+}
+
+// isTheLabsTolerationOf reports whether a setting is the toleration of that
+// taint the Named setting holds: a keyed literal of its four fields, keyed by
+// the taint, matching any value, with the effect that moves a Pod off a Node, at
+// the lab's waiting time.
+func isTheLabsTolerationOf(setting ast.Expr, taint string) bool {
+	fields, isAToleration := keyedFieldsOf(setting, thePodName, theTolerationSetting)
+
+	return isAToleration && len(fields) == theTolerationFields &&
+		namesThe(fields[theTolerationsKey], theNodeName, taint) &&
+		namesThe(fields["Operator"], thePodName, "Exists") &&
+		namesThe(fields["Effect"], thePodName, "NoExecute") &&
+		namesThe(fields["TolerationSeconds"], theNodeName, "UnresponsiveWait")
+}
+
+// callsGroupingSettingsOfTheLabsOwn names every declaration of the lab's own
+// sources that calls the grouping means: from outside the pod package as
+// pod.Settings, and from inside it unqualified. The mechanism's declaration calls
+// nothing by that name, so it is no offender.
+func callsGroupingSettingsOfTheLabsOwn(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, file := range files {
+		for _, declared := range file.Declarations {
+			for _, used := range declared.Names {
+				// A type declaring a field of that name is no call, so inside the pod
+				// package only a function's unqualified use counts.
+				callsIt := used.Name == theGroupingMeans && (used.Qualifier == thePodName ||
+					(used.Qualifier == "" && file.Package == thePodName && declared.Kind == modulerules.FuncDeclaration))
+				if callsIt {
+					offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s groups settings under a name of the lab's own",
+						file.Path, declared.Name, writtenAs(used)))
+				}
+			}
+		}
+	}
+
+	return offenders
+}
+
+// namesAStartupForm reports whether a definition's Startup time argument is a
+// call of one of the four Startup forms.
+func namesAStartupForm(definition *ast.CallExpr) bool {
+	if len(definition.Args) < theFirstSettingArgument {
+		return false
+	}
+	startup, isACall := definition.Args[theStartupTimeArgument].(*ast.CallExpr)
+
+	return isACall && slices.ContainsFunc(theStartupForms, func(form string) bool {
+		return callsThe(startup, thePodName, form)
+	})
+}
+
+// namesTheNamedSetting reports whether a setting a definition writes is
+// LeaveUnresponsiveNodes(), the Named setting of the same place taking nothing.
+func namesTheNamedSetting(setting ast.Expr) bool {
+	named, isACall := setting.(*ast.CallExpr)
+	if !isACall {
+		return false
+	}
+	function, isAName := named.Fun.(*ast.Ident)
+
+	return isAName && function.Name == theNamedSetting && len(named.Args) == 0
+}
+
+// tolerates reports whether a setting a definition writes is a pod.Toleration of
+// that taint, Key: node.<taint>, whatever time it writes.
+func tolerates(setting ast.Expr, taint string) bool {
+	fields, isAToleration := keyedFieldsOf(setting, thePodName, theTolerationSetting)
+
+	return isAToleration && namesThe(fields[theTolerationsKey], theNodeName, taint)
+}
+
+// thePodSpecificationsDeclaredIn are the names the place's file of predefined Pod
+// specifications declares, which a Workload line declares its specification by.
+func thePodSpecificationsDeclaredIn(files []modulerules.GoFile) map[string]bool {
+	defined := make(map[string]bool)
+	for _, file := range files {
+		if filepath.Base(file.Path) != thePodSpecifications {
+			continue
+		}
+		for _, declared := range file.Declarations {
+			if _, _, isADefinition := theNameDefinedBy(declared, thePodName, thePodSpecificationDefinition); isADefinition {
+				defined[declared.Name] = true
+			}
+		}
+	}
+
+	return defined
+}
+
+// callsDefiningAPodSpecificationOfTheLabsOwn names every declaration of the lab's
+// own sources that defines a Pod specification: one calling the pod package's
+// mechanism, from inside that package or out of it, and one calling the domain's
+// constructor from outside the domain but in the mechanism itself.
+func callsDefiningAPodSpecificationOfTheLabsOwn(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, file := range files {
+		for _, declared := range file.Declarations {
+			for _, used := range declared.Names {
+				if definesAPodSpecification(file.Package, declared, used) {
+					offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s defines a Pod specification of the lab's own",
+						file.Path, declared.Name, writtenAs(used)))
+				}
+			}
+		}
+	}
+
+	return offenders
+}
+
+// definesAPodSpecification reports whether one name a declaration of package
+// uses is a call defining a Pod specification there. The domain calling its own
+// constructor, unqualified, is the domain's rule re-entered and no definition.
+func definesAPodSpecification(declaredIn string, declared modulerules.Declaration, used modulerules.UsedName) bool {
+	isTheMechanism := declaredIn == thePodName && declared.Name == thePodSpecificationDefinition
+
+	switch used.Name {
+	case thePodSpecificationDefinition:
+		return !isTheMechanism &&
+			(used.Qualifier == thePodName || (used.Qualifier == "" && declaredIn == thePodName))
+	case theDomainsPodSpecification:
+		return !isTheMechanism && used.Qualifier == theDomainsName
 	default:
 		return false
 	}
 }
 
 // theLabsOwnSources are the production sources of the lab itself, every one under
-// theLabsSourceRoots, which is where a Named Node capacity of the lab's own would
-// be defined.
+// theLabsSourceRoots, the pod and node packages included, which is where a Named
+// Node capacity, a specification or a Named setting of the lab's own would be
+// defined.
 func theLabsOwnSources(t *testing.T) []modulerules.GoFile {
 	t.Helper()
 
@@ -804,18 +1660,17 @@ func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnyth
 		admitted bool
 	}{
 		"one predefined specification": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement())`,
 			admitted: true,
 		},
 		"a specification it customizes": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement().Customize(
-		lab.TopologySpread(lab.TopologyKey(lab.ZoneLabel), lab.MaxSkew(2),
-			lab.WhenUnsatisfiable(lab.DoNotSchedule), lab.NodeTaintsPolicy(lab.Honor)),
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(
+		pod.TopologySpreadConstraint{TopologyKey: node.Zone, MaxSkew: 2, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor},
 	))`,
 			admitted: true,
 		},
 		"a Customize naming no setting": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement().Customize())`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize())`,
 			admitted: true,
 		},
 		"no specification at all": {
@@ -823,47 +1678,55 @@ func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnyth
 			admitted: false,
 		},
 		"a setting written beside the specification": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement(),
-		lab.TopologySpread(lab.TopologyKey(lab.ZoneLabel), lab.MaxSkew(2),
-			lab.WhenUnsatisfiable(lab.DoNotSchedule), lab.NodeTaintsPolicy(lab.Honor)))`,
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement(),
+		pod.TopologySpreadConstraint{TopologyKey: node.Zone, MaxSkew: 2, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor})`,
 			admitted: false,
 		},
 		"a second Customize written on the first": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement().Customize().Customize())`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize().Customize())`,
 			admitted: false,
 		},
 		"a Required Capacity written after the Workload Step": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).RequiredCapacity(lab.Pods(6))`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).RequiredCapacity(lab.Pods(6))`,
 			admitted: true,
 		},
 		"a second Required Capacity written on the first": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).` +
 				`RequiredCapacity(lab.Pods(6)).RequiredCapacity(lab.Pods(3))`,
 			admitted: false,
 		},
 		"a Wait chained onto the Workload Step": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).WaitFor().AllPodsReady()`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).WaitFor().AllPodsReady()`,
 			admitted: true,
 		},
 		"a Wait chained onto the Required Capacity": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).` +
 				`RequiredCapacity(lab.Pods(6)).WaitFor().AllPodsReady()`,
 			admitted: true,
 		},
 		"a Wait written on the Workload Step with no WaitFor opening it": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).AllPodsReady()`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).AllPodsReady()`,
 			admitted: false,
 		},
 		"a Customize written after the Workload Step": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).Customize()`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).Customize()`,
 			admitted: false,
 		},
 		"a call written after the Workload Step": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement()).NodeCapacity(lab.CPU(4), lab.MemoryGi(16), lab.Pods(2))`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).Pool("general", node.PerZone(1), StandardNodes())`,
 			admitted: false,
 		},
 		"a specification of the Scenario's own": {
 			line:     `s.Given().Workload(Checkout, lab.Pods(9), aSpecificationOfItsOwn())`,
+			admitted: false,
+		},
+		"a specification named on the Step surface": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())`,
+			admitted: false,
+		},
+		"a specification defined on the line itself": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ` +
+				`pod.Predefined("Inline placement", pod.StartupMillisBetween(500, 1000)))`,
 			admitted: false,
 		},
 	}
@@ -879,33 +1742,34 @@ func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnyth
 
 // theWorkloadLine is a Workload line every rule here admits, which a rule read on
 // something other than the line itself is written with. theFullAccessLine is that
-// line reaching a Pod setting the lab's own vocabulary does not name, written the
-// way a Scenario writes full access.
+// line reaching a Pod setting the lab does not name, written the way a Scenario
+// writes full access.
 const (
-	theWorkloadLine   = `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())`
-	theFullAccessLine = `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement().Customize(
-		lab.FullAccess(func(pod *` + thePodSettingsName + `.PodSpec) {
-			pod.PriorityClassName = "critical"
+	theWorkloadLine   = `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement())`
+	theFullAccessLine = `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(
+		pod.FullAccess(func(spec *` + thePodSettingsName + `.PodSpec) {
+			spec.PriorityClassName = "critical"
 		}),
 	))`
 )
 
 // aScenarioWhoseWorkloadLineIs is a Scenario source holding that one Workload
-// line and importing the Step surface alone, which is what a Scenario naming the
-// lab's own vocabulary needs.
+// line and importing the lab's three packages, which is what a Scenario of the
+// lab needs, beside a file of predefined Pod specifications defining
+// ResilientPlacement, as the lab's own place holds them.
 func aScenarioWhoseWorkloadLineIs(t *testing.T, line string) []modulerules.GoFile {
 	t.Helper()
 
-	return aScenarioSourceThatImports(t, []string{theStepSurfaceImport}, line)
+	return aScenarioSourceThatImports(t, theScenarioImports, line)
 }
 
 // aScenarioAlsoImporting is a Scenario source importing that one path beside the
-// Step surface, which is what a Scenario reaching a Pod setting through full
-// access needs.
+// lab's three packages, which is what a Scenario reaching a Pod setting through
+// full access needs.
 func aScenarioAlsoImporting(t *testing.T, imported, line string) []modulerules.GoFile {
 	t.Helper()
 
-	return aScenarioSourceThatImports(t, []string{theStepSurfaceImport, imported}, line)
+	return aScenarioSourceThatImports(t, append(slices.Clone(theScenarioImports), imported), line)
 }
 
 // aScenarioSourceThatImports is a Scenario source written with those imports and
@@ -915,6 +1779,8 @@ func aScenarioSourceThatImports(t *testing.T, imported []string, line string) []
 
 	return aPlaceHolding(t, map[string]string{
 		theScenarioSource: fmt.Sprintf(theScenarioSourceShape, anImportBlockOf(imported), line),
+		thePodSpecifications: aPodSpecificationsSourceOf(
+			theNamedSettingDefinition, theEvenSpreadDefinition, theResilientPlacementDefinition),
 	})
 }
 
@@ -931,15 +1797,21 @@ func aScenarioBesideTheNamedNodeCapacities(t *testing.T, steps ...string) []modu
 }
 
 // aScenarioSourceWhoseStepsAre is the text of a Scenario source holding these
-// Steps, one per line, importing the Step surface alone.
+// Steps, one per line, importing the lab's three packages.
 func aScenarioSourceWhoseStepsAre(steps ...string) string {
-	return fmt.Sprintf(theScenarioSourceShape, anImportBlockOf([]string{theStepSurfaceImport}), strings.Join(steps, "\n\t"))
+	return fmt.Sprintf(theScenarioSourceShape, anImportBlockOf(theScenarioImports), strings.Join(steps, "\n\t"))
 }
 
 // aNamedNodeCapacitiesSourceOf is the text of a file of Named Node capacities
-// holding these definitions, importing the Step surface alone.
+// holding these definitions, importing the pod and node packages.
 func aNamedNodeCapacitiesSourceOf(definitions ...string) string {
-	return fmt.Sprintf(theNamedNodeCapacitiesShape, strings.Join(definitions, "\n\n"))
+	return fmt.Sprintf(aFileOfDefinitionsShape, strings.Join(definitions, "\n\n"))
+}
+
+// aPodSpecificationsSourceOf is the text of a file of predefined Pod
+// specifications holding these definitions, importing the pod and node packages.
+func aPodSpecificationsSourceOf(definitions ...string) string {
+	return fmt.Sprintf(aFileOfDefinitionsShape, strings.Join(definitions, "\n\n"))
 }
 
 // aPlaceHolding is the files named, each holding the source given, scanned the
@@ -1178,7 +2050,7 @@ func TestTheWaitOrderingRule_ShouldReportEveryThenAndFailureNoWaitStandsBefore(t
 // Wait that fits it chained onto its line, each Wait written as a Step of its own,
 // the Failure that discards the Placement, and a Then that judges one.
 const (
-	theTopologyLine         = `s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), StandardNodes()))`
+	theTopologyLine         = `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()))`
 	theTopologyWaitingLine  = theTopologyLine + `.WaitFor().AllNodesReady()`
 	theWorkloadWaitingLine  = theWorkloadLine + `.WaitFor().AllPodsReady()`
 	theWaitForEveryNodeLine = `s.WaitFor().AllNodesReady()`
@@ -1201,11 +2073,11 @@ func aWorldDeclaredAndAwaited(followedBy ...string) []string {
 }
 
 // aScenarioWhoseStepsAre is a Scenario source holding these Steps, one per line
-// as a Scenario writes them, importing the Step surface alone.
+// as a Scenario writes them, importing the lab's three packages.
 func aScenarioWhoseStepsAre(t *testing.T, steps ...string) []modulerules.GoFile {
 	t.Helper()
 
-	return aScenarioSourceThatImports(t, []string{theStepSurfaceImport}, strings.Join(steps, "\n\t"))
+	return aScenarioSourceThatImports(t, theScenarioImports, strings.Join(steps, "\n\t"))
 }
 
 // stepsReadingAPlacementNoWaitReached names every Step of the place that reads the
@@ -1361,27 +2233,34 @@ func isAWaitStep(line modulerules.Statement, scenarioParameter string) bool {
 	return opened && kind == WaitStep
 }
 
-func TestEveryScenarioSource_ShouldNameOnlyWhatTheLabOffersScenarios(t *testing.T) {
+// Every name a Scenario writes reads by its subject: the Scenario's own under
+// lab, what a Pod carries under pod, what a Node is under node, each one its
+// package exports, or a name the Scenarios define themselves. A name written
+// unqualified, as a dot import would write it, is none of these (docs/prd.md
+// REQ-SIM-016).
+func TestEveryScenarioSource_ShouldWriteEachNameUnderItsSubjectOrAsOneTheScenariosDefine(t *testing.T) {
 	place := theScenariosPlace(t)
 
 	offenders := namesUsedThatTheLabDoesNotOffer(t, filesOfThePlace(t, place))
 
 	if len(offenders) > 0 {
-		t.Errorf("every name a Scenario uses is one internal/lab offers it, so a Scenario reads as one vocabulary under one prefix, but:\n%s",
+		t.Errorf("every name a Scenario uses is one lab, pod or node exports under its own qualifier, or one the Scenarios define, but:\n%s",
 			strings.Join(offenders, "\n"))
 	}
 }
 
 // What the name rule reports is read here rather than on the lab's own place,
-// which names only what it offers: a name the Step surface does not export, and
-// one neither it nor the place declares at all.
-func TestTheNameRule_ShouldReportANameNeitherTheStepSurfaceNorThePlaceDeclares(t *testing.T) {
+// which names only what it offers: a name its package does not export, a name
+// under another subject's package, a name written unqualified, and one neither
+// the lab nor the place declares at all.
+func TestTheNameRule_ShouldReportANameNeitherItsSubjectNorThePlaceDeclares(t *testing.T) {
 	written := map[string]struct {
 		line     string
 		admitted bool
 	}{
-		"the names the Step surface exports": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())`,
+		"the names each subject's package exports": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+				`pod.Request{CPU: 1, Memory: 1 * pod.Gi}))`,
 			admitted: true,
 		},
 		"a specification the Step surface no longer exports": {
@@ -1389,6 +2268,22 @@ func TestTheNameRule_ShouldReportANameNeitherTheStepSurfaceNorThePlaceDeclares(t
 		},
 		"a name of the Scenario's own": {
 			line: `s.Given().Workload(Checkout, lab.Pods(9), aSpecificationOfItsOwn())`,
+		},
+		"a Pod setting under the Scenario's package": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+				`lab.Request{CPU: 1, Memory: 1 * pod.Gi}))`,
+		},
+		"a Node's taint under the pod package": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+				`pod.Toleration{Key: pod.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: 300}))`,
+		},
+		"a function marking the position of a value": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+				`pod.Toleration{Key: pod.Key(node.NotReady), Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: 300}))`,
+		},
+		"a Pod setting written unqualified, as a dot import writes it": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+				`Request{CPU: 1, Memory: 1 * Gi}))`,
 		},
 	}
 
@@ -1403,9 +2298,9 @@ func TestTheNameRule_ShouldReportANameNeitherTheStepSurfaceNorThePlaceDeclares(t
 
 // The names a Scenario reaching full access writes are read here rather than on
 // the lab's own place, which holds no Scenario using full access: the Pod settings
-// it names are the one thing a Scenario writes that internal/lab does not offer
-// it, and the placeholder the Scenario's own function literal declares is no name
-// it writes at all.
+// it names are the one thing a Scenario writes that the lab's packages do not
+// offer it, and the placeholder the Scenario's own function literal declares is
+// no name it writes at all.
 func TestTheNameRule_ShouldAdmitTheKubernetesPodSettingsFullAccessNames(t *testing.T) {
 	reaching := aScenarioAlsoImporting(t, thePodSettingsImport, theFullAccessLine)
 
@@ -1415,13 +2310,13 @@ func TestTheNameRule_ShouldAdmitTheKubernetesPodSettingsFullAccessNames(t *testi
 }
 
 // namesUsedThatTheLabDoesNotOffer names every name a file of the place uses that
-// is neither one internal/lab exports nor one the place declares itself. A name
-// taken from a value, such as a Step called on the Scenario, is the compiler's own
-// to check and admitted here.
+// is neither one lab, pod or node exports under its own qualifier nor one the
+// place declares itself. A name taken from a value, such as a Step called on the
+// Scenario, is the compiler's own to check and admitted here.
 func namesUsedThatTheLabDoesNotOffer(t *testing.T, files []modulerules.GoFile) []string {
 	t.Helper()
 
-	offered := theNamesTheStepSurfaceOffers(t)
+	offered := theNamesEachSubjectOffers(t)
 	ownedByThePlace := theNamesDeclaredIn(files)
 
 	var offenders []string
@@ -1431,7 +2326,7 @@ func namesUsedThatTheLabDoesNotOffer(t *testing.T, files []modulerules.GoFile) [
 				if isOffered(used, offered, ownedByThePlace, declared) {
 					continue
 				}
-				offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s is no name internal/lab offers Scenarios",
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s is no name lab, pod or node offers Scenarios under it",
 					file.Path, declared.Name, writtenAs(used)))
 			}
 		}
@@ -1441,16 +2336,18 @@ func namesUsedThatTheLabDoesNotOffer(t *testing.T, files []modulerules.GoFile) [
 }
 
 // isOffered reports whether one name a declaration uses is one a Scenario may
-// write: a name of the Step surface, a name the place declares, a parameter of
-// the declaration using it, a name Go itself predeclares, or a name taken from a
-// value, whose own type the compiler checks.
+// write: a name its subject's package exports, under that package's qualifier, a
+// name the place declares, a parameter of the declaration using it, a name Go
+// itself predeclares, or a name taken from a value, whose own type the compiler
+// checks.
 func isOffered(
 	used modulerules.UsedName,
-	offered, ownedByThePlace map[string]bool,
+	offered map[string]map[string]bool,
+	ownedByThePlace map[string]bool,
 	declared modulerules.Declaration,
 ) bool {
-	if used.Qualifier == theStepSurfaceName {
-		return offered[used.Name]
+	if bySubject, isASubject := offered[used.Qualifier]; isASubject {
+		return bySubject[used.Name]
 	}
 	if used.Qualifier != "" {
 		return true
@@ -1460,9 +2357,10 @@ func isOffered(
 		types.Universe.Lookup(used.Name) != nil
 }
 
-// theNamesTheStepSurfaceOffers are the names this package exports, read off its
-// own sources, which is what a Scenario may write under the one prefix it uses.
-func theNamesTheStepSurfaceOffers(t *testing.T) map[string]bool {
+// theNamesEachSubjectOffers are the names lab, pod and node each export, read off
+// their own sources and keyed by the package's name, which is what a Scenario may
+// write under that qualifier.
+func theNamesEachSubjectOffers(t *testing.T) map[string]map[string]bool {
 	t.Helper()
 
 	root, err := modulerules.Root(t.Context(), ownPackageDir)
@@ -1471,14 +2369,21 @@ func theNamesTheStepSurfaceOffers(t *testing.T) map[string]bool {
 	}
 	sources, err := modulerules.ScanGoFiles(filepath.Join(root, theLabsOwnPackageDir), modulerules.ProductionGoFilesOnly)
 	if err != nil {
-		t.Fatalf("read the sources of the Step surface: %v", err)
+		t.Fatalf("read the sources of the lab's three packages: %v", err)
 	}
 
-	offered := make(map[string]bool)
+	offered := make(map[string]map[string]bool, len(theSubjects))
+	for _, subject := range theSubjects {
+		offered[subject] = make(map[string]bool)
+	}
 	for _, source := range sources {
+		bySubject, isASubject := offered[source.Package]
+		if !isASubject {
+			continue
+		}
 		for _, declared := range source.Declarations {
 			if declared.Exported {
-				offered[declared.Name] = true
+				bySubject[declared.Name] = true
 			}
 		}
 	}
@@ -1589,6 +2494,8 @@ func declarationsThatDoNotBelong(files []modulerules.GoFile) []string {
 			offenders = append(offenders, declarationsThatAreNotWorkloadNames(file)...)
 		case theNamedNodeCapacities:
 			offenders = append(offenders, declarationsThatAreNotNamedNodeCapacities(file)...)
+		case thePodSpecifications:
+			offenders = append(offenders, declarationsThatAreNotPodSpecifications(file)...)
 		case theList:
 			offenders = append(offenders, declarationsThatAreNotTheList(file)...)
 		default:
@@ -1636,20 +2543,24 @@ func declarationsThatAreNotWorkloadNames(source modulerules.GoFile) []string {
 // at all: a Scenario deploys a Workload, so one declaring none would meet the
 // shape rule by having nothing to check.
 func workloadLinesDeclaringNoPredefinedSpecification(files []modulerules.GoFile) []string {
+	defined := thePodSpecificationsDeclaredIn(files)
+
 	var offenders []string
 	for _, source := range files {
 		for _, declared := range source.Declarations {
 			if !isAScenario(declared) {
 				continue
 			}
-			offenders = append(offenders, workloadLinesOfScenarioThatDeclareNoSpecification(source.Path, declared)...)
+			offenders = append(offenders, workloadLinesOfScenarioThatDeclareNoSpecification(source.Path, declared, defined)...)
 		}
 	}
 
 	return offenders
 }
 
-func workloadLinesOfScenarioThatDeclareNoSpecification(path string, declared modulerules.Declaration) []string {
+func workloadLinesOfScenarioThatDeclareNoSpecification(
+	path string, declared modulerules.Declaration, defined map[string]bool,
+) []string {
 	var offenders []string
 	deploying := 0
 	for _, line := range declared.Statements {
@@ -1657,7 +2568,7 @@ func workloadLinesOfScenarioThatDeclareNoSpecification(path string, declared mod
 			continue
 		}
 		deploying++
-		if !declaresOnePredefinedSpecification(line) {
+		if !declaresOnePredefinedSpecification(line, defined) {
 			offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s declares no predefined Pod specification",
 				path, declared.Name, line.Written))
 		}
@@ -1683,11 +2594,12 @@ func namesTheWorkloadStep(line modulerules.Statement) bool {
 }
 
 // declaresOnePredefinedSpecification reports whether a Workload line declares one
-// of the lab's predefined Pod specifications and nothing besides: the line ends at
-// the Workload Step, or at one call of the Workload's own closed set written on
-// it, and that Step takes the Workload name, the Pod count and that specification,
-// itself one predefined call that zero or one Customize is written on.
-func declaresOnePredefinedSpecification(line modulerules.Statement) bool {
+// of the predefined Pod specifications the place defines and nothing besides: the
+// line ends at the Workload Step, or at one call of the Workload's own closed set
+// written on it, and that Step takes the Workload name, the Pod count and that
+// specification, itself one predefined call that zero or one Customize is
+// written on.
+func declaresOnePredefinedSpecification(line modulerules.Statement, defined map[string]bool) bool {
 	deploying, ends := theWorkloadStepTheLineEndsAt(line)
 	if !ends || len(deploying.Arguments) != theWorkloadLineArguments {
 		return false
@@ -1698,7 +2610,7 @@ func declaresOnePredefinedSpecification(line modulerules.Statement) bool {
 		declared = *declared.On
 	}
 
-	return isAPredefinedSpecification(declared)
+	return isAPredefinedSpecification(declared, defined)
 }
 
 // theWorkloadStepTheLineEndsAt is the Workload Step a line ends at, directly or
@@ -1733,11 +2645,10 @@ func whatTheChainedWaitWasWrittenOn(line modulerules.Statement) modulerules.Stat
 }
 
 // isAPredefinedSpecification reports whether an expression declares one of the
-// lab's predefined specifications: a call taking nothing, named on the Step
-// surface and not on a value of the Scenario's own.
-func isAPredefinedSpecification(declared modulerules.Statement) bool {
-	return declared.Call && len(declared.Arguments) == 0 &&
-		declared.On != nil && !declared.On.Call && declared.On.Name == theStepSurfaceName
+// predefined specifications the place defines: an unqualified call taking
+// nothing, of a function the place's file of them declares.
+func isAPredefinedSpecification(declared modulerules.Statement, defined map[string]bool) bool {
+	return declared.Call && len(declared.Arguments) == 0 && declared.On == nil && defined[declared.Name]
 }
 
 // isAScenario reports whether a declaration is a Scenario: an exported function
@@ -1977,24 +2888,28 @@ func readTheReadme(t *testing.T, place string) string {
 }
 
 // What the import rule admits is read here rather than on the lab's own place,
-// where every source imports the Step surface alone: no Scenario of the lab
+// where every source imports the lab's packages alone: no Scenario of the lab
 // reaches full access, so the one admitted exception is exercised on a source of
 // this test's own.
-func TestTheImportRule_ShouldAdmitThePodSettingsPackageAndNoOtherKubernetesPackage(t *testing.T) {
+func TestTheImportRule_ShouldAdmitTheLabsThreePackagesAndThePodSettingsPackageAlone(t *testing.T) {
 	written := map[string]struct {
 		imported []string
 		admitted bool
 	}{
-		"the Step surface alone": {
-			imported: []string{theStepSurfaceImport},
+		"the lab's three packages": {
+			imported: theScenarioImports,
 			admitted: true,
 		},
-		"the Pod settings full access reaches, beside it": {
-			imported: []string{theStepSurfaceImport, thePodSettingsImport},
+		"the Pod settings full access reaches, beside them": {
+			imported: append(slices.Clone(theScenarioImports), thePodSettingsImport),
 			admitted: true,
 		},
-		"another Kubernetes package beside it": {
-			imported: []string{theStepSurfaceImport, theKubernetesClientImport},
+		"another Kubernetes package beside them": {
+			imported: append(slices.Clone(theScenarioImports), theKubernetesClientImport),
+			admitted: false,
+		},
+		"the domain package behind them": {
+			imported: append(slices.Clone(theScenarioImports), theDomainImport),
 			admitted: false,
 		},
 	}
@@ -2011,21 +2926,447 @@ func TestTheImportRule_ShouldAdmitThePodSettingsPackageAndNoOtherKubernetesPacka
 	}
 }
 
-// machineryImportedBy names every import of a Scenario source that is neither the
-// Step surface nor the Pod settings package: another package of the lab, the
-// Kubernetes client, or anything else. The Step surface alone is what makes every
-// name a Scenario writes one the lab offers it, which the name rule above reads on
-// that footing; the Pod settings package is the single stated exception, for a
-// Scenario reaching a setting through full access.
+// machineryImportedBy names every import of a Scenario source that is none of the
+// lab's three packages nor the Pod settings package: another package of the lab,
+// the Kubernetes client, or anything else. The three packages alone are what
+// make every name a Scenario writes one the lab offers it, which the name rule
+// above reads on that footing; the Pod settings package is the single stated
+// exception, for a Scenario reaching a setting through full access.
 func machineryImportedBy(source modulerules.GoFile) []string {
+	admitted := []string{theStepSurface, thePodPackage, theNodePackage, thePodSettingsPackage}
+
 	var offenders []string
 	for _, imported := range source.Imports {
-		if imported == theStepSurface || imported == thePodSettingsPackage {
+		if slices.Contains(admitted, imported) {
 			continue
 		}
-		offenders = append(offenders, fmt.Sprintf("  %s imports %s, which is neither the Step surface nor the Pod settings full access reaches",
+		offenders = append(offenders, fmt.Sprintf("  %s imports %s, which is none of lab, pod and node nor the Pod settings full access reaches",
 			source.Path, imported))
 	}
 
 	return offenders
+}
+
+// The pod and node packages sit beneath the Step surface: it imports both, and
+// neither imports it or the other, so a Scenario's three subjects form no cycle
+// and each reads on its own (docs/adr/2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md).
+func TestThePodAndNodePackages_ShouldImportNeitherTheStepSurfaceNorEachOther(t *testing.T) {
+	root, err := modulerules.Root(t.Context(), ownPackageDir)
+	if err != nil {
+		t.Fatalf("locate the root of the module: %v", err)
+	}
+	sources, err := modulerules.ScanGoFiles(filepath.Join(root, theLabsOwnPackageDir), modulerules.ProductionGoFilesOnly)
+	if err != nil {
+		t.Fatalf("read the sources of the lab's three packages: %v", err)
+	}
+
+	offenders := backEdgesAmong(sources)
+
+	expect.Expect(t, offenders).To(expect.HaveLen[string](0))
+}
+
+// backEdgesAmong names every import of a pod or node source that reaches the
+// Step surface or the other of the two.
+func backEdgesAmong(sources []modulerules.GoFile) []string {
+	refused := map[string][]string{
+		thePodName:  {theStepSurface, theNodePackage},
+		theNodeName: {theStepSurface, thePodPackage},
+	}
+
+	var offenders []string
+	for _, source := range sources {
+		for _, imported := range source.Imports {
+			if slices.Contains(refused[source.Package], imported) {
+				offenders = append(offenders, fmt.Sprintf("  %s imports %s", source.Path, imported))
+			}
+		}
+	}
+
+	return offenders
+}
+
+// The Even spread stands beside the predefined Pod specifications as one exported
+// function taking the topology key, whose body is one return of the topology
+// spread constraint over that key, under its Kubernetes names, at an even skew,
+// leaving a Pod no Node can take Pending, counting only the Nodes whose taints
+// the Pods tolerate, and nothing else (docs/prd.md REQ-SIM-016).
+func TestTheEvenSpread_ShouldHoldOneTopologySpreadOverTheSubjectItIsGiven(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := evenSpreadsNotAsDefined(filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("%s holds one exported function %s(topologyKey string) returning pod.%s{TopologyKey: topologyKey, "+
+			"MaxSkew: %s, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor} and nothing else, but:\n%s",
+			thePodSpecifications, theEvenSpread, theSpreadSetting, theEvenSkew, strings.Join(offenders, "\n"))
+	}
+}
+
+// The rule's own decisions over the Even spread are read here, since the shipped
+// file writes only the shape it admits.
+func TestTheEvenSpreadRule_ShouldAdmitTheOneEvenSpreadAndReportAnythingElse(t *testing.T) {
+	const (
+		aSpreadAtAWiderSkew = `func EvenSpreadOver(topologyKey string) pod.TopologySpreadConstraint {
+	return pod.TopologySpreadConstraint{
+		TopologyKey: topologyKey, MaxSkew: 2, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor,
+	}
+}`
+		aSpreadPlacingPastItsSkew = `func EvenSpreadOver(topologyKey string) pod.TopologySpreadConstraint {
+	return pod.TopologySpreadConstraint{
+		TopologyKey: topologyKey, MaxSkew: 1, WhenUnsatisfiable: pod.ScheduleAnyway, NodeTaintsPolicy: pod.Honor,
+	}
+}`
+		aSpreadCountingEveryNode = `func EvenSpreadOver(topologyKey string) pod.TopologySpreadConstraint {
+	return pod.TopologySpreadConstraint{
+		TopologyKey: topologyKey, MaxSkew: 1, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Ignore,
+	}
+}`
+		aSpreadOverASubjectOfItsOwn = `func EvenSpreadOver(topologyKey string) pod.TopologySpreadConstraint {
+	return pod.TopologySpreadConstraint{
+		TopologyKey: node.Zone, MaxSkew: 1, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor,
+	}
+}`
+		aSpreadLeavingOutAField = `func EvenSpreadOver(topologyKey string) pod.TopologySpreadConstraint {
+	return pod.TopologySpreadConstraint{TopologyKey: topologyKey, MaxSkew: 1, WhenUnsatisfiable: pod.DoNotSchedule}
+}`
+		aSpreadWrittenByPosition = `func EvenSpreadOver(topologyKey string) pod.TopologySpreadConstraint {
+	return pod.TopologySpreadConstraint{topologyKey, 1, pod.DoNotSchedule, pod.Honor}
+}`
+		aSpreadTakingASecondValue = `func EvenSpreadOver(topologyKey string, maxSkew int) pod.TopologySpreadConstraint {
+	return pod.TopologySpreadConstraint{
+		TopologyKey: topologyKey, MaxSkew: maxSkew, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor,
+	}
+}`
+		aSpreadGroupedWithAnother = `func EvenSpreadOver(topologyKey string) pod.Customization {
+	return pod.Settings(pod.TopologySpreadConstraint{
+		TopologyKey: topologyKey, MaxSkew: 1, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor,
+	}, pod.Request{CPU: 1, Memory: 1 * pod.Gi})
+}`
+	)
+
+	written := map[string]struct {
+		definitions []string
+		admitted    bool
+	}{
+		"the Even spread":                    {definitions: []string{theEvenSpreadDefinition}, admitted: true},
+		"no Even spread at all":              {},
+		"a spread at a wider skew":           {definitions: []string{aSpreadAtAWiderSkew}},
+		"a spread placing past its skew":     {definitions: []string{aSpreadPlacingPastItsSkew}},
+		"a spread counting every Node":       {definitions: []string{aSpreadCountingEveryNode}},
+		"a spread over a subject of its own": {definitions: []string{aSpreadOverASubjectOfItsOwn}},
+		"a spread leaving out a field":       {definitions: []string{aSpreadLeavingOutAField}},
+		"a spread written by position":       {definitions: []string{aSpreadWrittenByPosition}},
+		"a spread taking a second value":     {definitions: []string{aSpreadTakingASecondValue}},
+		"a spread grouped with another setting": {
+			definitions: []string{aSpreadGroupedWithAnother},
+		},
+		"the Even spread defined twice": {
+			definitions: []string{theEvenSpreadDefinition, theEvenSpreadDefinition},
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			place := aPlaceHolding(t, map[string]string{thePodSpecifications: aPodSpecificationsSourceOf(taken.definitions...)})
+
+			offenders := evenSpreadsNotAsDefined(place)
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// Resilient placement names the Even spread over Zones and over Nodes, and writes
+// no topology spread constraint itself, so its definition reads as the name, the
+// Startup time, the Named setting for leaving an unresponsive Node, and the two
+// Even spreads (docs/prd.md REQ-SIM-016).
+func TestResilientPlacement_ShouldNameTheEvenSpreadOverZonesAndOverNodes(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := resilientPlacementNotNamingTheEvenSpread(filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("%s defines %s naming %s(node.%s) and %s(node.%s) and writing no pod.%s itself, but:\n%s",
+			thePodSpecifications, theResilientPlacement, theEvenSpread, theSpreadSubjectOfZone, theEvenSpread,
+			theSpreadSubjectOfNode, theSpreadSetting, strings.Join(offenders, "\n"))
+	}
+}
+
+// The rule's own decisions over Resilient placement are read here, since the
+// shipped file writes only the shape it admits.
+func TestTheResilientPlacementRule_ShouldAdmitTheEvenSpreadNamedOverZonesAndNodesAndReportAnythingElse(t *testing.T) {
+	const (
+		namingTheZoneSpreadAlone = `func ResilientPlacement() pod.Specification {
+	return pod.Predefined("Resilient placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		EvenSpreadOver(node.Zone),
+	)
+}`
+		writingTheZoneSpreadItself = `func ResilientPlacement() pod.Specification {
+	return pod.Predefined("Resilient placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		pod.TopologySpreadConstraint{TopologyKey: node.Zone, MaxSkew: 1, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor},
+		EvenSpreadOver(node.Hostname),
+	)
+}`
+		writingASpreadBesideBoth = `func ResilientPlacement() pod.Specification {
+	return pod.Predefined("Resilient placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		EvenSpreadOver(node.Zone),
+		EvenSpreadOver(node.Hostname),
+		pod.TopologySpreadConstraint{TopologyKey: node.Zone, MaxSkew: 2, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor},
+	)
+}`
+		namingTheSpreadOverAKeyOfItsOwn = `func ResilientPlacement() pod.Specification {
+	return pod.Predefined("Resilient placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		EvenSpreadOver("topology.kubernetes.io/zone"),
+		EvenSpreadOver(node.Hostname),
+	)
+}`
+	)
+
+	written := map[string]struct {
+		definitions []string
+		admitted    bool
+	}{
+		"the Even spread over Zones and over Nodes": {
+			definitions: []string{theResilientPlacementDefinition},
+			admitted:    true,
+		},
+		"no Resilient placement at all":         {},
+		"the Even spread over Zones alone":      {definitions: []string{namingTheZoneSpreadAlone}},
+		"the Zone spread written itself":        {definitions: []string{writingTheZoneSpreadItself}},
+		"a spread written beside both":          {definitions: []string{writingASpreadBesideBoth}},
+		"the Even spread over a key of its own": {definitions: []string{namingTheSpreadOverAKeyOfItsOwn}},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			place := aPlaceHolding(t, map[string]string{
+				thePodSpecifications: aPodSpecificationsSourceOf(
+					append([]string{theNamedSettingDefinition, theEvenSpreadDefinition}, taken.definitions...)...),
+			})
+
+			offenders := resilientPlacementNotNamingTheEvenSpread(place)
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// evenSpreadsNotAsDefined names every way the place's file of Pod specifications
+// fails to hold the Even spread as defined: not exactly one, or one that is not an
+// exported function of the topology key alone returning the even topology spread
+// constraint over it.
+func evenSpreadsNotAsDefined(files []modulerules.GoFile) []string {
+	var offenders []string
+	held := 0
+	for _, file := range files {
+		if filepath.Base(file.Path) != thePodSpecifications {
+			continue
+		}
+		for _, declared := range file.Declarations {
+			if declared.Kind != modulerules.FuncDeclaration || declared.Name != theEvenSpread {
+				continue
+			}
+			held++
+			if why := whyNotTheEvenSpread(declared); why != "" {
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s", file.Path, declared.Name, why))
+			}
+		}
+	}
+	if held != onlyOnce {
+		offenders = append(offenders, fmt.Sprintf("  %s defines %s %d times", thePodSpecifications, theEvenSpread, held))
+	}
+
+	return offenders
+}
+
+// whyNotTheEvenSpread is why a declaration named EvenSpreadOver is not the Even
+// spread, or the empty string where it is.
+func whyNotTheEvenSpread(declared modulerules.Declaration) string {
+	if !declared.Exported || len(declared.Parameters) != onlyOnce || len(declared.Statements) != onlyOnce {
+		return "is not an exported function of one value whose body is one statement"
+	}
+	returned, isAReturn := strings.CutPrefix(declared.Statements[0].Written, theReturn)
+	if !isAReturn {
+		return "does not return its spread"
+	}
+	parsed, err := parser.ParseExpr(returned)
+	if err != nil {
+		return "does not return an expression"
+	}
+	fields, isASpread := keyedFieldsOf(parsed, thePodName, theSpreadSetting)
+	if !isASpread || len(fields) != theSpreadFields {
+		return fmt.Sprintf("does not return one pod.%s with a key beside each of its %d values", theSpreadSetting, theSpreadFields)
+	}
+	overTheKeyGiven, isAName := fields["TopologyKey"].(*ast.Ident)
+	evenSkew, isALiteral := fields["MaxSkew"].(*ast.BasicLit)
+	if !isAName || overTheKeyGiven.Name != declared.Parameters[0].Name ||
+		!isALiteral || evenSkew.Value != theEvenSkew ||
+		!namesThe(fields["WhenUnsatisfiable"], thePodName, "DoNotSchedule") ||
+		!namesThe(fields["NodeTaintsPolicy"], thePodName, "Honor") {
+		return fmt.Sprintf("does not spread over the key it is given at MaxSkew %s, pod.DoNotSchedule and pod.Honor", theEvenSkew)
+	}
+
+	return ""
+}
+
+// resilientPlacementNotNamingTheEvenSpread names every way the place's
+// definition of Resilient placement fails to name the Even spread over Zones and
+// over Nodes alone: no such definition, a subject it names no Even spread over,
+// or a topology spread constraint it writes itself.
+func resilientPlacementNotNamingTheEvenSpread(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, file := range files {
+		if filepath.Base(file.Path) != thePodSpecifications {
+			continue
+		}
+		for _, declared := range file.Declarations {
+			_, call, isADefinition := theNameDefinedBy(declared, thePodName, thePodSpecificationDefinition)
+			if !isADefinition || declared.Name != theResilientPlacement {
+				continue
+			}
+
+			return whereResilientPlacementDepartsFromTheEvenSpread(file.Path, call.Args)
+		}
+	}
+
+	return append(offenders, fmt.Sprintf("  %s defines no %s", thePodSpecifications, theResilientPlacement))
+}
+
+// whereResilientPlacementDepartsFromTheEvenSpread names every subject the
+// settings of Resilient placement name no Even spread over, and every topology
+// spread constraint they write themselves.
+func whereResilientPlacementDepartsFromTheEvenSpread(path string, settings []ast.Expr) []string {
+	var offenders []string
+	for _, subject := range theSpreadSubjects {
+		if !slices.ContainsFunc(settings, func(setting ast.Expr) bool { return namesTheEvenSpreadOver(setting, subject) }) {
+			offenders = append(offenders, fmt.Sprintf("  %s, in %s: names no %s(node.%s)",
+				path, theResilientPlacement, theEvenSpread, subject))
+		}
+	}
+	for _, setting := range settings {
+		if isALiteralOf(setting, thePodName, theSpreadSetting) {
+			offenders = append(offenders, fmt.Sprintf("  %s, in %s: writes a pod.%s itself",
+				path, theResilientPlacement, theSpreadSetting))
+		}
+	}
+
+	return offenders
+}
+
+// namesTheEvenSpreadOver reports whether a setting is EvenSpreadOver(node.<subject>),
+// the Even spread of the same place over that label.
+func namesTheEvenSpreadOver(setting ast.Expr, subject string) bool {
+	named, isACall := setting.(*ast.CallExpr)
+	if !isACall || len(named.Args) != onlyOnce {
+		return false
+	}
+	function, isAName := named.Fun.(*ast.Ident)
+
+	return isAName && function.Name == theEvenSpread && namesThe(named.Args[0], theNodeName, subject)
+}
+
+// Every value of a setting a Scenario writes stands beside its Kubernetes name: a
+// literal of a type the pod or node package offers writes a key before each
+// value, so no value is read by its position (docs/prd.md REQ-SIM-016).
+func TestEveryScenarioSource_ShouldWriteEachValueOfASettingBesideItsKubernetesName(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := settingsWrittenByPosition(t, filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("every literal of a pod or node type a Scenario writes keys each value by its field's name, but:\n%s",
+			strings.Join(offenders, "\n"))
+	}
+}
+
+// The rule's own decisions are read here, since the shipped sources write only the
+// keyed form.
+func TestTheKeyedSettingRule_ShouldAdmitAKeyedLiteralAndReportOneWrittenByPosition(t *testing.T) {
+	written := map[string]struct {
+		line     string
+		admitted bool
+	}{
+		"a keyed Request": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+				`pod.Request{CPU: 3, Memory: 12 * pod.Gi}))`,
+			admitted: true,
+		},
+		"a keyed Node capacity": {
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), ` +
+				`node.Capacity{CPU: 4, Memory: 16 * node.Gi, Pods: 10}))`,
+			admitted: true,
+		},
+		"a Request by position": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+				`pod.Request{3, 12 * pod.Gi}))`,
+		},
+		"a Node capacity by position": {
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), ` +
+				`node.Capacity{4, 16 * node.Gi, 10}))`,
+		},
+		"a toleration by position": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+				`pod.Toleration{node.NotReady, pod.Exists, pod.NoExecute, 300}))`,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			offenders := settingsWrittenByPosition(t, aScenarioWhoseStepsAre(t, taken.line))
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// settingsWrittenByPosition names every literal of a type the pod or node package
+// offers that a file of the place writes with a value standing without its key.
+// The files are parsed again here, since a literal is no name a declaration uses.
+func settingsWrittenByPosition(t *testing.T, files []modulerules.GoFile) []string {
+	t.Helper()
+
+	positions := token.NewFileSet()
+	var offenders []string
+	for _, file := range files {
+		parsed, err := parser.ParseFile(positions, file.Path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file.Path, err)
+		}
+		ast.Inspect(parsed, func(visited ast.Node) bool {
+			literal, isALiteral := visited.(*ast.CompositeLit)
+			if isALiteral && isATypeOfAPodOrANode(literal.Type) && !keysEveryValue(literal) {
+				offenders = append(offenders, fmt.Sprintf("  %s: writes a value of a setting without its name",
+					positions.Position(literal.Pos())))
+			}
+
+			return true
+		})
+	}
+
+	return offenders
+}
+
+// isATypeOfAPodOrANode reports whether a literal's type is one the pod or the
+// node package offers.
+func isATypeOfAPodOrANode(written ast.Expr) bool {
+	selected, isSelected := written.(*ast.SelectorExpr)
+	if !isSelected {
+		return false
+	}
+	qualifier, isAName := selected.X.(*ast.Ident)
+
+	return isAName && (qualifier.Name == thePodName || qualifier.Name == theNodeName)
+}
+
+// keysEveryValue reports whether every value of a literal stands beside its key.
+func keysEveryValue(literal *ast.CompositeLit) bool {
+	return !slices.ContainsFunc(literal.Elts, func(element ast.Expr) bool {
+		_, isKeyed := element.(*ast.KeyValueExpr)
+
+		return !isKeyed
+	})
 }

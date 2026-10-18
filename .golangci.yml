@@ -32,13 +32,15 @@ linters:
               desc: internal/scenario and internal/timeline import no Kubernetes package; Kubernetes types stay inside internal/cluster (docs/system-design.md § Package Structure)
 
         # The Scenario rule: a Scenario source is Steps alone, so it reaches the
-        # Step surface and nothing else of the lab. It keeps the place an engineer
-        # finds the experiments in from re-accumulating machinery.
+        # Step surface and the pod and node packages beneath it, and nothing else
+        # of the lab. It keeps the place an engineer finds the experiments in from
+        # re-accumulating machinery; the lax list mode admits the three packages,
+        # since no deny entry below names them.
         scenarios-hold-steps-alone:
           list-mode: lax
           files:
             - "**/scenarios/**"
-          # The one stated exception to the single-vocabulary rule: a Scenario
+          # The one stated exception to the read-by-subject rule: a Scenario
           # reaching a Pod setting the lab's own vocabulary does not name writes
           # full access, which names that setting under the Kubernetes package
           # declaring it (docs/system-design.md § Package Structure). The lax list

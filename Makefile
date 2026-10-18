@@ -4,11 +4,12 @@
 # It is declared as the gate command in scripts/layout.toml [gate]; the target names
 # are the ones CLAUDE.md § Build Commands documents.
 #
-# golangci-lint is invoked from GOPATH/bin rather than through `go run`: upstream
-# discourages `go run` because it builds the linter against this module's Go version
-# instead of the tested release (CLAUDE.md § Toolchain).
+# golangci-lint is a released binary, never `go run`: upstream discourages `go run`
+# because it builds the linter against this module's Go version instead of the
+# tested release (CLAUDE.md § Toolchain). The binary on PATH wins (Homebrew, or
+# the install script pointed there); GOPATH/bin is the fallback.
 
-GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
+GOLANGCI_LINT := $(or $(shell command -v golangci-lint 2>/dev/null),$(shell go env GOPATH)/bin/golangci-lint)
 
 # Module path prefixes of the dependency classes docs/system-design.md
 # § Dependency Policy § Prohibited rejects. That table is the source of truth; one

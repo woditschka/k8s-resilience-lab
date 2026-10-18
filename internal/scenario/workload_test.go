@@ -29,7 +29,7 @@ const (
 func aWorkload(t *testing.T) scenario.Workload {
 	t.Helper()
 
-	workload, err := scenario.NewWorkload(someWorkloadName, somePodCount, aPodSpecification())
+	workload, err := scenario.NewWorkload(someWorkloadName, somePodCount, aPodSpecification(t))
 	if err != nil {
 		t.Fatalf("build a Workload of %d Pods: %v", somePodCount, err)
 	}
@@ -38,7 +38,7 @@ func aWorkload(t *testing.T) scenario.Workload {
 }
 
 func TestAWorkload_ShouldKeepThePodSpecificationItDeclares(t *testing.T) {
-	declared := aPodSpecification()
+	declared := aPodSpecification(t)
 
 	workload, err := scenario.NewWorkload(someWorkloadName, somePodCount, declared)
 	if err != nil {
@@ -114,14 +114,12 @@ func TestAWorkload_ShouldRefuseADeclarationItCannotDeploy(t *testing.T) {
 		declaring scenario.PodSpecification
 		named     string
 	}{
-		"no name":        {name: "", pods: somePodCount, declaring: aPodSpecification(), named: "name"},
-		"no Pod at all":  {name: someWorkloadName, pods: 0, declaring: aPodSpecification(), named: "Pod"},
-		"a negative Pod": {name: someWorkloadName, pods: -1, declaring: aPodSpecification(), named: "Pod"},
+		"no name":        {name: "", pods: somePodCount, declaring: aPodSpecification(t), named: "name"},
+		"no Pod at all":  {name: someWorkloadName, pods: 0, declaring: aPodSpecification(t), named: "Pod"},
+		"a negative Pod": {name: someWorkloadName, pods: -1, declaring: aPodSpecification(t), named: "Pod"},
+		// A constructed specification always holds the lab's tolerations, so only
+		// the zero value reaches the guard against a specification setting nothing.
 		"a specification that sets nothing": {
-			name: someWorkloadName, pods: somePodCount,
-			declaring: scenario.NewPodSpecification(someSpecificationName), named: "setting",
-		},
-		"no specification at all": {
 			name: someWorkloadName, pods: somePodCount,
 			declaring: scenario.PodSpecification{}, named: "setting",
 		},

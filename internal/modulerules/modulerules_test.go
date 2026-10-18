@@ -439,3 +439,80 @@ func aModuleWhoseFilesAre(t *testing.T, sources map[string]string) string {
 
 	return root
 }
+
+// The sources a keyed literal is read on: a struct literal whose keys name the
+// fields it sets, a map literal whose keys are values it reads, and a slice of
+// structs whose elements leave their type out.
+const (
+	aKeyedStructLiteralSource = `package probe
+
+func Tolerate() Toleration {
+	return pod.Toleration{Key: node.NotReady, TolerationSeconds: wait}
+}
+`
+	aMapLiteralSource = `package probe
+
+func Keyed() map[string]int {
+	return map[string]int{key: count}
+}
+`
+	anElidedStructLiteralSource = `package probe
+
+func Tolerate() []pod.Toleration {
+	return []pod.Toleration{{Key: node.NotReady}}
+}
+`
+)
+
+// The key of a struct literal names a field of the type written, which is no name
+// the declaration reads: the fields a value of a package's type sets are that
+// type's to declare. The key of a map literal is a value, so it stays a name used.
+func TestAKeyedLiteral_ShouldReportTheNamesItsValuesUseAndNotTheFieldsItSets(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		used   []modulerules.UsedName
+	}{
+		{
+			name:   "a struct literal of a package's type",
+			source: aKeyedStructLiteralSource,
+			used: []modulerules.UsedName{
+				{Name: "Toleration"},
+				{Qualifier: "pod", Name: "Toleration"},
+				{Qualifier: "node", Name: "NotReady"},
+				{Name: "wait"},
+			},
+		},
+		{
+			name:   "a map literal",
+			source: aMapLiteralSource,
+			used: []modulerules.UsedName{
+				{Name: "string"},
+				{Name: "int"},
+				{Name: "key"},
+				{Name: "count"},
+			},
+		},
+		{
+			name:   "a struct literal leaving its type out",
+			source: anElidedStructLiteralSource,
+			used: []modulerules.UsedName{
+				{Qualifier: "pod", Name: "Toleration"},
+				{Qualifier: "node", Name: "NotReady"},
+			},
+		},
+	}
+
+	for _, one := range cases {
+		t.Run(one.name, func(t *testing.T) {
+			probed := aModuleWhoseFilesAre(t, map[string]string{"keyed.go": one.source})
+
+			scanned, err := modulerules.ScanGoFiles(probed, modulerules.ProductionGoFilesOnly)
+			if err != nil {
+				t.Fatalf("scan the Go files under %s: %v", probed, err)
+			}
+
+			expect.Expect(t, theOneDeclarationOf(t, scanned).Names).To(expect.Equal(one.used))
+		})
+	}
+}

@@ -1,6 +1,6 @@
 # A Workload declares one of the lab's predefined Pod specifications
 
-**Status:** Accepted
+**Status:** Accepted, amended 2026-10-18: the Scenarios define each predefined specification, per [ADR: Every predefined Pod specification is defined by the Scenarios, with its own Startup time](2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md); amended again 2026-10-18: a run reports every setting a Workload's Pods carry, per [ADR: The Scenarios name leaving an unresponsive Node as one setting, and a run reports every setting a Workload's Pods carry](2026-10-18-the-scenarios-name-leaving-an-unresponsive-node-as-one-setting.md); amended a third time 2026-10-18: `lab.FullAccess`, `lab.PredefinedPodSpecification` and `lab.Settings` are now `pod.FullAccess`, `pod.Predefined` and `pod.Settings`, and `lab.CPU(1)` and `lab.MemoryGi(2)` are now the `CPU` and `Memory` fields of a keyed literal, memory written in `pod.Gi` for a Pod and `node.Gi` for a Node, per [ADR: Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given](2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md)
 
 ## Context
 
@@ -61,7 +61,7 @@ func ResilientPlacement() PodSpecification {
 
 `Customize` takes zero or more Customizations, returns a changed copy, and keeps the last setting written for a field. Each definition is therefore a worked example of the surface a Scenario changes a specification through.
 
-A Customization is one setting written under Kubernetes' own field names, so `internal/lab` exports the spread setting and the names it takes. The toleration setting stays unexported: a Scenario states no waiting time of its own, per REQ-SIM-008. Every exported name a Scenario may write stands in one file, which is the vocabulary `internal/lab` offers Scenarios. That single-import rule is kept for the one vocabulary it gives a Scenario — one prefix, one curated list — rather than for hiding the machinery.
+A Customization is one setting written under Kubernetes' own field names, so `internal/lab` exports the spread setting and the names it takes. The toleration setting stayed unexported until the amendment of 2026-10-18, below, so that a Scenario states no waiting time of its own, per REQ-SIM-008. Since that amendment the setting is offered, and the domain holds the lab's waiting time whatever a definition writes. Every exported name a Scenario may write stands in one file, which is the vocabulary `internal/lab` offers Scenarios. That single-import rule is kept for the one vocabulary it gives a Scenario — one prefix, one curated list — rather than for hiding the machinery.
 
 A Scenario holds no declaration and no local value, so it writes its Customizations on the Workload line itself. A change worth reusing becomes a predefined specification instead.
 
@@ -79,11 +79,15 @@ The mapper transcribes a specification onto the Pod template field by field. The
 
 Option 1 keeps the reading problem: the line still states rules. Option 2 hides Kubernetes' own names behind a vocabulary of the lab's, which is what the definition exists to show. Option 4 leaves the domain core with nothing to hold, and option 5 makes every Scenario a Kubernetes author, inverting "the lab's own vocabulary first, full access as an extension". Option 6 needs a method before a Scenario can set a field, and a value needs none.
 
+Since the amendment of 2026-10-18, the definitions above live in `scenarios/pods.go`, written through `lab.PredefinedPodSpecification` with their own Startup time. The base and the definitions in `internal/lab` are retired. That amendment had a definition write the lab's two tolerations itself, through the toleration setting it offered, and the domain holds them at the lab's waiting time whatever is written, per [ADR: Every predefined Pod specification is defined by the Scenarios, with its own Startup time](2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md). Since the second amendment of 2026-10-18, a definition names the Named setting for leaving an unresponsive Node and writes neither toleration itself. The Scenarios define that setting beside the specifications, as exactly the two tolerations under their Kubernetes names grouped through `lab.Settings`, per [ADR: The Scenarios name leaving an unresponsive Node as one setting](2026-10-18-the-scenarios-name-leaving-an-unresponsive-node-as-one-setting.md).
+
 ## Consequences
 
 A Workload line reads as an intent, and the Step a run reports names that intent. A customized Workload reads the same way, since the Step names the specification and not its settings. Two Workloads under one intent therefore read alike where one was customized, which is what keeps the report free of configuration.
 
-The definition is the whole of what decides a Placement, with the lab's own settings one hop away in the base.
+Since the second amendment of 2026-10-18, that holds of the Step name alone. The run prints every setting the Workload's Pods carry on lines of their own under the Given, so a customized Workload's lines differ there.
+
+The definition is the whole of what decides a Placement. Until the amendment of 2026-10-18 the lab's own settings sat one hop away in the base. Since then a definition states every setting its Pods carry. Since the second amendment it writes each one itself except the lab's two tolerations, which it names through the Named setting for leaving an unresponsive Node.
 
 `SpreadEvenly`, the Scenario-named spread domains and the spread-rule type are gone, and `scenario.SpreadDomain` stays beside `Placement` as the axis its Skew is read over. A Given's refusals are a Pod count below one and a specification holding no setting.
 
@@ -118,3 +122,4 @@ No Scenario of the lab uses full access, so the single-import exception is unexe
 - [system-design.md § Contracts](../system-design.md)
 - [ADR: A Scenario's Workload declares the spread of its own Pods](2026-10-04-scenario-declared-pod-spread.md)
 - [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md)
+- [ADR: Every predefined Pod specification is defined by the Scenarios, with its own Startup time](2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md)

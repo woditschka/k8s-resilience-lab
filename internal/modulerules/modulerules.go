@@ -134,8 +134,9 @@ type Declaration struct {
 	Statements []Statement
 	// Names is every name this declaration uses, each once and in the order it
 	// first writes them: the types it names, the values it reads and the functions
-	// it calls. Neither the name it declares itself nor a name a function literal
-	// inside it declares for itself is one of them.
+	// it calls. Neither the name it declares itself, nor a name a function literal
+	// inside it declares for itself, nor a field a struct literal inside it sets is
+	// one of them.
 	Names []UsedName
 }
 
@@ -496,6 +497,10 @@ func namesUsedIn(positions *token.FileSet, nodes ...ast.Node) []UsedName {
 				for _, declared := range namesDeclaredBy(shape.Type) {
 					broughtAlong[declared] = true
 				}
+			case *ast.CompositeLit:
+				for _, field := range fieldsSetBy(shape) {
+					broughtAlong[field] = true
+				}
 			case *ast.Ident:
 				if !broughtAlong[shape] && shape.Name != theBlankIdentifier {
 					used = appendOnce(used, UsedName{Name: shape.Name})
@@ -507,6 +512,32 @@ func namesUsedIn(positions *token.FileSet, nodes ...ast.Node) []UsedName {
 	}
 
 	return used
+}
+
+// fieldsSetBy are the field names a struct literal's keys write, which name
+// fields of the type written rather than anything the declaration reads. A map
+// literal's keys are values, and an array or slice literal's are indices, so
+// only a literal of another type, or one leaving its type out, sets fields: a
+// literal leaving its type out is read as a struct, the element type a source
+// most often leaves out.
+func fieldsSetBy(literal *ast.CompositeLit) []*ast.Ident {
+	switch literal.Type.(type) {
+	case *ast.MapType, *ast.ArrayType:
+		return nil
+	}
+
+	var fields []*ast.Ident
+	for _, element := range literal.Elts {
+		keyed, isKeyed := element.(*ast.KeyValueExpr)
+		if !isKeyed {
+			continue
+		}
+		if field, isAName := keyed.Key.(*ast.Ident); isAName {
+			fields = append(fields, field)
+		}
+	}
+
+	return fields
 }
 
 // namesDeclaredBy are the names a function type declares for itself: those of

@@ -1,8 +1,8 @@
 # Scenarios
 
-The lab's experiments. A Scenario is one file here, holding one exported Go function over `*lab.Scenario` whose every line is one Step. Nothing of the machinery that runs them lives here: the Step surface and the runner are `internal/lab`.
+The lab's experiments. A Scenario is one file here, holding one exported Go function over `*lab.Scenario` whose every line is one Step. Nothing of the machinery that runs them lives here: the Step surface and the runner are `internal/lab`, with what a Pod carries in `internal/lab/pod` and what a Node is in `internal/lab/node`.
 
-Three files sit beside them. `scenarios.go` holds `All`, the list of the Scenarios a run carries out. `workloads.go` holds the names of the Workloads they deploy, one constant each. `nodes.go` holds the Named Node capacities they name, one function each, defined once with `lab.NamedNodeCapacity`. The lab defines no Node capacity of its own.
+Four files sit beside them. `scenarios.go` holds `All`, the list of the Scenarios a run carries out. `workloads.go` holds the names of the Workloads they deploy, one constant each. `nodes.go` holds the Named Node capacities they name, one function each, defined once with `node.Named`. `pods.go` holds the predefined Pod specifications they declare, one function each, defined once with `pod.Predefined`, and the two Named settings they name: `LeaveUnresponsiveNodes`, defined once with `pod.Settings`, and `EvenSpreadOver`, the Even spread. The lab defines no Node capacity, no Pod specification and no Named setting of its own.
 
 Run them all with `make run`, or `go run ./cmd/lab`. The lab's flags pass through as `make run ARGS="--whole-timeline"`.
 
@@ -21,25 +21,32 @@ A Wait is written as a Step of its own, `s.WaitFor().AllPodsReady()`, or on the 
 
 ## The vocabulary a Scenario writes
 
-Each name below is defined in `internal/lab`, which stays the authority on what it does.
+Every name a Scenario writes reads by its subject. The Scenario's own is under `lab`, what a Pod carries under `pod`, and what a Node is under `node`. Each package stays the authority on what its names do, except the functions of `nodes.go` and `pods.go`, which the Scenarios define. A Scenario imports the three packages by name, never with a dot.
+
+A setting of several values is a keyed literal under Kubernetes' names, such as `pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait}`. Every field the lab offers is required. A field left out holds its zero value, and the setting is refused at the Given declaring it: a Pod setting at the Workload's Given, naming the setting and the field, and a Node capacity at the Topology's Given.
 
 **Givens**
 
-- `Given().Topology(lab.Zones, lab.NodePool(lab.NodePoolName, lab.NodesPerZone, capacity), …)`, each NodePool naming the label its Nodes carry and the room each of its Nodes has: `StandardNodes()` or another function of `nodes.go` naming a Named Node capacity, or `lab.NodeCapacity(lab.CPU, lab.MemoryGi, lab.Pods)` stating cpu, memory and Pod count, all three. Either way, the Topology's Given line reports the cpu, memory and Pod count, after the name where one is named. Zones holding Nodes of different kinds take one NodePool each
-- `Given().Workload(name, lab.Pods, specification)`, with `.RequiredCapacity(lab.Pods)` for the fewest Pods it keeps Running through a Failure
+- `Given().Topology(lab.Zones, node.Pool(node.PoolName, node.PerZone, capacity), …)`, each NodePool naming the label its Nodes carry and the room each of its Nodes has: `StandardNodes()` or another function of `nodes.go` naming a Named Node capacity, or `node.Capacity{CPU: 4, Memory: 16 * node.Gi, Pods: 10}` stating cpu in whole cores, memory and the Pods a Node has room for, all three. Either way, the Topology's Given line reports the cpu, memory and Pod count, after the name where one is named. Zones holding Nodes of different kinds take one NodePool each
+- `Given().Workload(name, lab.Pods, specification)`, with `.RequiredCapacity(lab.Pods)` for the fewest Pods it keeps Running through a Failure; `lab.Pods` counts a Workload's Pods, and the `Pods` field of `node.Capacity` a Node's room
 - the Workload constants of `workloads.go`, business capabilities of the domain the Scenarios model
-- the Named Node capacity functions of `nodes.go`, each `lab.NamedNodeCapacity(name, lab.CPU, lab.MemoryGi, lab.Pods)` under a name of the Scenarios' own; a new one is a function there, never a call in a Scenario
+- the Named Node capacity functions of `nodes.go`, each `node.Named(name, node.Capacity{…})` under a name of the Scenarios' own; a new one is a function there, never a call in a Scenario
 
 **Pod specifications**
 
-- `lab.ResilientPlacement()` — its Pods spread as evenly over the Zones and over the Nodes as the control plane can place them
-- `lab.DefaultPlacement()` — no spread, so where its Pods land is the scheduler's own choice
+- `ResilientPlacement()` of `pods.go` — its Pods spread as evenly over the Zones and over the Nodes as the control plane can place them, by `EvenSpreadOver(node.Zone)` and `EvenSpreadOver(node.Hostname)`, each starting in 500ms to 1s
+- `DefaultPlacement()` of `pods.go` — no spread, so where its Pods land is the scheduler's own choice, each starting in 500ms to 1s
+- the specification functions of `pods.go`, each `pod.Predefined(name, startup, settings…)`: a name of the Scenarios' own, the Startup time its Pods take in one of the four forms below, then its settings. Each names `LeaveUnresponsiveNodes()` first and writes neither of the lab's two tolerations itself; the lab holds both at its waiting time whatever is written. A new specification is a function there, never a call in a Scenario
+- `LeaveUnresponsiveNodes()` of `pods.go` — a Named setting, defined beside the specifications that name it, never by the lab: its Pods leave a Node that stopped responding after the lab's waiting time. It stands for exactly two tolerations under their Kubernetes names, `pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait}` and the same for `node.Unreachable`, grouped by `pod.Settings(…)`, the lab's only means to group settings under a name; it takes settings alone, so a Startup time, a full access or another group does not compile inside it
+- `EvenSpreadOver(topologyKey)` of `pods.go` — the Even spread, a Named setting holding one `pod.TopologySpreadConstraint` over the label given, at a `MaxSkew` of one, `pod.DoNotSchedule` and `pod.Honor`. A Scenario wanting another skew, or a Pod placed past it, writes the literal itself
+- the Workload's Given line, which reports under it every setting its Pods carry, one line each as a manifest writes it, a Named setting as the settings it stands for and a full access as one line saying it applies
+- `pod.TopologySpreadConstraint{…}`, `pod.Request{CPU: 3, Memory: 12 * pod.Gi}` and `pod.Toleration{…}` — the settings a definition sets and a Customization changes, with the values `pod.DoNotSchedule`, `pod.Honor`, `pod.Exists` and `pod.NoExecute`, the labels `node.Zone` and `node.Hostname`, the taints `node.NotReady` and `node.Unreachable`, and the lab's waiting time `node.UnresponsiveWait` in whole seconds
 - `.Customize(…)` on a specification — that specification with the lab's own settings changed
-- `lab.FullAccess(…)` — the Customization carrying a Scenario's own change to the Kubernetes Pod specification
-- `lab.StartupSeconds(n)` — the Customization stating the whole seconds each of its Pods takes to start; with none stated, each Pod takes its own time within the lab's own Startup time
-- `lab.StartupSecondsBetween(shortest, longest)` — the Customization stating that each Pod takes a time between the two, in whole seconds
-- `lab.StartupMillis(n)` — the Customization stating the whole milliseconds each of its Pods takes to start
-- `lab.StartupMillisBetween(shortest, longest)` — the Customization stating that each Pod takes a time between the two, in whole milliseconds
+- `pod.FullAccess(…)` — the Customization carrying a Scenario's own change to the Kubernetes Pod specification
+- `pod.StartupSeconds(n)` — the Startup time of whole seconds each Pod takes to start, which a definition names and a Customization may state again; the Workload's Given line reports it after the specification's name
+- `pod.StartupSecondsBetween(shortest, longest)` — the Startup time stating that each Pod takes a time between the two, in whole seconds
+- `pod.StartupMillis(n)` — the Startup time stating the whole milliseconds each of its Pods takes to start
+- `pod.StartupMillisBetween(shortest, longest)` — the Startup time stating that each Pod takes a time between the two, in whole milliseconds
 
 **Failures**
 
@@ -80,9 +87,9 @@ The function is named for the condition it runs under and the outcome it asserts
 
 ```go
 func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), lab.NodePool("general", lab.NodesPerZone(3), StandardNodes()))
+	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())
+	s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement())
 	s.WaitFor().AllPodsReady()
 	s.Then().PodsPerZone(3)
 }
@@ -92,6 +99,6 @@ Every line is one Step opened on `s`, so a reader scans the Step kinds in one co
 
 The Scenario runs under the stem of its file, with hyphens for underscores, so renaming the file renames the Scenario. A new Scenario is a file here and one line in `scenarios.go`.
 
-A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `lab.NodesPerZone`, `lab.Pods`, `lab.WorkloadName`, `lab.NodePoolName`, the NodePool's capacity and the specification — so a swapped or missing argument does not compile. An optional setting is a further call on the complete declaration, `.RequiredCapacity` on the Workload.
+A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `node.PerZone`, `lab.Pods`, `lab.WorkloadName`, `node.PoolName`, the NodePool's capacity and the specification — so a swapped or missing argument does not compile. A setting's values stand beside their Kubernetes field names, so none is read by its position. An optional setting is a further call on the complete declaration, `.RequiredCapacity` on the Workload.
 
 A Scenario has no test of its own: it is itself the check, and a test beside it could only repeat its own Then Steps. The lab's Scenarios run in `cmd/lab`'s own suite, which fails when one reports a Finding or ends at a Step.

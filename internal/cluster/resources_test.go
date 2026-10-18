@@ -59,13 +59,30 @@ func aWorkload(t *testing.T, declaring scenario.PodSpecification) scenario.Workl
 	return workload
 }
 
-// aSpecificationOf is a specification holding the settings named. This suite
-// builds its own with internal/scenario's constructors rather than naming one of
-// the lab's predefined definitions: those are defined in internal/lab, which
-// imports this package, so what is mapped here are settings and not a catalogue.
-func aSpecificationOf(settings ...scenario.Setting) scenario.PodSpecification {
-	return scenario.NewPodSpecification(someSpecificationName, settings...)
+// aSpecificationOf is a specification holding the settings named, its Pods
+// taking some Startup time. This suite builds its own with internal/scenario's
+// constructors: the predefined ones are defined by the Scenarios' place, which
+// imports internal/lab, which imports this package, so what is mapped here are
+// settings and not a catalogue.
+func aSpecificationOf(t *testing.T, settings ...scenario.Setting) scenario.PodSpecification {
+	t.Helper()
+
+	declared, err := scenario.NewPodSpecification(someSpecificationName,
+		aStartupTimeBetween(t, someShortestStartup, someLongestStartup), settings...)
+	if err != nil {
+		t.Fatalf("build the Pod specification %q: %v", someSpecificationName, err)
+	}
+
+	return declared
 }
+
+// someShortestStartup and someLongestStartup are the Startup time the
+// specifications of this suite name where a test does not turn on it: a range
+// under a second, as the Scenarios' own definitions name.
+const (
+	someShortestStartup = 500 * time.Millisecond
+	someLongestStartup  = time.Second
+)
 
 // anEvenSpreadOver is a spread setting counted over one label, enforced and
 // reading the Nodes' taints, which is the shape every spread the lab defines has.
@@ -121,8 +138,8 @@ func theTolerationOf(taint string) corev1.Toleration {
 // field: one enforced constraint per spread setting at the Skew that setting
 // names, and one toleration per toleration setting for the time it names, per
 // docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md. A
-// specification setting no spread carries no constraint and still its own
-// tolerations.
+// specification setting no spread carries no constraint and still the lab's two
+// tolerations, which every specification holds.
 func TestAWorkloadDeclaringAPredefinedSpecification_ShouldBeDeployedWithTheSettingsItsDefinitionNames(t *testing.T) {
 	declared := map[string]struct {
 		specification scenario.PodSpecification
@@ -130,7 +147,7 @@ func TestAWorkloadDeclaringAPredefinedSpecification_ShouldBeDeployedWithTheSetti
 		tolerations   []corev1.Toleration
 	}{
 		"a specification spreading its Pods over the Zones and over the Nodes": {
-			specification: aSpecificationOf(
+			specification: aSpecificationOf(t,
 				aNodeConditionToleration(scenario.TaintNodeNotReady),
 				aNodeConditionToleration(scenario.TaintNodeUnreachable),
 				anEvenSpreadOver(scenario.ZoneLabel, evenSkew),
@@ -146,8 +163,11 @@ func TestAWorkloadDeclaringAPredefinedSpecification_ShouldBeDeployedWithTheSetti
 			},
 		},
 		"a specification setting no spread of its own": {
-			specification: aSpecificationOf(aNodeConditionToleration(scenario.TaintNodeNotReady)),
-			tolerations:   []corev1.Toleration{theTolerationOf(corev1.TaintNodeNotReady)},
+			specification: aSpecificationOf(t, aNodeConditionToleration(scenario.TaintNodeNotReady)),
+			tolerations: []corev1.Toleration{
+				theTolerationOf(corev1.TaintNodeNotReady),
+				theTolerationOf(corev1.TaintNodeUnreachable),
+			},
 		},
 	}
 
@@ -199,7 +219,7 @@ func afterEverySettingOf(declared scenario.PodSpecification) int {
 // vocabulary does not name included, so what a Scenario wrote stands on the Pod
 // template its Workload is deployed with.
 func TestASpecificationCustomizedWithFullAccess_ShouldHoldTheSettingsTheScenarioNamed(t *testing.T) {
-	declared := aSpecificationOf(aNodeConditionToleration(scenario.TaintNodeNotReady))
+	declared := aSpecificationOf(t, aNodeConditionToleration(scenario.TaintNodeNotReady))
 
 	deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
 		Access:        namingThePriorityClass(theCriticalPriorityClass),
@@ -208,14 +228,16 @@ func TestASpecificationCustomizedWithFullAccess_ShouldHoldTheSettingsTheScenario
 
 	expect.Expect(t, deployed.Spec.Template.Spec.PriorityClassName).To(expect.Equal(theCriticalPriorityClass))
 	expect.Expect(t, deployed.Spec.Template.Spec.Tolerations).
-		To(expect.Equal([]corev1.Toleration{theTolerationOf(corev1.TaintNodeNotReady)}))
+		To(expect.Equal([]corev1.Toleration{
+			theTolerationOf(corev1.TaintNodeNotReady), theTolerationOf(corev1.TaintNodeUnreachable),
+		}))
 }
 
 // A full access runs in the place it was written, so where it and a setting of
 // the lab's own name one Kubernetes field, the one written later is what the Pod
 // template carries.
 func TestFullAccessWrittenBesideTheLabsOwnCustomizations_ShouldWinWhereItIsWrittenLater(t *testing.T) {
-	declared := aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
+	declared := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 
 	written := map[string]struct {
 		place       int
@@ -244,7 +266,7 @@ func TestFullAccessWrittenBesideTheLabsOwnCustomizations_ShouldWinWhereItIsWritt
 // Edge case 7: the specification's own tolerations are transcribed after the last
 // full access, so the unresponsive-Node wait holds whatever full access left out.
 func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHolding(t *testing.T) {
-	declared := aSpecificationOf(
+	declared := aSpecificationOf(t,
 		aNodeConditionToleration(scenario.TaintNodeNotReady),
 		aNodeConditionToleration(scenario.TaintNodeUnreachable),
 	)
@@ -263,7 +285,7 @@ func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHoldi
 // are counted by, the selector reading them and the Deployment's own name and
 // labels stand even where a full access leaves nothing of that specification.
 func TestAWorkloadCustomizedWithFullAccess_ShouldStillHaveItsPodsCountedAsItsOwn(t *testing.T) {
-	declared := aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
+	declared := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 
 	deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
 		Access: leavingNothingOfThePodSpecification(), AfterSettings: beforeEverySetting,
@@ -295,7 +317,7 @@ func TestEveryKubernetesNameTheLabSpells_ShouldEqualTheClientLibrarysOwnConstant
 // maximum Skew of one keeps every Pod Running
 // (docs/adr/2026-10-04-scenario-declared-pod-spread.md).
 func TestADeployedPodTemplate_ShouldCarryNoPodAffinityRule(t *testing.T) {
-	deployed := toDeployment(aWorkload(t, aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
+	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
 	expect.Expect(t, deployed.Spec.Template.Spec.Affinity).To(expect.Equal[*corev1.Affinity](nil))
 }
@@ -305,7 +327,7 @@ func TestADeployedPodTemplate_ShouldCarryNoPodAffinityRule(t *testing.T) {
 // neither, per
 // docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
 func TestADeployedPodTemplate_ShouldCarryTheContainerNoSpecificationCanName(t *testing.T) {
-	deployed := toDeployment(aWorkload(t, aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
+	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
 	expect.Expect(t, deployed.Spec.Template.Spec.Containers).To(expect.Equal([]corev1.Container{
 		{Name: workloadContainer, Image: workloadImage},
@@ -406,7 +428,7 @@ func TestANodeTheKWOKControllerNoLongerMaintains_ShouldKeepEveryLabelButTheMarki
 }
 
 func TestADeployedWorkload_ShouldLabelAndSelectItsPodsByItsName(t *testing.T) {
-	deployed := toDeployment(aWorkload(t, aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
+	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
 	expect.Expect(t, deployed.Name).To(expect.Equal(deployedWorkloadName))
 	expect.Expect(t, int(*deployed.Spec.Replicas)).To(expect.Equal(somePodCount))
@@ -485,7 +507,7 @@ func TestEveryQuantityTheLabSpells_ShouldEqualTheClientLibrarysOwnSpelling(t *te
 // asks for. A specification stating none leaves its Pods asking for nothing, so
 // the spread alone decides where they land.
 func TestAPodSpecificationStatingARequest_ShouldDeployItsPodsWithThatRequest(t *testing.T) {
-	declared := aSpecificationOf(scenario.NewRequest(someRequestedCPU, someRequestedMemory))
+	declared := aSpecificationOf(t, scenario.NewRequest(someRequestedCPU, someRequestedMemory))
 
 	deployed := toDeployment(aWorkload(t, declared))
 
@@ -496,7 +518,7 @@ func TestAPodSpecificationStatingARequest_ShouldDeployItsPodsWithThatRequest(t *
 }
 
 func TestAPodSpecificationStatingNoRequest_ShouldDeployItsPodsAskingForNothing(t *testing.T) {
-	declared := aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
+	declared := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 
 	deployed := toDeployment(aWorkload(t, declared))
 
@@ -941,8 +963,8 @@ func aCapacityOf(t *testing.T, pods int, cpu scenario.CPU, memory scenario.Memor
 
 // The Startup times a specification below states, in the whole milliseconds a
 // Startup time is built from: a shortest under a second and a longest that is no
-// whole second, apart from each other and from the lab's own, so what a template
-// carries is read back as the specification's.
+// whole second, apart from each other and from the one this suite's
+// specifications name, so what a template carries is read back as the one stated.
 const (
 	aShortStartupMillis  = 300
 	aLongerStartupMillis = 1700
@@ -971,23 +993,23 @@ func theStartupAnnotations(shortest, longest time.Duration) map[string]string {
 	}
 }
 
-// Every Workload's Pod template carries a Startup time, the lab's own where its
-// specification states none. The annotations sit on the template's metadata,
-// which full access does not reach, so a full access leaving nothing of the Pod
-// specification leaves them standing (docs/prd.md REQ-SIM-012).
+// Every Workload's Pod template carries the Startup time its specification
+// names. The annotations sit on the template's metadata, which full access does
+// not reach, so a full access leaving nothing of the Pod specification leaves
+// them standing (docs/prd.md REQ-SIM-012).
 func TestAWorkloadsPodTemplate_ShouldCarryItsStartupTimeWhateverFullAccessNames(t *testing.T) {
-	statingNone := aSpecificationOf(anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
-	statingARange := statingNone.WithStartupTime(aStartupTimeBetween(t, aShortStartupMillis*time.Millisecond, aLongerStartupMillis*time.Millisecond))
+	namingSome := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
+	statingARange := namingSome.WithStartupTime(aStartupTimeBetween(t, aShortStartupMillis*time.Millisecond, aLongerStartupMillis*time.Millisecond))
 
 	deployed := map[string]struct {
 		template *appsv1.Deployment
 		carries  map[string]string
 	}{
-		"a specification stating none": {
-			template: toDeployment(aWorkload(t, statingNone)),
-			carries:  theStartupAnnotations(scenario.DefaultShortestStartupTime, scenario.DefaultLongestStartupTime),
+		"the Startup time its definition names": {
+			template: toDeployment(aWorkload(t, namingSome)),
+			carries:  theStartupAnnotations(someShortestStartup, someLongestStartup),
 		},
-		"a specification stating a shortest and a longest": {
+		"a shortest and a longest stated after": {
 			template: toDeployment(aWorkload(t, statingARange)),
 			carries:  theStartupAnnotations(aShortStartupMillis*time.Millisecond, aLongerStartupMillis*time.Millisecond),
 		},

@@ -1,6 +1,6 @@
 # Every NodePool states its Node capacity or names one its Scenarios define
 
-**Status:** Accepted
+**Status:** Accepted, amended 2026-10-18: a capacity dimension left out is refused at the Topology Given rather than failing to compile, `lab.NamedNodeCapacity`, `lab.NodeCapacity` and `lab.DeclaredNodeCapacity` are now `node.Named` and `node.Capacity`, a keyed literal whose `CPU`, `Memory` and `Pods` fields replace `lab.CPU`, `lab.MemoryGi` and the Pod count a capacity took, and `lab.NodePool` and `lab.NodesPerZone` are now `node.Pool` and `node.PerZone`, per [ADR: Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given](2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md)
 
 ## Context
 
@@ -53,7 +53,7 @@ Both capacity forms return one value carrying the domain capacity, or the domain
 
 ## Consequences
 
-A Scenario's Topology line shows every value its Nodes hold, under the name where it names one. The two omissions REQ-SIM-011 and REQ-SIM-013 refuse are compile errors on the Step surface, with the zero capacity refused at run time. The lab's own capacity, the Standard entry in `internal/scenario`, the list of names and the run-start "Standard Node:" line are retired. Standard keeps the values the retired default held, so every Scenario keeps its asserted outcome.
+A Scenario's Topology line shows every value its Nodes hold, under the name where it names one. A NodePool without a capacity is a compile error on the Step surface. Since the amendment of 2026-10-18, a capacity leaving out a dimension compiles and the domain refuses it at the Topology Given, as it refuses the zero capacity. The lab's own capacity, the Standard entry in `internal/scenario`, the list of names and the run-start "Standard Node:" line are retired. Standard keeps the values the retired default held, so every Scenario keeps its asserted outcome.
 
 The Scenarios' place admits a file of Named Node capacities beside its file of Workload names. A source rule holds that file to definitions alone and each name to one definition. No source of the lab outside that place calls `lab.NamedNodeCapacity`.
 

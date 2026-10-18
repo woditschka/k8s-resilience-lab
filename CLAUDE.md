@@ -142,10 +142,10 @@ Installed for this stack, beyond the harness core catalogued in the Agent Usage 
 | Tool | Version | Install |
 |------|---------|---------|
 | Go | 1.27 | System package (supports `range int`, `t.Context()`, `strings.SplitSeq`) |
-| golangci-lint | v2.13.2 | Binary install: `curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \| sh` |
+| golangci-lint | v2.15.0 | `brew install golangci-lint` (macOS), or the binary install: `curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \| sh`. A Go upgrade needs a linter rebuilt with it, or lint fails on export data |
 | C compiler (Linux only) | gcc or clang | `sudo apt-get install gcc` (Debian, Ubuntu) or `sudo dnf install gcc` (Fedora, RHEL). The race detector needs it, with `CGO_ENABLED=1`. macOS needs none |
 
-golangci-lint binary lives at `$(go env GOPATH)/bin/golangci-lint`. Do not use `go run` — upstream discourages it (Go version mismatch, untested builds).
+The Makefile takes the `golangci-lint` on PATH, falling back to `$(go env GOPATH)/bin/golangci-lint`. Do not use `go run` — upstream discourages it (Go version mismatch, untested builds).
 
 ## Build Commands
 

@@ -18,6 +18,8 @@ import (
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
+	"github.com/woditschka/k8s-resilience-lab/internal/lab/node"
+	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
@@ -56,8 +58,8 @@ const (
 
 // aFullAccessTheControlPlaneRefuses is full access naming that policy, written the
 // way a Scenario writes one.
-func aFullAccessTheControlPlaneRefuses() Customization {
-	return FullAccess(func(pod *corev1.PodSpec) { pod.RestartPolicy = theRefusedRestartPolicy })
+func aFullAccessTheControlPlaneRefuses() pod.Customization {
+	return pod.FullAccess(func(spec *corev1.PodSpec) { spec.RestartPolicy = theRefusedRestartPolicy })
 }
 
 // aScenarioOnAClusterFor is a Scenario over a Simulated Cluster of its own, the
@@ -141,13 +143,13 @@ func TestAWaitWrittenWithItsGivenAndOneWrittenOnItsOwn_ShouldReportTheSameWaitLi
 	forms := map[string]func(*Scenario){
 		"with the Given that declared it": func(waiting *Scenario) {
 			waiting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
-			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement()).
+			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement()).
 				WaitFor().AllPodsReady()
 		},
 		"as a Step of its own": func(waiting *Scenario) {
 			waiting.Given().Topology(Zones(twoZones), theGeneralNodePool())
 			waiting.WaitFor().AllNodesReady()
-			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), ResilientPlacement())
+			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement())
 			waiting.WaitFor().AllPodsReady()
 		},
 	}
@@ -215,10 +217,10 @@ func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testin
 	t.Parallel()
 	waiting := aScenarioOnAClusterFor(t, theSettlingScenario)
 
-	waiting.Given().Topology(Zones(twoZones), NodePool(generalNodePool, NodesPerZone(twoNodesPerZone),
-		NodeCapacity(CPU(someCoresPerNode), MemoryGi(someGibibytesPerNode), Pods(roomForOnePodPerNode))))
+	waiting.Given().Topology(Zones(twoZones), node.Pool(generalNodePool, node.PerZone(twoNodesPerZone),
+		node.Capacity{CPU: someCoresPerNode, Memory: someGibibytesPerNode * node.Gi, Pods: roomForOnePodPerNode}))
 	waiting.WaitFor().AllNodesReady()
-	waiting.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), ResilientPlacement())
+	waiting.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), resilientPlacement())
 	waiting.WaitFor().PlacementSettled()
 
 	settled := waiting.outcome()
@@ -275,7 +277,7 @@ func expectReachedAtOnce(t *testing.T, recorded []Step) {
 // declares and reaches no cluster, so the Wait below it is the Step that applied
 // the declaration and the Step the ending names, with the declaration in its
 // cause; no Step after it is carried out or judged. Full access is how a Scenario
-// can write such a value; the rule is every Customization's.
+// can write such a value; the rule is every pod.Customization's.
 func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTheWaitThatDeployedTheWorkload(
 	t *testing.T,
 ) {
@@ -284,7 +286,7 @@ func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTh
 
 	ending.Given().Topology(Zones(twoZones), theGeneralNodePool())
 	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode),
-		ResilientPlacement().Customize(aFullAccessTheControlPlaneRefuses()))
+		resilientPlacement().Customize(aFullAccessTheControlPlaneRefuses()))
 	ending.WaitFor().AllPodsReady()
 	ending.Then().PodsPerZone(podsPerZoneWhenEven)
 
@@ -326,12 +328,11 @@ func TestARequestOnlyOneNodePoolHasRoomFor_ShouldPlacePodsOnThatNodePoolAlone(t 
 	t.Parallel()
 	const onePodPerGpuNode = 1
 	podsTheGpuNodesHold := twoZones * oneGpuNodePerZone * onePodPerGpuNode
-	roomy := theCapacityRoomyStandsFor(t)
-	aboveRoomy := Request(roomy.CPU()+CPU(1), roomy.Memory()+MemoryGi(1))
+	aboveRoomy := pod.Request{CPU: roomyCoresPerNode + 1, Memory: (roomyGibibytesPerNode + 1) * pod.Gi}
 	placing := aScenarioOnAClusterFor(t, theGpuRequestScenario)
 
 	placing.Given().Topology(Zones(twoZones), theGeneralNodePool(), theGpuNodePool())
-	placing.Given().Workload(someWorkloadName, Pods(podsTheGpuNodesHold), DefaultPlacement().Customize(aboveRoomy))
+	placing.Given().Workload(someWorkloadName, Pods(podsTheGpuNodesHold), defaultPlacement().Customize(aboveRoomy))
 	placing.WaitFor().PlacementSettled()
 
 	settled := placing.outcome()

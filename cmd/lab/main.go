@@ -76,11 +76,6 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	// state, which is what a Wait stating more is refused against.
 	reported.printf("lab waiting time:   at most %s for a state of the cluster, and the most a Wait may state\n",
 		scenario.WaitingTime)
-	// The lab's own Startup time is no control-plane setting either: it is the range
-	// each placed Pod draws its own time to become Ready from where its Scenario
-	// states none (docs/prd.md REQ-SIM-012).
-	reported.printf("Pod startup time:   %s to %s for every Pod whose Scenario states none\n",
-		scenario.DefaultShortestStartupTime, scenario.DefaultLongestStartupTime)
 
 	// The Scenarios the lab holds, in the order the list beside them names: the
 	// command names no Scenario, so adding one touches the Scenarios' place alone.
@@ -219,10 +214,15 @@ func notFiled(outcome lab.Outcome) error {
 }
 
 // writeSteps reports every Step the Scenario carried out, in order, so the run
-// reads the way the Scenario does, and every Finding under them.
+// reads the way the Scenario does, and every Finding under them. A Workload's
+// Given carries the settings its Pods carry, each reported on a line of its own
+// one level deeper, so what a Named setting stands for stays visible.
 func writeSteps(report *runReport, outcome lab.Outcome) {
 	for _, step := range outcome.Steps {
 		report.printf("  %s\n", step)
+		for _, setting := range step.Settings {
+			report.printf("    %s\n", setting)
+		}
 	}
 
 	for _, finding := range outcome.Findings {

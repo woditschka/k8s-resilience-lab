@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -68,17 +69,6 @@ const (
 	DefaultUnresponsiveNodeWait = 300 * time.Second
 )
 
-// DefaultShortestStartupTime and DefaultLongestStartupTime are the lab's own
-// Startup time: the range each placed Pod draws its own time from where its
-// specification states none. Both bounds are above zero, so no Pod is Ready at
-// its placement and the Pending-on-Node state stays visible, and they differ, so
-// two runs of one Scenario may record different Timelines. Every run prints both
-// beside the other times the lab sets (docs/prd.md REQ-SIM-012).
-const (
-	DefaultShortestStartupTime = 500 * time.Millisecond
-	DefaultLongestStartupTime  = time.Second
-)
-
 // StartupTime is the time one placed Pod takes to become Ready: each Pod takes
 // its own time between the shortest and the longest, both included, so equal
 // bounds are one time every Pod takes. It is no Setting, because no Kubernetes
@@ -110,12 +100,6 @@ func NewStartupTime(shortestMillis, longestMillis int) (StartupTime, error) {
 	}
 
 	return StartupTime{shortest: shortest, longest: longest}, nil
-}
-
-// labsOwnStartupTime is the Startup time a specification stating none holds. It
-// is the lab's own rather than a Scenario's statement, so it is refused nothing.
-func labsOwnStartupTime() StartupTime {
-	return StartupTime{shortest: DefaultShortestStartupTime, longest: DefaultLongestStartupTime}
 }
 
 // Shortest is the least time a Pod taking this Startup time takes to become Ready.
@@ -320,33 +304,42 @@ func (Request) field() settingField {
 }
 
 // PodSpecification is the settings one Workload's Pods are deployed with, under
-// the intent they serve. It holds one setting per field, in the order its
-// definition wrote them, which is the order the mapper transcribes them in.
+// the intent they serve, and the Startup time each of them takes. It holds one
+// setting per field, in the order its definition wrote them, which is the order
+// the mapper transcribes them in.
 //
-// Each of the lab's predefined specifications is defined in internal/lab as the
-// settings it sets, so what a reader of a definition sees is the whole of what
-// decides a Placement.
-//
-// It also holds the Startup time its Pods take: the lab's own unless one was
-// stated, and a later statement wins over an earlier one.
+// Each predefined specification is defined by the Scenarios as the settings it
+// sets and the Startup time it names, so what a reader of a definition sees is
+// the whole of what decides a Placement, per
+// docs/adr/2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md.
 type PodSpecification struct {
 	name        string
 	settings    []Setting
 	startupTime StartupTime
 }
 
-// NewPodSpecification builds the specification of that name out of the settings
-// written, keeping each field once at the value written last for it. It is the
-// one place that rule lives, which is why a customized copy re-enters here.
-func NewPodSpecification(name string, settings ...Setting) PodSpecification {
-	return PodSpecification{name: name, settings: eachFieldOnce(settings), startupTime: labsOwnStartupTime()}
+// NewPodSpecification builds the specification of that name, its Pods taking that
+// Startup time, out of the settings written. A specification is declared by its
+// name, so one under no name is refused.
+//
+// It keeps each field once at the value written last for it, and it holds the
+// lab's two tolerations at the lab's waiting time whatever is written, because a
+// Scenario states no waiting time of its own (docs/prd.md REQ-SIM-008).
+func NewPodSpecification(name string, startup StartupTime, settings ...Setting) (PodSpecification, error) {
+	if name == "" {
+		return PodSpecification{}, errors.New("a Pod specification is declared by its name, so one under no name is refused")
+	}
+
+	return PodSpecification{name: name, settings: held(settings), startupTime: startup}, nil
 }
 
 // With is this specification customized by the settings named: a copy holding
-// them, leaving the specification they were applied to as it was.
+// them, leaving the specification they were applied to as it was. The name and
+// the Startup time it keeps were admitted when this one was built, so only the
+// rule over its settings is entered again.
 func (s PodSpecification) With(settings ...Setting) PodSpecification {
-	customized := NewPodSpecification(s.name, append(slices.Clone(s.settings), settings...)...)
-	customized.startupTime = s.startupTime
+	customized := s
+	customized.settings = held(slices.Concat(s.settings, settings))
 
 	return customized
 }
@@ -361,7 +354,7 @@ func (s PodSpecification) WithStartupTime(stated StartupTime) PodSpecification {
 }
 
 // StartupTime is the time each Pod of this specification takes to become Ready:
-// the one stated last, or the lab's own where none was stated.
+// the one its definition named, or the one stated last on it.
 func (s PodSpecification) StartupTime() StartupTime {
 	return s.startupTime
 }
@@ -408,6 +401,45 @@ func (s PodSpecification) Tolerations() []Toleration {
 // compares through, since the type's fields are unexported.
 func (s PodSpecification) Equal(other PodSpecification) bool {
 	return s.name == other.name && slices.Equal(s.settings, other.settings) && s.startupTime == other.startupTime
+}
+
+// held are the settings a specification holds of those written: every field
+// once, and the lab's two tolerations at the lab's waiting time.
+func held(settings []Setting) []Setting {
+	return withTheLabsTolerations(eachFieldOnce(settings))
+}
+
+// theLabsTaints are the two taints a Node that stopped responding carries, which
+// every specification tolerates for the lab's waiting time and no other.
+var theLabsTaints = []string{TaintNodeNotReady, TaintNodeUnreachable}
+
+// theLabsWaitInSeconds is the lab's waiting time as the whole seconds Kubernetes
+// holds a toleration's time in.
+const theLabsWaitInSeconds = int64(UnresponsiveNodeWait / time.Second)
+
+// withTheLabsTolerations are these settings with a toleration of each of the
+// lab's taints at the lab's waiting time: one written keeps its place and takes
+// that time, and one not written is added after the settings written.
+func withTheLabsTolerations(settings []Setting) []Setting {
+	holding := slices.Clone(settings)
+	for at, setting := range holding {
+		if toleration, isToleration := setting.(Toleration); isToleration && slices.Contains(theLabsTaints, toleration.key) {
+			toleration.tolerationSeconds = theLabsWaitInSeconds
+			holding[at] = toleration
+		}
+	}
+	for _, taint := range theLabsTaints {
+		if !slices.ContainsFunc(holding, func(setting Setting) bool { return setting.field() == tolerationOf(taint) }) {
+			holding = append(holding, NewToleration(taint, Exists, NoExecute, theLabsWaitInSeconds))
+		}
+	}
+
+	return holding
+}
+
+// tolerationOf is the field a toleration of that taint occupies.
+func tolerationOf(taint string) settingField {
+	return settingField{kind: tolerationSetting, key: taint}
 }
 
 // eachFieldOnce are these settings with every field held once: the setting
