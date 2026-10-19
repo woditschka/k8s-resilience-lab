@@ -1,15 +1,14 @@
 // The tests in this file drive the name a Scenario runs under, and how a run
-// carries out its Scenarios at once. The name comes from the file the
-// Scenario's function is defined in, so no run input reaches it and no Scenario
-// carries a name of its own. They reach no engine: a name that cannot be derived
-// stops the run before a Simulated Cluster is provisioned, and carrying out
-// Scenarios at once is driven with functions in memory, because a Scenario
-// defined beside a test has no run name (docs/system-design.md, lab.Runner).
+// carries out its Scenarios at once. The name comes from the condition half of
+// the Scenario's function's name, so no run input reaches it and no Scenario
+// carries a name of its own. They reach no engine: a function naming no
+// condition, or two naming one, stops the run before a Simulated Cluster is
+// provisioned, and carrying out Scenarios at once is driven with functions in
+// memory (docs/system-design.md, lab.Runner).
 package lab
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -20,25 +19,27 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
 )
 
-const (
-	// someScenariosPlace is where the Go runtime would record a Scenario source.
-	// Only the file's own name bears on the run name, so the directory stands for
-	// any.
-	someScenariosPlace = "/home/engineer/k8s-resilience-lab/scenarios"
+// someScenariosPackage is the package path the Go runtime writes before a
+// function's own name. Only the name after it bears on the Scenario name, so the
+// path stands for any.
+const someScenariosPackage = "github.com/woditschka/k8s-resilience-lab/scenarios."
 
-	// theScenarioOfATestFile and theTestFileHoldingIt are what a run that can
-	// derive no name names: the function below, and this file it is defined in,
-	// which is a test file and so no Scenario source.
-	theScenarioOfATestFile = "aScenarioDefinedBesideThisTest"
-	theTestFileHoldingIt   = "runner_test.go"
+// The functions below are Scenarios a refusal is driven with. Each is declared
+// at the top level, because a closure's runtime name is itself one naming no
+// condition.
+const (
+	theFunctionNamingNoCondition = "aFunctionNamingNoCondition"
+	theFirstOfTheTwins           = "ATwinCondition_ShouldReachOneOutcome"
+	theSecondOfTheTwins          = "ATwinCondition_ShouldReachAnotherOutcome"
 )
 
-// aScenarioDefinedBesideThisTest is a function over the Step surface that no
-// Scenario source holds: the Scenarios' place holds no test file, so the lab can
-// locate no Scenario file for it and derives no run name.
-func aScenarioDefinedBesideThisTest(*Scenario) {}
+func aFunctionNamingNoCondition(*Scenario) {}
 
-// aRunnerReachingNoEngine is the Runner a derivation is driven through. A run
+func ATwinCondition_ShouldReachOneOutcome(*Scenario) {}
+
+func ATwinCondition_ShouldReachAnotherOutcome(*Scenario) {}
+
+// aRunnerReachingNoEngine is the Runner a refusal is driven through. A Scenario
 // name that cannot be derived stops the run before anything is provisioned, so
 // the engine this runner holds is never dialed and the Timeline folder it files
 // into is never created; both stand for any.
@@ -48,76 +49,99 @@ func aRunnerReachingNoEngine(t *testing.T) *Runner {
 	return NewRunner(cluster.Endpoint{}, cluster.DefaultKubernetesVersion(), timeline.NewFolder(t.TempDir()))
 }
 
-func TestAScenarioFile_ShouldGiveARunNameOfItsStemWithHyphens(t *testing.T) {
-	runNamesPerFile := map[string]struct {
-		file    string
-		runName string
+func TestAScenarioFunction_ShouldRunUnderTheConditionItsNameStatesWithHyphens(t *testing.T) {
+	scenarioNamesPerFunction := map[string]struct {
+		function     string
+		scenarioName string
 	}{
-		"a file of two words": {file: "resilient_placement.go", runName: "resilient-placement"},
-		"a file of one word":  {file: "eviction.go", runName: "eviction"},
+		"a condition opening with a one-letter word": {
+			function:     "ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding",
+			scenarioName: "a-node-that-stops-responding",
+		},
+		"a one-letter word inside the condition": {
+			function:     "NoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending",
+			scenarioName: "no-room-after-a-zone-stops-responding",
+		},
+		"a run of capitals before a word": {
+			function:     "GeneralPodsBesideTaintedGPUNodes_ShouldStayOffThem",
+			scenarioName: "general-pods-beside-tainted-gpu-nodes",
+		},
+		"a run of capitals ending the condition": {function: "PodsOnGPU_ShouldRun", scenarioName: "pods-on-gpu"},
+		"a digit ending a word":                  {function: "Zone3StopsResponding_ShouldHold", scenarioName: "zone3-stops-responding"},
+		"a condition of one word":                {function: "Eviction_ShouldRestoreThePods", scenarioName: "eviction"},
 	}
 
-	for named, expected := range runNamesPerFile {
+	for named, expected := range scenarioNamesPerFunction {
 		t.Run(named, func(t *testing.T) {
-			derived, err := runNameOf(filepath.Join(someScenariosPlace, expected.file))
+			derived, err := scenarioNameOf(someScenariosPackage + expected.function)
 			if err != nil {
-				t.Fatalf("derive the run name of %s: %v", expected.file, err)
+				t.Fatalf("derive the Scenario name of %s: %v", expected.function, err)
 			}
 
-			expect.Expect(t, derived).To(expect.Equal(expected.runName))
+			expect.Expect(t, derived).To(expect.Equal(expected.scenarioName))
 		})
 	}
 }
 
-func TestAFileThatIsNoScenarioSource_ShouldYieldNoRunNameRatherThanAGuess(t *testing.T) {
-	filesOfNoScenario := map[string]string{
-		"a test file":             filepath.Join(someScenariosPlace, "resilient_placement_test.go"),
-		"a file that is not Go":   filepath.Join(someScenariosPlace, theReadme),
-		"a directory and no file": someScenariosPlace + string(filepath.Separator),
+func TestAFunctionNameStatingNoCondition_ShouldYieldNoScenarioNameButNameTheFunction(t *testing.T) {
+	functionsNamingNoCondition := map[string]string{
+		"a name without the outcome":         "AWorkloadPlacedForResilience",
+		"an empty condition":                 "_ShouldPlaceThreePodsPerZone",
+		"a closure inside a Scenario":        "AWorkload_ShouldBePlaced.func1",
+		"a method value":                     "(*Catalog).AWorkload_ShouldBePlaced-fm",
+		"an underscore inside the condition": "A_Workload_ShouldBePlaced",
+		"a letter beyond ASCII":              "AWorkloadÜberall_ShouldBePlaced",
 	}
 
-	for named, file := range filesOfNoScenario {
+	for named, function := range functionsNamingNoCondition {
 		t.Run(named, func(t *testing.T) {
-			derived, err := runNameOf(file)
+			derived, err := scenarioNameOf(someScenariosPackage + function)
 
 			if err == nil {
-				t.Errorf("%s yields no run name, but %s gave %q", named, file, derived)
+				t.Fatalf("%s names no condition, but gave the Scenario name %q", function, derived)
 			}
+			expect.Expect(t, strings.Contains(err.Error(), function)).To(expect.Equal(true))
 		})
 	}
 }
 
-func TestAFunctionOfNoScenarioFile_ShouldStopTheRunNamingTheFunctionAndTheFile(t *testing.T) {
+func TestAScenarioFunctionNamingNoCondition_ShouldStopTheRunNamingTheFunction(t *testing.T) {
 	running := aRunnerReachingNoEngine(t)
 
-	reported, err := running.Run(t.Context(), aScenarioDefinedBesideThisTest)
+	reported, err := running.Run(t.Context(), aFunctionNamingNoCondition)
 
 	if err == nil {
-		t.Fatalf("a function the lab can locate no Scenario file for stops the run, but it reported: %+v", reported)
+		t.Fatalf("a function naming no condition stops the run, but it reported: %+v", reported)
 	}
-	if !strings.Contains(err.Error(), theScenarioOfATestFile) {
-		t.Errorf("the run names the function it could derive no name for, but reads: %v", err)
-	}
-	if !strings.Contains(err.Error(), theTestFileHoldingIt) {
-		t.Errorf("the run names the file it could derive no name from, but reads: %v", err)
-	}
+	expect.Expect(t, strings.Contains(err.Error(), theFunctionNamingNoCondition)).To(expect.Equal(true))
 }
 
-func TestARunListingAFunctionOfNoScenarioFile_ShouldStopBeforeCarryingOutAnyScenario(t *testing.T) {
+func TestARunListingAFunctionNamingNoCondition_ShouldStopBeforeCarryingOutAnyScenario(t *testing.T) {
 	running := aRunnerReachingNoEngine(t)
 
-	carried, err := running.RunAtOnce(t.Context(), []func(*Scenario){aScenarioDefinedBesideThisTest})
+	carried, err := running.RunAtOnce(t.Context(), []func(*Scenario){aFunctionNamingNoCondition})
 
 	if err == nil {
-		t.Fatalf("a function the lab can locate no Scenario file for stops the run, but it carried out: %+v", carried)
+		t.Fatalf("a function naming no condition stops the run, but it carried out: %+v", carried)
 	}
-	if !strings.Contains(err.Error(), theScenarioOfATestFile) {
-		t.Errorf("the run names the function it could derive no name for, but reads: %v", err)
-	}
+	expect.Expect(t, strings.Contains(err.Error(), theFunctionNamingNoCondition)).To(expect.Equal(true))
 }
 
-// threeScenariosOfARun are the run names the Scenarios carried out at once below
-// run under. Which names they are bears on nothing; that there are several, each
+func TestTwoScenariosNamingTheSameCondition_ShouldStopTheRunBeforeCarryingOutAnyScenario(t *testing.T) {
+	running := aRunnerReachingNoEngine(t)
+
+	carried, err := running.RunAtOnce(t.Context(),
+		[]func(*Scenario){ATwinCondition_ShouldReachOneOutcome, ATwinCondition_ShouldReachAnotherOutcome})
+
+	if err == nil {
+		t.Fatalf("two Scenarios naming one condition stop the run, but it carried out: %+v", carried)
+	}
+	expect.Expect(t, strings.Contains(err.Error(), theFirstOfTheTwins)).To(expect.Equal(true))
+	expect.Expect(t, strings.Contains(err.Error(), theSecondOfTheTwins)).To(expect.Equal(true))
+}
+
+// threeScenariosOfARun are the Scenario names the Scenarios carried out at once
+// below run under. Which names they are bears on nothing; that there are several, each
 // distinct, is what a run carrying them out at once is judged by.
 var threeScenariosOfARun = []string{"some-scenario", "another-scenario", "a-third-scenario"}
 
@@ -230,7 +254,7 @@ func aRunFinishingInReverse(t *testing.T, named []string) func(int) (Outcome, er
 	}
 }
 
-// theNamesReportedIn are the run names of what a run carried out, in the order
+// theNamesReportedIn are the Scenario names of what a run carried out, in the order
 // it handed them back.
 func theNamesReportedIn(carried []Carried) []string {
 	named := make([]string, 0, len(carried))
@@ -241,7 +265,7 @@ func theNamesReportedIn(carried []Carried) []string {
 	return named
 }
 
-// theScenariosThatWentWrongIn are the run names of the Scenarios the lab could
+// theScenariosThatWentWrongIn are the Scenario names of the Scenarios the lab could
 // not carry out to their end.
 func theScenariosThatWentWrongIn(carried []Carried) []string {
 	var wentWrong []string

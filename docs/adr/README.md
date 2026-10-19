@@ -65,7 +65,7 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-03 | [The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md) | Accepted |
 | 2026-10-03 | [Kubernetes version pin for the Simulated Cluster](2026-10-03-kubernetes-version-pin.md) | Accepted |
 | 2026-10-03 | [The lab provisions the Simulated Cluster it drives](2026-10-03-lab-provisioned-simulated-cluster.md) | Accepted |
-| 2026-10-03 | [Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) | Accepted, amended 2026-10-09 |
+| 2026-10-03 | [Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) | Accepted, amended 2026-10-09 and 2026-10-19 |
 | 2026-10-04 | [A Scenario's Workload declares the spread of its own Pods](2026-10-04-scenario-declared-pod-spread.md) | Accepted |
 | 2026-10-04 | [Each Scenario provisions its own Simulated Cluster](2026-10-04-cluster-per-scenario.md) | Accepted, amended 2026-10-09 |
 | 2026-10-04 | [Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md) | Accepted |

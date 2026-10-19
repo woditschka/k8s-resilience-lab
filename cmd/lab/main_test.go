@@ -39,14 +39,14 @@ const (
 )
 
 // The lines a run of the lab's own Scenarios is read by: the Resilient placement
-// Scenario's heading under the run name derived for it, the two Then Steps its
+// Scenario's heading under the Scenario name derived for it, the two Then Steps its
 // Placement has to meet, and what a Finding is reported under.
 const (
 	// aScenarioHeading opens each Scenario's own part of a report, which is the
 	// boundary a Timeline's count and its printed entries are read inside.
 	aScenarioHeading = "Scenario "
 
-	resilientPlacementReported = aScenarioHeading + "resilient-placement"
+	resilientPlacementReported = aScenarioHeading + "a-workload-placed-for-resilience"
 	threePodsPerZoneJudged     = "Then 3 Pods per Zone"
 	onePodPerNodeJudged        = "Then 1 Pod per Node"
 	aFindingReported           = "Finding"
@@ -114,7 +114,7 @@ func theLabsTolerationCarried(taint string) string {
 const theRequestCarried = aSettingCarried + "resources.requests: {cpu: 3, memory: 12Gi}"
 
 // The lines a run of the Node stops responding Scenario is read by: its heading
-// under the run name derived for it, the When Step naming the Node the lab
+// under the Scenario name derived for it, the When Step naming the Node the lab
 // picked, the Then that judges what the Failure left behind, and the counts its
 // capacity judgement states — eight Pods left Running by a Node holding one,
 // and the ninth placed again once the Placement has settled.
@@ -122,7 +122,7 @@ const theRequestCarried = aSettingCarried + "resources.requests: {cpu: 3, memory
 // theNodePickedToFail is the first Node the Scenario's Topology derives, which is
 // the pick a run has to report and has to repeat on every run.
 const (
-	nodeStopsRespondingReported = aScenarioHeading + "node-stops-responding"
+	nodeStopsRespondingReported = aScenarioHeading + "a-node-that-stops-responding"
 	theNodePickedToFail         = "zone-1-node-1"
 	oneNodeFailsReported        = "When 1 Node fails, " + theNodePickedToFail
 	noPodOnTheFailedNodesJudged = "Then no Pod on the Nodes that failed"
@@ -140,7 +140,7 @@ const (
 // theZonePickedToFail is the first Zone the Scenario's Topology derives, which is
 // the pick a run has to report and has to repeat on every run.
 const (
-	zoneStopsRespondingReported = aScenarioHeading + "zone-stops-responding"
+	zoneStopsRespondingReported = aScenarioHeading + "a-zone-that-stops-responding"
 	theZonePickedToFail         = "zone-1"
 	oneZoneFailsReported        = "When 1 Zone fails, " + theZonePickedToFail
 	noPodInTheFailedZonesJudged = "Then no Pod in the Zones that failed"
@@ -171,7 +171,7 @@ const (
 // exactly the minimum of six is left Running at that moment and all nine once
 // the Placement has settled (docs/prd.md REQ-SIM-018).
 const (
-	spotNodesStopRespondingReported = aScenarioHeading + "spot-nodes-stop-responding"
+	spotNodesStopRespondingReported = aScenarioHeading + "spot-nodes-that-stop-responding"
 	theOnDemandAndSpotNodesDeclared = "Given a Topology of 3 Zones of " +
 		"a NodePool on-demand of 2 Standard Nodes holding 16 cpu, 64Gi memory and 10 Pods each, " +
 		"labelled capacity-type=on-demand; " +
@@ -188,7 +188,7 @@ const (
 // holds one on-demand and one spot Node, so six Pods spread evenly put two in
 // each Zone and three on each capacity type (docs/prd.md REQ-SIM-017).
 const (
-	spreadOverOnDemandAndSpotReported = aScenarioHeading + "spread-over-on-demand-and-spot"
+	spreadOverOnDemandAndSpotReported = aScenarioHeading + "a-workload-spread-over-on-demand-and-spot"
 	theLabelledNodePoolsDeclared      = "Given a Topology of 3 Zones of " +
 		"a NodePool on-demand of 1 Standard Node holding 16 cpu, 64Gi memory and 10 Pods each, " +
 		"labelled capacity-type=on-demand; " +
@@ -221,7 +221,7 @@ func spreadOverOnDemandAndSpotCarries() string {
 // general Nodes and none reaches a gpu Node, and three tolerating Pods, each
 // asking for more than a general Node holds, take the three gpu Nodes.
 const (
-	generalPodsStayOffGpuNodesReported = aScenarioHeading + "general-pods-stay-off-gpu-nodes"
+	generalPodsStayOffGpuNodesReported = aScenarioHeading + "general-pods-beside-tainted-gpu-nodes"
 	theTaintedGpuNodePoolDeclared      = "Given a Topology of 3 Zones of " +
 		"a NodePool general of 2 Standard Nodes holding 16 cpu, 64Gi memory and 10 Pods each; " +
 		"a NodePool gpu of 1 GPU Node holding 32 cpu, 128Gi memory and 10 Pods each, " +
@@ -405,7 +405,7 @@ func theScenarioSectionsOf(t *testing.T, reported string) []string {
 	return sections[1:]
 }
 
-// theScenarioNamedIn is the run name the heading of one such section carries,
+// theScenarioNamedIn is the Scenario name the heading of one such section carries,
 // which is what names the case reading it.
 func theScenarioNamedIn(section string) string {
 	named, _, _ := strings.Cut(section, ",")
@@ -959,16 +959,16 @@ func whatTheRunReportsForEach(t *testing.T, carried []lab.Carried) (string, erro
 // because a Scenario whose Steps fail part-way cannot be written as a Scenario
 // source: the Scenarios' place holds the lab's own experiments, which pass.
 const (
-	theScenarioReported = "resilient-placement"
-	itsCluster          = "k8s-resilience-lab-resilient-placement-7f3a9c"
+	theScenarioReported = "a-workload-placed-for-resilience"
+	itsCluster          = "k8s-resilience-lab-a-workload-placed-for-resilience-7f3a9c"
 	theThenStepName     = "3 Pods per Zone"
 	aTopologyStepName   = "a Topology of 3 Zones of 3 Nodes"
 
 	whatEndedTheScenario      = "apply " + aTopologyStepName + ": create Node zone-1-node-1: already exists"
 	whyTheTimelineWasNotFiled = "create the Timeline folder /read-only/timelines: permission denied"
-	someTimelinePath          = "/tmp/a-run/timelines/k8s-resilience-lab-resilient-placement-7f3a9c.jsonl"
+	someTimelinePath          = "/tmp/a-run/timelines/k8s-resilience-lab-a-workload-placed-for-resilience-7f3a9c.jsonl"
 
-	theScenarioNotStarted    = "node-stops-responding"
+	theScenarioNotStarted    = "a-node-that-stops-responding"
 	whyTheClusterDidNotStart = "the Scenario " + theScenarioNotStarted + ": start the Simulated Cluster: port already allocated"
 )
 

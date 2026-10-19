@@ -1,8 +1,8 @@
 # Scenarios
 
-The lab's experiments. A Scenario is one file here, holding one exported Go function over `*lab.Scenario` whose every line is one Step. Nothing of the machinery that runs them lives here: the Step surface and the runner are `internal/lab`, with what a Pod carries in `internal/lab/pod` and what a Node is in `internal/lab/node`.
+The lab's experiments. A Scenario is one exported Go function over `*lab.Scenario` whose every line is one Step, and every one of them sits in `scenarios.go`. Nothing of the machinery that runs them lives here: the Step surface and the runner are `internal/lab`, with what a Pod carries in `internal/lab/pod` and what a Node is in `internal/lab/node`.
 
-These files sit beside them. `scenarios.go` holds `All`, the list of the Scenarios a run carries out. `workloads.go` holds the names of the Workloads they deploy, one constant each. `labels.go` holds the keys of the Node labels their NodePools state, one string constant each. `taints.go` holds the keys and values of the taints their NodePools state, one string constant each. `nodes.go` holds the Named Node capacities they name, one function each, defined once with `node.Named`. `pods.go` holds the predefined Pod specifications they declare, one function each, defined once with `pod.Predefined`, and the two Named settings they name: `LeaveUnresponsiveNodes`, defined once with `pod.Settings`, and `EvenSpreadOver`, the Even spread. The lab defines no Node capacity, no Pod specification and no Named setting of its own.
+`scenarios.go` opens with `All`, the list of the Scenarios a run carries out, and holds every Scenario after it in the order `All` names them. These files sit beside it. `workloads.go` holds the names of the Workloads they deploy, one constant each. `labels.go` holds the keys of the Node labels their NodePools state, one string constant each. `taints.go` holds the keys and values of the taints their NodePools state, one string constant each. `nodes.go` holds the Named Node capacities they name, one function each, defined once with `node.Named`. `pods.go` holds the predefined Pod specifications they declare, one function each, defined once with `pod.Predefined`, and the two Named settings they name: `LeaveUnresponsiveNodes`, defined once with `pod.Settings`, and `EvenSpreadOver`, the Even spread. The lab defines no Node capacity, no Pod specification and no Named setting of its own.
 
 Run them all with `make run`, or `go run ./cmd/lab`. The lab's flags pass through as `make run ARGS="--whole-timeline"`.
 
@@ -83,15 +83,15 @@ A Wait stating no time is held to the lab's own waiting time, which every run re
 
 ## The Scenarios
 
-- **resilient-placement**, `resilient_placement.go` — the lab's simplest Scenario and its starting point. A Workload declares Resilient placement on Nodes with room for more than one of its Pods, so the even Placement is the scheduler honouring that specification.
-- **node-stops-responding**, `node_stops_responding.go` — the Resilient placement world, and then one Node stops responding: what the control plane restores, and the capacity held through it.
-- **zone-stops-responding**, `zone_stops_responding.go` — the same world, and then every Node of one Zone stops responding at once: the capacity surviving a lost Zone.
-- **no-room-after-a-zone-stops-responding**, `no_room_after_a_zone_stops_responding.go` — the lost Zone again, on Nodes with room for one Pod each: six of the nine Pods are Running, the three with nowhere to go stay Pending, and the declared Required Capacity of six is still held.
-- **spread-over-on-demand-and-spot**, `spread_over_on_demand_and_spot.go` — three Zones, each holding an on-demand and a spot NodePool of one Standard Node, labelled by capacity type: six Pods spread evenly over both, two per Zone and three per capacity type.
-- **spot-nodes-stop-responding**, `spot_nodes_stop_responding.go` — three Zones, each holding two on-demand Nodes and one spot Node under Resilient placement, then every spot Node stops responding at once: the nine Pods are restored on the on-demand Nodes, three per Zone, and the Required Capacity of six is held.
-- **general-pods-stay-off-gpu-nodes**, `general_pods_stay_off_gpu_nodes.go` — three Zones, each holding two general Nodes and one larger gpu Node tainted NoSchedule: six Pods under Resilient placement all run on the general Nodes, then three Pods tolerating the taint run on the gpu Nodes, drawn there by a Request only a gpu Node has room for.
+- **a-workload-placed-for-resilience** — the lab's simplest Scenario and its starting point. A Workload declares Resilient placement on Nodes with room for more than one of its Pods, so the even Placement is the scheduler honouring that specification.
+- **a-node-that-stops-responding** — the Resilient placement world, and then one Node stops responding: what the control plane restores, and the capacity held through it.
+- **a-zone-that-stops-responding** — the same world, and then every Node of one Zone stops responding at once: the capacity surviving a lost Zone.
+- **no-room-after-a-zone-stops-responding** — the lost Zone again, on Nodes with room for one Pod each: six of the nine Pods are Running, the three with nowhere to go stay Pending, and the declared Required Capacity of six is still held.
+- **a-workload-spread-over-on-demand-and-spot** — three Zones, each holding an on-demand and a spot NodePool of one Standard Node, labelled by capacity type: six Pods spread evenly over both, two per Zone and three per capacity type.
+- **spot-nodes-that-stop-responding** — three Zones, each holding two on-demand Nodes and one spot Node under Resilient placement, then every spot Node stops responding at once: the nine Pods are restored on the on-demand Nodes, three per Zone, and the Required Capacity of six is held.
+- **general-pods-beside-tainted-gpu-nodes** — three Zones, each holding two general Nodes and one larger gpu Node tainted NoSchedule: six Pods under Resilient placement all run on the general Nodes, then three Pods tolerating the taint run on the gpu Nodes, drawn there by a Request only a gpu Node has room for.
 
-A Scenario's Steps are read in its source.
+A Scenario's Steps are read in `scenarios.go`.
 
 ## Writing one
 
@@ -109,7 +109,7 @@ func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *la
 
 Every line is one Step opened on `s`, so a reader scans the Step kinds in one column and a line is inserted, removed or reordered on its own. The Scenarios here are held to that layout by a rule test, per [the layout ADR](../docs/adr/2026-10-07-the-labs-scenarios-write-one-step-per-line.md).
 
-The Scenario runs under the stem of its file, with hyphens for underscores, so renaming the file renames the Scenario. A new Scenario is a file here and one line in `scenarios.go`.
+The Scenario runs under its Scenario name, the words of the condition before `_Should` in lowercase joined by hyphens, so the function above runs as `a-workload-placed-for-resilience` and renaming the function renames the Scenario. A run of capitals is one word, so `GPUNodes` reads `gpu-nodes`. A condition holding anything but ASCII letters and digits, and two Scenarios naming one condition, are refused before any Simulated Cluster is provisioned. A new Scenario is a function in `scenarios.go`, after the last one, and one line at the end of `All`.
 
 A Scenario's mandatory values are passed as named arguments — `lab.Zones`, `node.PerZone`, `lab.Pods`, `lab.WorkloadName`, `node.PoolName`, the NodePool's capacity and the specification — so a swapped or missing argument does not compile. A setting's values stand beside their Kubernetes field names, so none is read by its position. An optional setting is a further call on the complete declaration, `.RequiredCapacity` on the Workload and `.Labels` on a NodePool.
 

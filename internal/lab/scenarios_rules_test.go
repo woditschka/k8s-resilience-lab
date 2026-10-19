@@ -140,11 +140,11 @@ var (
 	theStartupForms   = []string{"StartupSeconds", "StartupSecondsBetween", "StartupMillis", "StartupMillisBetween"}
 )
 
-// theList is the other file of the place that is not a Scenario: it holds the
-// one exported function naming every Scenario of the place, taking nothing,
-// which is what a run iterates. onlyOnce is how often that function names each
-// of them: naming none leaves a Scenario unrun, and naming one twice runs it
-// twice.
+// theList is the one file of the place holding Scenarios: it opens with the one
+// exported function naming every Scenario of the place, taking nothing, which
+// is what a run iterates, and then holds every Scenario in the order that
+// function names them. onlyOnce is how often that function names each of them:
+// naming none leaves a Scenario unrun, and naming one twice runs it twice.
 const (
 	theList         = "scenarios.go"
 	theListFunction = "All"
@@ -348,7 +348,8 @@ func TestEveryScenarioSource_ShouldHoldOnlyGivenWhenWaitAndThenSteps(t *testing.
 	offenders := declarationsThatDoNotBelong(filesOfThePlace(t, place))
 
 	if len(offenders) > 0 {
-		t.Errorf("a Scenario source holds one exported Scenario function named %s whose every line is a Given, When, Wait or Then Step, and the four files beside them declare the Workload names, the Named Node capacities, the predefined Pod specifications and the list alone, but:\n%s",
+		t.Errorf("%s holds the list and exported Scenario functions named %s whose every line is a Given, When, Wait or Then Step, and the files beside it declare the Workload names, the Node label keys, the taints, the Named Node capacities and the predefined Pod specifications alone, but:\n%s",
+			theList,
 			theScenarioNameShape,
 			strings.Join(offenders, "\n"))
 	}
@@ -2490,6 +2491,143 @@ func TestTheScenariosPlace_ShouldHoldEveryScenarioAndAReadmeNamingThem(t *testin
 	}
 }
 
+func TestEveryScenarioOfTheLab_ShouldStandInOneSourceOfTheScenarios(t *testing.T) {
+	place := theScenariosPlace(t)
+	files := filesOfThePlace(t, place)
+
+	offenders := slices.Concat(scenariosOutsideTheList(files), scenariosOutOfTheListsOrder(files))
+
+	if len(offenders) > 0 {
+		t.Errorf("%s holds every Scenario of the lab, in the order %s names them, and no other source holds one, but:\n%s",
+			theList, theListFunction, strings.Join(offenders, "\n"))
+	}
+}
+
+// theFirstScenario and theSecondScenario are the two Scenarios a scratch place
+// holds below. What they assert bears on nothing; where they stand and in which
+// order is what the one-source rule judges.
+const (
+	theFirstScenario  = "SomeCondition_ShouldHold"
+	theSecondScenario = "AnotherCondition_ShouldHold"
+)
+
+func TestTheOneSourceRule_ShouldAdmitEveryScenarioInTheListsOrderAndReportOneElsewhereOrOutOfOrder(t *testing.T) {
+	placed := map[string]struct {
+		sources  map[string]string
+		admitted bool
+	}{
+		"every Scenario after the list, in its order": {
+			sources: map[string]string{
+				theList: theListSourceOf([]string{theFirstScenario, theSecondScenario}, theFirstScenario, theSecondScenario),
+			},
+			admitted: true,
+		},
+		"a Scenario in a source of its own": {
+			sources: map[string]string{
+				theList:           theListSourceOf([]string{theFirstScenario, theSecondScenario}, theFirstScenario),
+				theScenarioSource: theListSourceOf(nil, theSecondScenario),
+			},
+		},
+		"the Scenarios in another order than the list's": {
+			sources: map[string]string{
+				theList: theListSourceOf([]string{theFirstScenario, theSecondScenario}, theSecondScenario, theFirstScenario),
+			},
+		},
+	}
+
+	for shape, taken := range placed {
+		t.Run(shape, func(t *testing.T) {
+			place := aPlaceHolding(t, taken.sources)
+
+			offenders := slices.Concat(scenariosOutsideTheList(place), scenariosOutOfTheListsOrder(place))
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+// theListSourceOf is the text of a source declaring All naming the Scenarios
+// listed, where any are listed, and then the Scenarios declared, in that order,
+// each holding no Step.
+func theListSourceOf(listed []string, declared ...string) string {
+	var source strings.Builder
+	fmt.Fprintf(&source, "package scenarios\n\nimport %s\n", theStepSurfaceImport)
+	if listed != nil {
+		fmt.Fprintf(&source, "\nfunc %s() []func(%s) {\n\treturn []func(%s){\n", theListFunction, theScenarioParameter, theScenarioParameter)
+		for _, scenario := range listed {
+			fmt.Fprintf(&source, "\t\t%s,\n", scenario)
+		}
+		source.WriteString("\t}\n}\n")
+	}
+	for _, scenario := range declared {
+		fmt.Fprintf(&source, "\nfunc %s(s %s) {}\n", scenario, theScenarioParameter)
+	}
+
+	return source.String()
+}
+
+// scenariosOutsideTheList names every Scenario a file of the place other than the
+// list's own declares, since a run reaches the Scenarios through the list and an
+// engineer reads them in its file.
+func scenariosOutsideTheList(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, file := range files {
+		if filepath.Base(file.Path) == theList {
+			continue
+		}
+		for _, declared := range file.Declarations {
+			if isAScenario(declared) {
+				offenders = append(offenders, fmt.Sprintf("  %s declares the Scenario %s outside %s", file.Path, declared.Name, theList))
+			}
+		}
+	}
+
+	return offenders
+}
+
+// scenariosOutOfTheListsOrder names the list's file where it declares its
+// Scenarios in another order than the list names them, so the list at its head
+// reads as the index of what follows. A place holding no list is reported by
+// the place rule.
+func scenariosOutOfTheListsOrder(files []modulerules.GoFile) []string {
+	listed, found := theListIn(files)
+	if !found {
+		return nil
+	}
+
+	declared := make([]string, 0, len(files))
+	for _, scenario := range theScenariosIn(files) {
+		declared = append(declared, scenario.Name)
+	}
+	named := theScenariosNamedBy(listed, declared)
+	if slices.Equal(declared, named) {
+		return nil
+	}
+
+	return []string{fmt.Sprintf("  %s declares its Scenarios as %v, but %s names them as %v", theList, declared, theListFunction, named)}
+}
+
+// theScenariosNamedBy is every Scenario of those declared that the list names,
+// in the order its lines name them.
+func theScenariosNamedBy(listed modulerules.Declaration, declared []string) []string {
+	var named []string
+	for _, line := range listed.Statements {
+		for _, identifier := range identifiersIn(line.Written) {
+			if slices.Contains(declared, identifier) {
+				named = append(named, identifier)
+			}
+		}
+	}
+
+	return named
+}
+
+// theReadmeEntryOf is how the README names a Scenario: its Scenario name in bold
+// at the head of its entry.
+func theReadmeEntryOf(scenarioName string) string {
+	return "**" + scenarioName + "**"
+}
+
 // theScenariosPlace is where the lab's Scenarios sit, located from the module
 // file rather than from where go test happens to run.
 func theScenariosPlace(t *testing.T) string {
@@ -2517,28 +2655,22 @@ func filesOfThePlace(t *testing.T, place string) []modulerules.GoFile {
 	return sources
 }
 
-// scenarioSourcesIn is every file of the place that is a Scenario's own source,
-// which is every one of them but the two admitted beside them by name.
-func scenarioSourcesIn(files []modulerules.GoFile) []modulerules.GoFile {
-	var sources []modulerules.GoFile
+// theScenariosIn is every Scenario the list's own file declares, in the order
+// it declares them.
+func theScenariosIn(files []modulerules.GoFile) []modulerules.Declaration {
+	var scenarios []modulerules.Declaration
 	for _, file := range files {
-		if isAScenarioSource(file.Path) {
-			sources = append(sources, file)
+		if filepath.Base(file.Path) != theList {
+			continue
+		}
+		for _, declared := range file.Declarations {
+			if isAScenario(declared) {
+				scenarios = append(scenarios, declared)
+			}
 		}
 	}
 
-	return sources
-}
-
-// isAScenarioSource reports whether a file of the place holds a Scenario, which
-// every file of it does but the Workload names and the list.
-func isAScenarioSource(path string) bool {
-	switch filepath.Base(path) {
-	case theWorkloadNames, theNamedNodeCapacities, theNodeLabelKeys, theTaints, theList:
-		return false
-	default:
-		return true
-	}
+	return scenarios
 }
 
 // declarationsThatDoNotBelong names every declaration of the place that its own
@@ -2558,27 +2690,42 @@ func declarationsThatDoNotBelong(files []modulerules.GoFile) []string {
 		case thePodSpecifications:
 			offenders = append(offenders, declarationsThatAreNotPodSpecifications(file)...)
 		case theList:
-			offenders = append(offenders, declarationsThatAreNotTheList(file)...)
+			offenders = append(offenders, declarationsThatAreNeitherTheListNorAScenario(file)...)
 		default:
-			offenders = append(offenders, declarationsThatAreNotAScenario(file)...)
+			offenders = append(offenders, declarationsOfAFileThePlaceDoesNotAdmit(file)...)
 		}
 	}
 
 	return offenders
 }
 
-// declarationsThatAreNotAScenario names every declaration of a Scenario source
-// that is not a Scenario, and every line of a Scenario that is not a Step.
-func declarationsThatAreNotAScenario(source modulerules.GoFile) []string {
+// declarationsThatAreNeitherTheListNorAScenario names every declaration of the
+// list's file that is neither the list nor a Scenario, and every line of a
+// Scenario that is not a Step.
+func declarationsThatAreNeitherTheListNorAScenario(source modulerules.GoFile) []string {
 	var offenders []string
 	for _, declared := range source.Declarations {
-		if !isAScenario(declared) {
-			offenders = append(offenders, fmt.Sprintf("  %s declares the %s %s, which is not a Scenario named %s",
-				source.Path, declared.Kind, declared.Name, theScenarioNameShape))
-
-			continue
+		switch {
+		case isTheList(declared):
+		case isAScenario(declared):
+			offenders = append(offenders, linesOfScenarioThatAreNotSteps(source.Path, declared)...)
+		default:
+			offenders = append(offenders, fmt.Sprintf("  %s declares the %s %s, which is neither the exported %s nor a Scenario named %s",
+				source.Path, declared.Kind, declared.Name, theListFunction, theScenarioNameShape))
 		}
-		offenders = append(offenders, linesOfScenarioThatAreNotSteps(source.Path, declared)...)
+	}
+
+	return offenders
+}
+
+// declarationsOfAFileThePlaceDoesNotAdmit names every declaration of a file the
+// place does not admit by name, a Scenario included: the place admits the list's
+// file and the files of the Scenarios' own names alone.
+func declarationsOfAFileThePlaceDoesNotAdmit(source modulerules.GoFile) []string {
+	offenders := make([]string, 0, len(source.Declarations))
+	for _, declared := range source.Declarations {
+		offenders = append(offenders, fmt.Sprintf("  %s declares the %s %s, but the place admits no file of that name",
+			source.Path, declared.Kind, declared.Name))
 	}
 
 	return offenders
@@ -2840,21 +2987,6 @@ func theOpenerOf(kind StepKind) string {
 	return string(kind)
 }
 
-// declarationsThatAreNotTheList names every declaration of the list file that is
-// not the list itself: the file holds the one exported function naming the
-// Scenarios and nothing else.
-func declarationsThatAreNotTheList(source modulerules.GoFile) []string {
-	var offenders []string
-	for _, declared := range source.Declarations {
-		if !isTheList(declared) {
-			offenders = append(offenders, fmt.Sprintf("  %s declares the %s %s, which is not the exported %s naming the Scenarios",
-				source.Path, declared.Kind, declared.Name, theListFunction))
-		}
-	}
-
-	return offenders
-}
-
 // isTheList reports whether a declaration is the list: the exported function of
 // that name, taking nothing, so a run reaches every Scenario through it alone.
 func isTheList(declared modulerules.Declaration) bool {
@@ -2868,7 +3000,7 @@ func isTheList(declared modulerules.Declaration) bool {
 func whatThePlaceIsMissing(t *testing.T, place string, files []modulerules.GoFile) []string {
 	t.Helper()
 
-	held := scenarioSourcesIn(files)
+	held := theScenariosIn(files)
 
 	var missing []string
 	if len(held) == 0 {
@@ -2879,12 +3011,15 @@ func whatThePlaceIsMissing(t *testing.T, place string, files []modulerules.GoFil
 	missing = append(missing, scenariosTheListDoesNotNameOnce(place, files, held)...)
 
 	named := readTheReadme(t, place)
-	for _, source := range held {
-		if !strings.Contains(named, filepath.Base(source.Path)) {
-			missing = append(missing, fmt.Sprintf("  %s names no Scenario of %s", theReadme, filepath.Base(source.Path)))
-		}
-		if _, err := runNameOf(source.Path); err != nil {
+	for _, declared := range held {
+		scenarioName, err := scenarioNameOf(declared.Name)
+		if err != nil {
 			missing = append(missing, fmt.Sprintf("  %s holds a Scenario that would run under no name: %v", place, err))
+
+			continue
+		}
+		if !strings.Contains(named, theReadmeEntryOf(scenarioName)) {
+			missing = append(missing, fmt.Sprintf("  %s names no Scenario %s, the Scenario name of %s", theReadme, scenarioName, declared.Name))
 		}
 	}
 	for _, file := range files {
@@ -2897,19 +3032,17 @@ func whatThePlaceIsMissing(t *testing.T, place string, files []modulerules.GoFil
 // scenariosTheListDoesNotNameOnce names every Scenario of the place its list
 // does not name exactly once, and the list itself where the place holds none: a
 // Scenario the list does not name is one no run reaches.
-func scenariosTheListDoesNotNameOnce(place string, files, held []modulerules.GoFile) []string {
+func scenariosTheListDoesNotNameOnce(place string, files []modulerules.GoFile, held []modulerules.Declaration) []string {
 	listed, found := theListIn(files)
 	if !found {
 		return []string{fmt.Sprintf("  %s holds no %s declaring the exported %s", place, theList, theListFunction)}
 	}
 
 	var missing []string
-	for _, source := range held {
-		for _, declared := range source.Declarations {
-			if named := timesNamed(listed, declared.Name); isAScenario(declared) && named != onlyOnce {
-				missing = append(missing, fmt.Sprintf("  %s names the Scenario %s %d times, not once",
-					theList, declared.Name, named))
-			}
+	for _, declared := range held {
+		if named := timesNamed(listed, declared.Name); named != onlyOnce {
+			missing = append(missing, fmt.Sprintf("  %s names the Scenario %s %d times, not once",
+				theList, declared.Name, named))
 		}
 	}
 

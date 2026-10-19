@@ -1,6 +1,6 @@
 # Scenarios are Go functions over immutable descriptions
 
-**Status:** Accepted, amended 2026-10-09: a Node capacity's Pod count is a mandatory argument, per [ADR: Every NodePool states its Node capacity or names one its Scenarios define](2026-10-09-every-nodepool-states-or-names-its-node-capacity.md)
+**Status:** Accepted, amended 2026-10-09: a Node capacity's Pod count is a mandatory argument, per [ADR: Every NodePool states its Node capacity or names one its Scenarios define](2026-10-09-every-nodepool-states-or-names-its-node-capacity.md); amended 2026-10-19: a Scenario name is the condition its function states and every Scenario sits in one source, options 12 and 23 replacing option 11 (REQ-SIM-020)
 
 ## Context
 
@@ -10,9 +10,11 @@ The description has to read well at two levels: a high-level shortcut such as a 
 
 The first Scenario written this way reached 130 lines, most of them error plumbing and expectation helpers. The owner asked for "an internal dsl - setup a bit given when then style", small to read and to write. The owner also asked for the machinery out of sight: "the 'framework' should be more hidden e.g. within internal, the scenarios of the lab should be prominent".
 
-A Scenario also names the Workload it deploys. The owner found the first name unconvincing — "i find \"web\" a bit strange what would you see as workload name in a distributed system ?" — and chose naming by business capability over a technical role. Any domain is possible: "the lab is mainly scaffolding plus a few examples" (tidied). The Workloads the lab ships are one example domain's, not a vocabulary the lab fixes. A Scenario carries two names besides. Its function the owner asked to read "like the tests, without 'Test' at the start" (tidied). Its run name, the short one a run prints and a Simulated Cluster carries, was a constant in the command beside the line handing the function to the runner. The owner also asked (tidied): "Tests are not shipped with the binary — do we need tests at all for the Scenario?"
+A Scenario also names the Workload it deploys. The owner found the first name unconvincing — "i find \"web\" a bit strange what would you see as workload name in a distributed system ?" — and chose naming by business capability over a technical role. Any domain is possible: "the lab is mainly scaffolding plus a few examples" (tidied). The Workloads the lab ships are one example domain's, not a vocabulary the lab fixes. A Scenario carries two names besides. Its function the owner asked to read "like the tests, without 'Test' at the start" (tidied). Its Scenario name, the short one a run prints and a Simulated Cluster carries, was first a constant in the command beside the line handing the function to the runner. The owner also asked (tidied): "Tests are not shipped with the binary — do we need tests at all for the Scenario?"
 
 A Scenario that injects a Node Failure also says which Node fails. The first design passed the Node's name, which the owner rejected: "There is no way to deduce the Node name from the setup." The owner chose two forms instead, a count as the usual one and a position where a Scenario needs the Failure in a particular place.
+
+Each Scenario first sat in a file of its own, whose stem gave the Scenario name. On 2026-10-19 the owner found the Scenario place crowded and asked "why can we not just put all scenarios directly in scenarios.go? is this not ideomatic go?", then decided "let's go for the single file with all scenarios then". In one file the stem names no Scenario, so the name needs another source. Asked which, the owner chose "(b) From the function name (Recommended)", the condition half of the function's name, and left to the design whether `All` shares the file and whether that file keeps the name `scenarios.go`. Six of the seven Scenario names change. A Scenario name reaches a container name, a Simulated Cluster name and a Timeline file name. Go identifiers admit Unicode letters and underscores, and a function value may be a closure or a method value.
 
 ## Options Considered
 
@@ -44,17 +46,26 @@ How a Scenario says which Node fails, with option 4 in force:
 17. **A count the lab resolves** — `NodesFail(lab.Nodes(1))`, resolved against the declared Topology and reported by the Step.
 18. **A position in the declared Topology** — `NodeFails(lab.InZone(1), lab.Node(1))`, which says where the Failure lands.
 
-How a Scenario's run name is derived, with option 4 in force:
+How a Scenario name is derived, with option 4 in force:
 
 10. **A constant in the command** — the name sits beside the line handing the function to the runner, so adding a Scenario edits the command.
 11. **The Scenario's file name** — the Go runtime's record of where the function is defined yields the name; renaming the file renames the Scenario.
-12. **The Scenario's function name** — a second convention shortens the long name, and has to hold for every shape a function name may take.
+12. **The identifier before `_Should`, lowercased and hyphenated** — the condition half of the function's name, with a refusal for every name it cannot derive a condition from.
+19. **The whole identifier, hyphenated** — the name carries the outcome too, and outgrows a container name.
+20. **A name each Scenario states beside its function** — a second name to keep in step, the option the owner declined.
+
+Where the Scenarios and their list stand, with option 12 in force:
+
+21. **One file per Scenario, the list beside them** — the layout option 11 needs, and a directory the owner found crowded.
+22. **`All` in `scenarios.go`, the Scenarios in a second file** — two files to keep in step, and the list stands apart from what it lists.
+23. **`All` at the top of `scenarios.go`, every Scenario after it in `All`'s order** — the list reads as the file's own index.
+24. **A new file name such as `catalog.go`** — renames the one place the existing rules, README and Contracts row already name.
 
 ## Decision
 
-Options 2, 4 and 8. A Scenario is an exported Go function taking one `*lab.Scenario` and returning nothing, one Step per line. The Scenario value holds the first failure, so a Step that cannot be carried out ends the Scenario and names itself, and no line names an error. A Then the Placement does not meet records a Finding, and the later Steps still run.
+Options 2, 4, 8, 12 and 23. A Scenario is an exported Go function taking one `*lab.Scenario` and returning nothing, one Step per line. The Scenario value holds the first failure, so a Step that cannot be carried out ends the Scenario and names itself, and no line names an error. A Then the Placement does not meet records a Finding, and the later Steps still run.
 
-The lab's Scenarios are the top-level `scenarios` package with the README naming them; the machinery stays under `internal/`, and `internal/lab` is the one package a Scenario source imports. The list of them is one exported function beside them, one line per Scenario, so adding a Scenario touches that place alone. It is a function rather than a variable, because no package of the lab holds mutable state. A Scenario's function is named `<Condition>_Should<Outcome>`, the shape `docs/testing-principles.md` § Test Naming gives a test without its `Test` prefix. Option 11: the run name is the stem of the Scenario's file, with hyphens for underscores. A stem that is not a Scenario file name stops the run, naming the function and the file, so a name is never guessed or empty. The Scenario-place test asserts the function-name shape and that the list names every Scenario of the place exactly once, so a Scenario cannot exist unrun. A Scenario has no test of its own: it is itself the check, and a test beside it could only repeat its own Then Steps. The place holds production files alone. The `lab` command's own suite runs every Scenario the list holds, and fails when one reports a Finding or ends at a Step.
+The lab's Scenarios are the top-level `scenarios` package with the README naming them; the machinery stays under `internal/`, and `internal/lab` is the one package a Scenario source imports. The list of them is one exported function beside them, one line per Scenario, so adding a Scenario touches that place alone. It is a function rather than a variable, because no package of the lab holds mutable state. A Scenario's function is named `<Condition>_Should<Outcome>`, the shape `docs/testing-principles.md` § Test Naming gives a test without its `Test` prefix. Option 12, since 2026-10-19: the Scenario name is the identifier before the first `_Should` of its function's name, taken from the Go runtime's record of that function, its words lowercased and joined by hyphens. A word starts at a capital after a lower-case letter or digit. A run of capitals is one word, its last capital starting the next word when a lower-case letter follows, so `GPUNodes` reads `gpu-nodes` and `AWorkload` reads `a-workload`. A function with no condition is refused before any Simulated Cluster, naming the function, so a name is never guessed or empty: that covers no `_Should`, an empty half, a closure, a method value, and a condition holding anything other than ASCII letters and digits. Two Scenarios deriving one name are refused the same way, naming both functions. Every Scenario name therefore holds lowercase ASCII letters, digits and hyphens alone, whatever a Go identifier admits. Until then option 11 held: each Scenario sat in a file of its own, whose stem with hyphens for underscores was its name, so `resilient_placement.go` ran as `resilient-placement`, and renaming the file renamed the Scenario. Option 23, since the same day: `scenarios/scenarios.go` keeps its name and holds `All` first, then every Scenario in the order `All` names them; no other source of the place holds a Scenario, and the supporting files stay as they are. The Scenario-place test asserts the function-name shape, the one source and its order, and that the list names every Scenario of the place exactly once, so a Scenario cannot exist unrun. A Scenario has no test of its own: it is itself the check, and a test beside it could only repeat its own Then Steps. The place holds production files alone. The `lab` command's own suite runs every Scenario the list holds, and fails when one reports a Finding or ends at a Step.
 
 Option 14. A When injects one Failure, then discards the observation it injected into, so what the next Then judges is the Placement the control plane reached after the Failure. A Then judging what a When left reads that Failure from the Scenario value; one with no When before it ends the Scenario at its own line.
 
@@ -66,15 +77,17 @@ A Step is one complete call. Its mandatory values are named arguments: `Zones`, 
 
 ## Consequences
 
-One body of behavior serves the unattended run and the live view, so neither needs a second code path. A Scenario reads top to bottom and steps through in a debugger. Every Step it carried out is recorded in order, which is what a run reports and what the live view reads later. Renaming a Scenario's file renames the Scenario, which is what a run prints and what its Simulated Cluster carries. A convenience that cannot be expressed as a combination of existing settings is the signal that a setting is missing. A Scenario studying a Failure reads as the Scenario before it plus one When line, and states no waiting time. Every Node it fails is readable from its own Givens, and the run's Step line names the Node that failed. A count says nothing about where the Failure lands, which is what the by-position form is for. A Scenario pays one settle wait per When, so a long sequence of Whens is a slow Scenario. Per-Zone asymmetry, a disruption budget, and a Workload read from a manifest file are later slices, each a further Step over the same values.
+One body of behavior serves the unattended run and the live view, so neither needs a second code path. A Scenario reads top to bottom and steps through in a debugger. Every Step it carried out is recorded in order, which is what a run reports and what the live view reads later. Renaming a Scenario's function renames the Scenario, its Simulated Cluster and its Timeline file; a file rename no longer does, and a Timeline filed before 2026-10-19 carries a name no Scenario has now. The narrower character set makes the name safe as a container name and a path element before either guard runs. An engineer reads every Scenario top to bottom in one file, and `All` at its head is the index the directory listing used to be, so the one file grows with every Scenario added. A convenience that cannot be expressed as a combination of existing settings is the signal that a setting is missing. A Scenario studying a Failure reads as the Scenario before it plus one When line, and states no waiting time. Every Node it fails is readable from its own Givens, and the run's Step line names the Node that failed. A count says nothing about where the Failure lands, which is what the by-position form is for. A Scenario pays one settle wait per When, so a long sequence of Whens is a slow Scenario. Per-Zone asymmetry, a disruption budget, and a Workload read from a manifest file are later slices, each a further Step over the same values.
 
 ## Implementation
 
-**Requirements:** REQ-SIM-001, REQ-SIM-006, REQ-SIM-008, REQ-SIM-011
+**Requirements:** REQ-SIM-001, REQ-SIM-006, REQ-SIM-008, REQ-SIM-011, REQ-SIM-020
 
 ## References
 
-- [system-design.md § Contracts](../system-design.md)
+- [system-design.md § Package Structure](../system-design.md#package-structure)
+- [system-design.md § Contracts](../system-design.md#contracts)
 - [ADR: The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md)
 - [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md)
 - [ADR: A Scenario writes its own Wait, with its Given or as a Step of its own](2026-10-07-a-scenario-writes-its-own-wait.md)
+- [ADR: A Timeline is recorded from the API's watch stream and filed as JSON Lines](2026-10-05-timeline-from-the-watch-stream.md)
