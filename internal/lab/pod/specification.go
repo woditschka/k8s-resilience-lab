@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
@@ -291,8 +292,7 @@ func asAManifestWritesIt(declared scenario.Setting) string {
 		return fmt.Sprintf("topologySpreadConstraints: {topologyKey: %s, maxSkew: %d, whenUnsatisfiable: %s, nodeTaintsPolicy: %s}",
 			known.TopologyKey(), known.MaxSkew(), known.WhenUnsatisfiable(), known.NodeTaintsPolicy())
 	case scenario.Toleration:
-		return fmt.Sprintf("tolerations: {key: %s, operator: %s, effect: %s, tolerationSeconds: %d}",
-			known.Key(), known.Operator(), known.Effect(), known.TolerationSeconds())
+		return asAManifestWritesTheToleration(known)
 	case scenario.Request:
 		return fmt.Sprintf("resources.requests: {cpu: %s, memory: %s}", known.CPU(), known.Memory())
 	default:
@@ -300,6 +300,22 @@ func asAManifestWritesIt(declared scenario.Setting) string {
 		// reaches here; one added there reads as its Go value until it is named.
 		return fmt.Sprint(known)
 	}
+}
+
+// asAManifestWritesTheToleration is one toleration as a Pod manifest writes it:
+// its value where its operator takes one, and its waiting time where its effect
+// takes one, so a toleration of a NoSchedule taint reads with no waiting time.
+func asAManifestWritesTheToleration(toleration scenario.Toleration) string {
+	fields := []string{"key: " + toleration.Key(), "operator: " + string(toleration.Operator())}
+	if toleration.Operator().TakesAValue() {
+		fields = append(fields, "value: "+toleration.Value())
+	}
+	fields = append(fields, "effect: "+string(toleration.Effect()))
+	if toleration.Effect().TakesAWaitingTime() {
+		fields = append(fields, fmt.Sprintf("tolerationSeconds: %d", toleration.TolerationSeconds()))
+	}
+
+	return "tolerations: {" + strings.Join(fields, ", ") + "}"
 }
 
 // Equal reports whether two specifications name the same settings under the same

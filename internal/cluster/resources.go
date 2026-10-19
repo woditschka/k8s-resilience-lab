@@ -29,13 +29,18 @@ const (
 
 	// nodePoolLabel carries the name of a Node's NodePool, so one selector names
 	// one NodePool's Nodes. Every Node carries it, per
-	// docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md.
-	nodePoolLabel = "k8s-resilience-lab/node-pool"
+	// docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md. It is
+	// spelled in internal/scenario, which refuses a NodePool stating it.
+	nodePoolLabel = scenario.NodePoolLabel
 
 	// fakeNodeAnnotation marks a Node as one KWOK simulates, and fakeNodeLabel is
 	// the marking the KWOK controller is started to select the Nodes it maintains
 	// by (runtime.go manageMarkedNodesArgument). A Failure takes the label off its
 	// Node and leaves the annotation, so the Node still reads as a simulated one.
+	// The label stays a literal of this package, because the container's command
+	// is composed from this package's own constants alone (engine_surface_test.go);
+	// the pin test of the lab's own Node label keys holds it to the spelling
+	// internal/scenario refuses a NodePool stating.
 	fakeNodeAnnotation      = "kwok.x-k8s.io/node"
 	fakeNodeAnnotationValue = "fake"
 	fakeNodeLabel           = "type"
@@ -125,17 +130,34 @@ func probeSelector() string {
 // holds one Node. The Pod names that Node by its hostname label rather than
 // binding itself to it, so the scheduler alone can place it, and a Running probe
 // Pod then proves the Node is in the scheduler's own snapshot
-// (docs/adr/2026-10-04-scheduler-observable-provisioning.md).
+// (docs/adr/2026-10-04-scheduler-observable-provisioning.md). It tolerates
+// that Node's own taints, each by its key and value, so a tainted Node is
+// provisioned as any other, per
+// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
 func toProbePod(node scenario.Node) *corev1.Pod {
 	return &corev1.Pod{
 		Name: probePodNamePrefix + node.Name, Labels: probeLabels(),
 		Spec: corev1.PodSpec{
 			NodeSelector: map[string]string{hostnameLabel: node.Name},
+			Tolerations:  toleratingEach(node.Taints),
 			Containers: []corev1.Container{
 				{Name: probeContainer, Image: workloadImage},
 			},
 		},
 	}
+}
+
+// toleratingEach is a toleration of each of these taints, matching its key and
+// value, or none where there is no taint.
+func toleratingEach(taints scenario.NodeTaints) []corev1.Toleration {
+	var tolerations []corev1.Toleration
+	for _, taint := range taints.Taints() {
+		tolerations = append(tolerations, corev1.Toleration{
+			Key: taint.Key, Operator: corev1.TolerationOpEqual, Value: taint.Value, Effect: corev1.TaintEffect(taint.Effect),
+		})
+	}
+
+	return tolerations
 }
 
 // nodesHoldingRunningProbe are the Nodes an observation reports a Running probe
@@ -154,24 +176,33 @@ func nodesHoldingRunningProbe(observed []corev1.Pod) []string {
 
 // toNode is the Node the lab creates for one Node of a Topology: a fake Node,
 // Ready at creation, reporting the capacity the Topology declared, and carrying
-// the Zone and hostname labels a spread rule's domain is read from, and its
-// NodePool's name.
+// the labels its NodePool states, then the Zone and hostname labels a spread
+// rule's domain is read from and its NodePool's name. The lab's own labels are
+// written last, so they hold whatever was stated, per
+// docs/adr/2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md.
+// It carries the taints its NodePool states as its own.
 //
 // The capacity is reported allocatable as well as whole, because the scheduler
 // fits the requests of the Pods it places against what a Node reports allocatable
 // and nothing of a Simulated Cluster's Node is reserved.
 func toNode(node scenario.Node) *corev1.Node {
-	labelled := map[string]string{
+	stated := node.Labels.Pairs()
+	labelled := make(map[string]string, len(stated)+len(scenario.LabsOwnNodeLabelKeys()))
+	for _, label := range stated {
+		labelled[label.Key] = label.Value
+	}
+	maps.Copy(labelled, map[string]string{
 		zoneLabel:     node.Zone,
 		hostnameLabel: node.Name,
 		nodePoolLabel: node.NodePool,
 		fakeNodeLabel: fakeNodeLabelValue,
-	}
+	})
 
 	return &corev1.Node{
 		Name:        node.Name,
 		Labels:      labelled,
 		Annotations: map[string]string{fakeNodeAnnotation: fakeNodeAnnotationValue},
+		Spec:        corev1.NodeSpec{Taints: toTaints(node.Taints)},
 		Status: corev1.NodeStatus{
 			Capacity:    toResourceList(node.Capacity),
 			Allocatable: toResourceList(node.Capacity),
@@ -180,6 +211,17 @@ func toNode(node scenario.Node) *corev1.Node {
 			},
 		},
 	}
+}
+
+// toTaints are the taints a Node carries for those its NodePool states, in the
+// order the domain holds them, or none where it states none.
+func toTaints(stated scenario.NodeTaints) []corev1.Taint {
+	var taints []corev1.Taint
+	for _, taint := range stated.Taints() {
+		taints = append(taints, corev1.Taint{Key: taint.Key, Value: taint.Value, Effect: corev1.TaintEffect(taint.Effect)})
+	}
+
+	return taints
 }
 
 // toResourceList is the room one Node reports, in all three dimensions: the Pods
@@ -371,18 +413,24 @@ func toTolerations(declared []scenario.Toleration) []corev1.Toleration {
 }
 
 // toToleration is the one toleration a toleration setting becomes, each field as
-// that setting names it: the taint it names, matched the way it says, for the
-// waiting time it sets rather than the admission default, per
-// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
+// that setting names it: the taint it names, matched the way it says, and for a
+// NoExecute taint the waiting time it sets rather than the admission default, per
+// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md. A toleration of
+// a NoSchedule taint carries no waiting time, which Kubernetes takes for
+// NoExecute alone.
 func toToleration(declared scenario.Toleration) corev1.Toleration {
-	leavingAfter := declared.TolerationSeconds()
-
-	return corev1.Toleration{
-		Key:               declared.Key(),
-		Operator:          corev1.TolerationOperator(declared.Operator()),
-		Effect:            corev1.TaintEffect(declared.Effect()),
-		TolerationSeconds: &leavingAfter,
+	tolerated := corev1.Toleration{
+		Key:      declared.Key(),
+		Operator: corev1.TolerationOperator(declared.Operator()),
+		Value:    declared.Value(),
+		Effect:   corev1.TaintEffect(declared.Effect()),
 	}
+	if declared.Effect().TakesAWaitingTime() {
+		leavingAfter := declared.TolerationSeconds()
+		tolerated.TolerationSeconds = &leavingAfter
+	}
+
+	return tolerated
 }
 
 // toUnresponsive is the status of a Node that stopped responding: the status it
@@ -464,9 +512,10 @@ func isPodReady(pod corev1.Pod) bool {
 	return false
 }
 
-// fromNodes reads the Nodes of one observation. A Node's Zone and NodePool come
-// from its labels rather than from its name, so an observation reports what the
-// control plane holds and not what the Topology asked for.
+// fromNodes reads the Nodes of one observation. A Node's Zone, NodePool and
+// stated labels come from its labels rather than from its name, so an
+// observation reports what the control plane holds and not what the Topology
+// asked for.
 func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 	nodes := make([]scenario.Node, 0, len(observed))
 	for _, node := range observed {
@@ -474,16 +523,48 @@ func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read the capacity of Node %s: %w", node.Name, err)
 		}
+		stated, err := scenario.NewNodeLabels(statedLabelsOf(node.Labels))
+		if err != nil {
+			return nil, fmt.Errorf("read the labels of Node %s: %w", node.Name, err)
+		}
+		tainted, err := scenario.NewNodeTaints(statedTaintsOf(node.Spec.Taints)...)
+		if err != nil {
+			return nil, fmt.Errorf("read the taints of Node %s: %w", node.Name, err)
+		}
 
 		nodes = append(nodes, scenario.Node{
 			Name:     node.Name,
 			Zone:     node.Labels[zoneLabel],
 			NodePool: node.Labels[nodePoolLabel],
 			Capacity: capacity,
+			Labels:   stated,
+			Taints:   tainted,
 		})
 	}
 
 	return nodes, nil
+}
+
+// statedTaintsOf are the taints an observed Node carries other than the ones the
+// control plane sets from its conditions: the ones its NodePool stated.
+func statedTaintsOf(carried []corev1.Taint) []scenario.Taint {
+	var stated []scenario.Taint
+	for _, taint := range carried {
+		if !scenario.IsControlPlanesTaint(taint.Key) {
+			stated = append(stated, scenario.Taint{Key: taint.Key, Value: taint.Value, Effect: scenario.TaintEffect(taint.Effect)})
+		}
+	}
+
+	return stated
+}
+
+// statedLabelsOf are the labels an observed Node carries other than the lab's
+// own: the ones its NodePool stated, and any the control plane added.
+func statedLabelsOf(carried map[string]string) map[string]string {
+	stated := maps.Clone(carried)
+	maps.DeleteFunc(stated, func(key, _ string) bool { return scenario.IsLabsOwnNodeLabel(key) })
+
+	return stated
 }
 
 // fromReportedCapacity is the Node capacity one observed resource list reports,

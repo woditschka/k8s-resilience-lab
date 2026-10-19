@@ -1,6 +1,6 @@
 # Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given
 
-**Status:** Accepted
+**Status:** Accepted, amended 2026-10-19: a toleration requires the fields its operator and effect take, per [ADR: A NodePool states NoSchedule taints, and a later Workload deploys beside the earlier, judged alone](2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md)
 
 ## Context
 
@@ -35,10 +35,10 @@ Options 4, 6 and 8.
 - `node` holds what a Node is: `node.Pool`, its Nodes `node.PerZone`, `node.Capacity`, `node.Named`, `node.Gi`, the labels `node.Zone` and `node.Hostname`, the taints `node.NotReady` and `node.Unreachable`, and `node.UnresponsiveWait`.
 - `lab` keeps the Scenario, its Steps, `lab.Zones`, `lab.Nodes`, `lab.Pods` and `lab.WorkloadName`.
 - Every field of a setting the lab offers is required, and its zero value is the field left out. The domain holds each as a plain value with no unset state, and REQ-SIM-015 lets no Placement-deciding value fall to a default.
-- The rule refuses more than Kubernetes requires of a setting, by intent: `tolerationSeconds` and `nodeTaintsPolicy`, optional to Kubernetes, are required here, and a value written as zero counts as left out. Its ground is REQ-SIM-015, under which no Placement-deciding value falls to a default.
+- The rule refuses more than Kubernetes requires of a setting, by intent: `tolerationSeconds` and `nodeTaintsPolicy`, optional to Kubernetes, are required here, and a value written as zero counts as left out. Its ground is REQ-SIM-015, under which no Placement-deciding value falls to a default. A toleration is the exception: Equal takes a value and Exists none, and NoExecute takes a waiting time and NoSchedule none. A field stated against them is refused as one left out is.
 - A setting with a field left out records a refusal naming the setting and that field under its Kubernetes name. The Given declaring its Workload ends the Scenario with it, as a refused Startup time does.
 - A Node capacity left out of a dimension is refused by the domain at the Topology Given, as the zero capacity is.
-- A Pod count reads by its subject (edge case 4): `lab.Pods` for a Workload's size and Required Capacity, the `Pods` field of `node.Capacity` for a Node's room.
+- A Pod count reads by its subject: `lab.Pods` for a Workload's size and Required Capacity, the `Pods` field of `node.Capacity` for a Node's room.
 - The Scenarios define the Even spread as `EvenSpreadOver`, taking the topology key and returning the full literal at a `MaxSkew` of one, `DoNotSchedule` and `Honor`.
 - A plain number stands beside its field name with no wrapper, `MaxSkew: 1` included.
 

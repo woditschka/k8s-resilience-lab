@@ -148,7 +148,7 @@ func aWorkloadNamed(t *testing.T, name string, pods int, declaring scenario.PodS
 	return workload
 }
 
-// aTopologyOfOneZone is the Topology edge case 2 is read on: one Zone of the same
+// aTopologyOfOneZone is the Topology REQ-SIM-009 edge case 1 is read on: one Zone of the same
 // Nodes, so a spread over the Zones is satisfied by every Placement and the
 // spread over the Nodes is the only one left to honour. aTopologyOfOneNode is the
 // smallest there is, which a Workload larger than its room cannot fit into.
@@ -223,7 +223,7 @@ func theSettingsOf(deployed corev1.PodSpec) []scenario.Setting {
 	read := make([]scenario.Setting, 0, len(deployed.Tolerations)+len(deployed.TopologySpreadConstraints))
 	for _, tolerated := range deployed.Tolerations {
 		read = append(read, scenario.NewToleration(tolerated.Key,
-			scenario.TolerationOperator(tolerated.Operator), scenario.TaintEffect(tolerated.Effect),
+			scenario.TolerationOperator(tolerated.Operator), tolerated.Value, scenario.TaintEffect(tolerated.Effect),
 			secondsTolerated(tolerated)))
 	}
 	for _, constraint := range deployed.TopologySpreadConstraints {
@@ -333,6 +333,52 @@ func TestAProvisionedTopology_ShouldHoldThreeZonesOfThreeReadyNodes(t *testing.T
 		t.Fatalf("read the Nodes the cluster reports Ready: %v", err)
 	}
 	expect.Expect(t, ready).To(expect.Equal(topology.Nodes()))
+}
+
+// A NodePool stating labels is provisioned with Nodes the control plane reports
+// carrying them beside the lab's own: each observed Node equals its declared one,
+// stated labels, Zone and NodePool alike, so a label the control plane added or
+// dropped surfaces here rather than as a miscount (docs/prd.md REQ-SIM-017).
+func TestANodePoolStatingLabels_ShouldProvisionNodesCarryingThemBesideTheLabsOwn(t *testing.T) {
+	t.Parallel()
+	provisioned, _ := aProvisionedCluster(t)
+	const oneZone = 1
+	topology, err := scenario.NewTopology(oneZone, aNodePoolLabelled(t, "on-demand"), aNodePoolLabelled(t, "spot"))
+	if err != nil {
+		t.Fatalf("build a Topology of two labelled NodePools: %v", err)
+	}
+
+	if err := provisioned.ApplyTopology(t.Context(), topology); err != nil {
+		t.Fatalf("apply the Scenario's Topology: %v", err)
+	}
+
+	ready, err := provisioned.ReadyNodes(t.Context())
+	if err != nil {
+		t.Fatalf("read the Nodes the cluster reports Ready: %v", err)
+	}
+	expect.Expect(t, ready).To(expect.Equal(topology.Nodes()))
+}
+
+// aNodePoolLabelled is a NodePool of one Node per Zone named after the capacity
+// type it states, which it states under the capacity-type label.
+func aNodePoolLabelled(t *testing.T, capacityType string) scenario.NodePool {
+	t.Helper()
+
+	const oneNodePerZone = 1
+	labels, err := scenario.NewNodeLabels(map[string]string{capacityTypeLabel: capacityType})
+	if err != nil {
+		t.Fatalf("build the label %s=%s: %v", capacityTypeLabel, capacityType, err)
+	}
+	pool, err := scenario.NewNodePool(capacityType, oneNodePerZone, aCapacity(t))
+	if err != nil {
+		t.Fatalf("build the NodePool %s: %v", capacityType, err)
+	}
+	labelled, err := pool.Labelled(labels)
+	if err != nil {
+		t.Fatalf("label the NodePool %s: %v", capacityType, err)
+	}
+
+	return labelled
 }
 
 func TestADeclaredNodeHoldingNoRunningProbePod_ShouldBeNamedAsStillUnheld(t *testing.T) {
@@ -451,7 +497,7 @@ func TestTwoWorkloadsDeclaringDifferentSpecifications_ShouldEachBePlacedByTheOne
 	expect.Expect(t, nowhere.PodsItCannotAccountFor()).To(expect.HaveLen[scenario.Pod](noPodAtAll))
 }
 
-// Edge case 3: two Workloads declaring the same specification are each spread on
+// Edge case 2: two Workloads declaring the same specification are each spread on
 // their own. A spread constraint selects its Workload's Pods by their Workload
 // label, so the other's Pods are not counted towards the Skew and both reach one
 // Pod per Node.
@@ -469,7 +515,7 @@ func TestTwoWorkloadsDeclaringTheSameSpecification_ShouldEachBeSpreadWithoutCoun
 	expect.Expect(t, theOthers.PodsPerNode()).To(expect.Equal(onePodPerNode))
 }
 
-// Edge case 2: Resilient placement on a Topology of one Zone still lands its
+// Edge case 1: Resilient placement on a Topology of one Zone still lands its
 // Pods one per Node, and that one Zone holds them all, because a spread over the
 // Zones of a Topology that has one is satisfied by every Placement.
 func TestResilientPlacementOnATopologyOfOneZone_ShouldStillPlaceOnePodPerNode(t *testing.T) {
@@ -504,7 +550,7 @@ func TestARunAfterAnEarlierRun_ShouldReportOnlyItsOwnNodesAndPods(t *testing.T) 
 	expect.Expect(t, settled.Pods()).To(expect.HaveLen[scenario.Pod](ninePods))
 }
 
-// Edge case 1: a Workload declaring Default placement on a Topology too small for
+// REQ-SIM-001 edge case 1: a Workload declaring Default placement on a Topology too small for
 // its Pods has no spread to blame. The Nodes run out of room, so the Pods the
 // scheduler cannot place stay Pending and the control plane's own reason for each
 // is on the Timeline.
@@ -870,8 +916,9 @@ func TestAWaitForEveryNodeBeforeAWorkloadIsDeployed_ShouldReachThePlacementOfTho
 
 // What each expired Wait reports is read from the last observation alone, so it
 // is asserted here rather than by provoking a Wait that runs its whole budget
-// out, the way the expired settle wait below is (REQ-SIM-006 edge case: a Wait
-// the lab's waiting time outlasts names what was not Ready).
+// out, the way the expired settle wait below is (docs/prd.md REQ-SIM-006: a Wait
+// stating no time that the lab's waiting time outlasts ends the Scenario naming
+// the Pods that were not Ready).
 func TestAWaitForEveryPodTheWaitingTimeOutlasts_ShouldNameThePodsThatWereNotReady(t *testing.T) {
 	observed := aPlacementWithOnePodNotReadyYet(t)
 
@@ -897,7 +944,8 @@ func TestAWaitForEveryNodeTheWaitingTimeOutlasts_ShouldNameTheNodesThatWereNotRe
 // not satisfied with, and what it reports is read from the observation alone. So
 // the report is asserted here rather than by provoking a wait that runs its whole
 // budget out: the budget is what the two tests above run in, and no Placement the
-// lab can bring about keeps a wait open for it (PRD edge case 3).
+// lab can bring about keeps a wait open for it (docs/prd.md REQ-SIM-006: a Wait
+// the lab's waiting time outlasts ends the Scenario naming what was not Ready).
 func TestAPlacementThatDoesNotSettleAfterTheFailure_ShouldReportTheObservedPlacement(t *testing.T) {
 	observed := aPlacementStillHoldingAPodOnTheFailedNode(t)
 
@@ -1251,4 +1299,76 @@ func deployInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.T
 	if err := provisioned.Deploy(t.Context(), workload); err != nil {
 		t.Fatalf("deploy the Scenario's Workload: %v", err)
 	}
+}
+
+// aTopologyOfAGeneralAndATaintedNode is one Zone holding a general Node of four
+// cores and a gpu Node of the same capacity tainted NoSchedule, so what keeps a
+// Pod off the gpu Node is its taint alone.
+func aTopologyOfAGeneralAndATaintedNode(t *testing.T) scenario.Topology {
+	t.Helper()
+
+	capacity := aCapacityOf(t, somePodsPerNode, scenario.CPU(someNodesCores*millicoresPerCore), someMemoryPerNode)
+	general, err := scenario.NewNodePool(generalNodePool, theOneNodeInIt, capacity)
+	if err != nil {
+		t.Fatalf("build the general NodePool: %v", err)
+	}
+	gpu, err := scenario.NewNodePool(gpuNodePool, theOneNodeInIt, capacity)
+	if err != nil {
+		t.Fatalf("build the gpu NodePool: %v", err)
+	}
+	taints, err := scenario.NewNodeTaints(aGPUTaint())
+	if err != nil {
+		t.Fatalf("build the gpu taint: %v", err)
+	}
+	tainted, err := gpu.Tainted(taints)
+	if err != nil {
+		t.Fatalf("taint the gpu NodePool: %v", err)
+	}
+	topology, err := scenario.NewTopology(theOneZone, general, tainted)
+	if err != nil {
+		t.Fatalf("build a Topology of a general and a tainted Node: %v", err)
+	}
+
+	return topology
+}
+
+// The two NodePools of that Topology.
+const (
+	generalNodePool = "general"
+	gpuNodePool     = "gpu"
+)
+
+// A NodePool stating a NoSchedule taint is provisioned with Nodes the control
+// plane reports carrying it, provisioning ending on the tainted Node as on any
+// other because its probe Pod tolerates the taint.
+func TestANodePoolStatingANoScheduleTaint_ShouldProvisionNodesCarryingIt(t *testing.T) {
+	t.Parallel()
+	provisioned, _ := aProvisionedCluster(t)
+	topology := aTopologyOfAGeneralAndATaintedNode(t)
+
+	if err := provisioned.ApplyTopology(t.Context(), topology); err != nil {
+		t.Fatalf("apply the Scenario's Topology: %v", err)
+	}
+
+	ready, err := provisioned.ReadyNodes(t.Context())
+	if err != nil {
+		t.Fatalf("read the Nodes the cluster reports Ready: %v", err)
+	}
+	expect.Expect(t, ready).To(expect.Equal(topology.Nodes()))
+}
+
+// A Workload not tolerating a taint finds no room left on the untainted Node:
+// the Pod it has no room for stays Pending rather than being placed on the
+// tainted Node with room to spare.
+func TestAWorkloadNotToleratingATaint_ShouldKeepItsPodsOffTheTaintedNodes(t *testing.T) {
+	t.Parallel()
+	provisioned, _ := aProvisionedCluster(t)
+	workload := aWorkloadDeclaring(t, threePodsRequestingHalfANode, requestingCPUOf(t, halfTheNodesCPU))
+	deployInto(t, provisioned, aTopologyOfAGeneralAndATaintedNode(t), workload)
+
+	settled := settledPlacementOf(t, provisioned, workload)
+
+	expect.Expect(t, settled.PodsInPhase(scenario.PodPending)).To(expect.HaveLen[scenario.Pod](onePodThatDoesNotFit))
+	expect.Expect(t, settled.PodsPerNodePool()).
+		To(expect.Equal(map[string]int{generalNodePool: twoPodsThatFit, gpuNodePool: noPodAtAll}))
 }

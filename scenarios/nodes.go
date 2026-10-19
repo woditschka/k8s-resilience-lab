@@ -16,3 +16,9 @@ import "github.com/woditschka/k8s-resilience-lab/internal/lab/node"
 func StandardNodes() node.Capacity {
 	return node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
 }
+
+// GPUNodes are Nodes of GPU capacity: twice a Standard Node's cpu and memory, so
+// a Pod asking for more than a Standard Node holds has room on one of them alone.
+func GPUNodes() node.Capacity {
+	return node.Named("GPU", node.Capacity{CPU: 32, Memory: 128 * node.Gi, Pods: 10})
+}

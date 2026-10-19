@@ -163,15 +163,53 @@ func (p Placement) PodsPerNode() map[string]int {
 // included as zero. A Pod on a Node this observation does not hold belongs to no
 // known Zone and is counted in none.
 func (p Placement) PodsPerZone() map[string]int {
-	zoneOf := make(map[string]string, len(p.nodes))
+	return p.podsPerGroup(func(node Node) string { return node.Zone })
+}
+
+// PodsPerLabelValue counts this Workload's Pods under each value of key the
+// observed Nodes carry, a value whose Nodes hold no Pod included as zero. A Pod
+// on a Node carrying no value of key, or on a Node this observation does not
+// hold, is counted under none, per
+// docs/adr/2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md.
+func (p Placement) PodsPerLabelValue(key string) map[string]int {
+	valueOf := make(map[string]string, len(p.nodes))
 	counts := make(map[string]int)
 	for _, node := range p.nodes {
-		zoneOf[node.Name] = node.Zone
-		counts[node.Zone] = 0
+		if value, carried := node.Labels.Value(key); carried {
+			valueOf[node.Name] = value
+			counts[value] = 0
+		}
 	}
 	for _, pod := range p.pods {
-		if zone, known := zoneOf[pod.Node]; known && pod.Placed() {
-			counts[zone]++
+		if value, known := valueOf[pod.Node]; known && pod.Placed() {
+			counts[value]++
+		}
+	}
+
+	return counts
+}
+
+// PodsPerNodePool counts this Workload's Pods on each observed NodePool's Nodes,
+// a NodePool whose Nodes hold no Pod included as zero. A Pod on a Node this
+// observation does not hold belongs to no known NodePool and is counted in none.
+func (p Placement) PodsPerNodePool() map[string]int {
+	return p.podsPerGroup(func(node Node) string { return node.NodePool })
+}
+
+// podsPerGroup counts this Workload's placed Pods in each group of observed
+// Nodes, the group of a Node being what groupOf reads off it, a group holding no
+// Pod included as zero. A Pod on a Node this observation does not hold is
+// counted in no group.
+func (p Placement) podsPerGroup(groupOf func(Node) string) map[string]int {
+	groupOfNode := make(map[string]string, len(p.nodes))
+	counts := make(map[string]int)
+	for _, node := range p.nodes {
+		groupOfNode[node.Name] = groupOf(node)
+		counts[groupOf(node)] = 0
+	}
+	for _, pod := range p.pods {
+		if group, known := groupOfNode[pod.Node]; known && pod.Placed() {
+			counts[group]++
 		}
 	}
 
@@ -233,5 +271,5 @@ func (p Placement) countsOver(domain SpreadDomain) map[string]int {
 // also the equality go-cmp compares this type through, since its fields are
 // unexported.
 func (p Placement) Equal(other Placement) bool {
-	return slices.Equal(p.nodes, other.nodes) && slices.Equal(p.pods, other.pods)
+	return slices.EqualFunc(p.nodes, other.nodes, Node.Equal) && slices.Equal(p.pods, other.pods)
 }

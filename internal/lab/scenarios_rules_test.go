@@ -51,6 +51,20 @@ const (
 	theWorkloadNameType = "lab.WorkloadName"
 )
 
+// theNodeLabelKeys is the file of the place where the lab's own Scenarios take
+// the keys of the Node labels their NodePools state, and their Thens and spreads
+// count over, from. In it, every declaration is an exported untyped string
+// constant, so the file holds keys and no machinery, per
+// docs/adr/2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md.
+const theNodeLabelKeys = "labels.go"
+
+// theTaints is the file of the place where the lab's own Scenarios take the keys
+// and values of the taints their NodePools state, and their tolerations name,
+// from. It holds exported untyped string constants alone, as theNodeLabelKeys
+// does, per
+// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+const theTaints = "taints.go"
+
 // theNamedNodeCapacities is the file of the place where the lab's own Scenarios
 // take the Named Node capacities they name from, the lab defining none. In it,
 // every declaration is an exported function taking nothing whose body is one
@@ -352,22 +366,56 @@ func TestEveryScenarioOfTheLab_ShouldDeclareOnePredefinedPodSpecificationPerWork
 	}
 }
 
-// Every Scenario of the lab runs on one NodePool, and each names it general, so
-// the lab's reports read alike and a Scenario about NodePools is the one that
-// departs from it (docs/prd.md REQ-SIM-013).
-func TestEveryScenarioOfTheLab_ShouldNameItsOneNodePoolGeneral(t *testing.T) {
+// The rule's own decisions over the files of Node label keys and of taints are
+// read here, since the shipped files follow it.
+func TestTheNodeLabelKeysRule_ShouldAdmitExportedUntypedStringConstantsAndReportAnythingElse(t *testing.T) {
+	written := map[string]struct {
+		declarations string
+		admitted     bool
+	}{
+		"an exported untyped string constant": {declarations: `const CapacityType = "capacity-type"`, admitted: true},
+		"a group of them": {
+			declarations: "const (\n\tCapacityType = \"capacity-type\"\n\tRack = \"rack\"\n)", admitted: true,
+		},
+		"a typed constant":       {declarations: `const CapacityType string = "capacity-type"`},
+		"an unexported constant": {declarations: `const capacityType = "capacity-type"`},
+		"a constant of a number": {declarations: `const Racks = 3`},
+		"a constant of no value": {declarations: "const (\n\tCapacityType = \"capacity-type\"\n\tRack\n)"},
+		"a variable":             {declarations: `var CapacityType = "capacity-type"`},
+		"a function":             {declarations: `func CapacityType() string { return "capacity-type" }`},
+		"a computed constant":    {declarations: `const CapacityType = "capacity" + "-type"`},
+	}
+
+	for _, file := range []string{theNodeLabelKeys, theTaints} {
+		for shape, taken := range written {
+			t.Run(file+" "+shape, func(t *testing.T) {
+				place := aPlaceHolding(t, map[string]string{file: "package scenarios\n\n" + taken.declarations + "\n"})
+
+				offenders := declarationsThatDoNotBelong(place)
+
+				expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+			})
+		}
+	}
+}
+
+// Every Scenario of the lab running on one NodePool names it general, so the
+// lab's reports read alike; a Scenario about NodePools, declaring several, is
+// the one that departs from it and names each after what it holds (docs/prd.md
+// REQ-SIM-013, REQ-SIM-017).
+func TestEveryScenarioOfTheLab_ShouldDeclareANodePoolAndNameItGeneralWhenItDeclaresOnlyOne(t *testing.T) {
 	place := theScenariosPlace(t)
 
-	offenders := scenariosNotNamingTheirOneNodePoolGeneral(filesOfThePlace(t, place))
+	offenders := scenariosDeclaringNoNodePoolOrOneNotNamedGeneral(filesOfThePlace(t, place))
 
 	if len(offenders) > 0 {
-		t.Errorf("every Scenario of the lab declares one NodePool and names it %s, but:\n%s",
+		t.Errorf("every Scenario of the lab declares a NodePool, and names its one NodePool %s, but:\n%s",
 			theLabsNodePoolName, strings.Join(offenders, "\n"))
 	}
 }
 
 // The rule's own decisions are read here, since the shipped sources all follow it.
-func TestTheNodePoolNameRule_ShouldAdmitOneNodePoolNamedGeneralAndReportAnythingElse(t *testing.T) {
+func TestTheNodePoolNameRule_ShouldAdmitSeveralNodePoolsOrOneNamedGeneralAndReportNoneOrOneNamedOtherwise(t *testing.T) {
 	written := map[string]struct {
 		line     string
 		admitted bool
@@ -385,10 +433,15 @@ func TestTheNodePoolNameRule_ShouldAdmitOneNodePoolNamedGeneralAndReportAnything
 			line:     `s.Given().Topology(lab.Zones(3), node.Pool("gpu", node.PerZone(3), StandardNodes()))`,
 			admitted: false,
 		},
-		"two NodePools": {
-			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()), ` +
-				`node.Pool("general", node.PerZone(1), StandardNodes()))`,
-			admitted: false,
+		"two NodePools, each named after what it holds": {
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("on-demand", node.PerZone(1), StandardNodes()), ` +
+				`node.Pool("spot", node.PerZone(1), StandardNodes()))`,
+			admitted: true,
+		},
+		"a labelled NodePool named general": {
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()).` +
+				`Labels(node.Labels{"capacity-type": "spot"}))`,
+			admitted: true,
 		},
 		"no NodePool": {
 			line:     `s.Given().Topology(lab.Zones(3))`,
@@ -398,7 +451,7 @@ func TestTheNodePoolNameRule_ShouldAdmitOneNodePoolNamedGeneralAndReportAnything
 
 	for shape, taken := range written {
 		t.Run(shape, func(t *testing.T) {
-			offenders := scenariosNotNamingTheirOneNodePoolGeneral(aScenarioWhoseStepsAre(t, taken.line))
+			offenders := scenariosDeclaringNoNodePoolOrOneNotNamedGeneral(aScenarioWhoseStepsAre(t, taken.line))
 
 			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
 		})
@@ -413,11 +466,11 @@ const (
 	theLabsNodePoolName = `"general"`
 )
 
-// scenariosNotNamingTheirOneNodePoolGeneral names every Scenario of the place that
-// declares no NodePool, more than one, or one under another name. The NodePool
-// call is found wherever in a line it is written, since it is an argument of the
-// Topology line.
-func scenariosNotNamingTheirOneNodePoolGeneral(files []modulerules.GoFile) []string {
+// scenariosDeclaringNoNodePoolOrOneNotNamedGeneral names every Scenario of the
+// place that declares no NodePool, or one NodePool under another name. The
+// NodePool call is found wherever in a line it is written, since it is an
+// argument of the Topology line.
+func scenariosDeclaringNoNodePoolOrOneNotNamedGeneral(files []modulerules.GoFile) []string {
 	var offenders []string
 	for _, source := range files {
 		for _, declared := range source.Declarations {
@@ -428,7 +481,7 @@ func scenariosNotNamingTheirOneNodePoolGeneral(files []modulerules.GoFile) []str
 			for _, line := range declared.Statements {
 				pools = append(pools, nodePoolCallsIn(line)...)
 			}
-			if len(pools) != onlyOnce || len(pools[0].Arguments) == 0 || pools[0].Arguments[0].Written != theLabsNodePoolName {
+			if len(pools) == 0 || len(pools) == onlyOnce && !namesTheLabsNodePool(pools[0]) {
 				offenders = append(offenders, fmt.Sprintf("  %s, in %s: declares %d NodePools, and not one named %s",
 					source.Path, declared.Name, len(pools), theLabsNodePoolName))
 			}
@@ -436,6 +489,12 @@ func scenariosNotNamingTheirOneNodePoolGeneral(files []modulerules.GoFile) []str
 	}
 
 	return offenders
+}
+
+// namesTheLabsNodePool reports whether one NodePool call names its NodePool
+// general.
+func namesTheLabsNodePool(pool modulerules.Statement) bool {
+	return len(pool.Arguments) > 0 && pool.Arguments[0].Written == theLabsNodePoolName
 }
 
 // nodePoolCallsIn is every call to the NodePool declaration, node.Pool, inside one
@@ -2475,7 +2534,7 @@ func scenarioSourcesIn(files []modulerules.GoFile) []modulerules.GoFile {
 // every file of it does but the Workload names and the list.
 func isAScenarioSource(path string) bool {
 	switch filepath.Base(path) {
-	case theWorkloadNames, theNamedNodeCapacities, theList:
+	case theWorkloadNames, theNamedNodeCapacities, theNodeLabelKeys, theTaints, theList:
 		return false
 	default:
 		return true
@@ -2494,6 +2553,8 @@ func declarationsThatDoNotBelong(files []modulerules.GoFile) []string {
 			offenders = append(offenders, declarationsThatAreNotWorkloadNames(file)...)
 		case theNamedNodeCapacities:
 			offenders = append(offenders, declarationsThatAreNotNamedNodeCapacities(file)...)
+		case theNodeLabelKeys, theTaints:
+			offenders = append(offenders, declarationsThatAreNotNodeLabelKeys(file)...)
 		case thePodSpecifications:
 			offenders = append(offenders, declarationsThatAreNotPodSpecifications(file)...)
 		case theList:
@@ -2536,6 +2597,50 @@ func declarationsThatAreNotWorkloadNames(source modulerules.GoFile) []string {
 	}
 
 	return offenders
+}
+
+// declarationsThatAreNotNodeLabelKeys names every declaration of the file of
+// Node label keys that is not an exported constant of a string literal written
+// without a type: the file holds the keys the lab's Scenarios state and nothing
+// else. The scan keeps no constant's value, so the file is read again here.
+func declarationsThatAreNotNodeLabelKeys(source modulerules.GoFile) []string {
+	parsed, err := parser.ParseFile(token.NewFileSet(), source.Path, nil, parser.SkipObjectResolution)
+	if err != nil {
+		return []string{fmt.Sprintf("  %s cannot be read: %v", source.Path, err)}
+	}
+
+	var offenders []string
+	for _, declared := range parsed.Decls {
+		if !declaresNodeLabelKeysAlone(declared) {
+			offenders = append(offenders, fmt.Sprintf("  %s declares something other than an exported untyped string constant",
+				source.Path))
+		}
+	}
+
+	return offenders
+}
+
+// declaresNodeLabelKeysAlone reports whether one declaration is a group of
+// exported constants each holding a string literal and naming no type.
+func declaresNodeLabelKeysAlone(declared ast.Decl) bool {
+	group, isAGroup := declared.(*ast.GenDecl)
+	if !isAGroup || group.Tok != token.CONST {
+		return false
+	}
+	for _, spec := range group.Specs {
+		constant, isAValue := spec.(*ast.ValueSpec)
+		if !isAValue || constant.Type != nil || len(constant.Values) != len(constant.Names) {
+			return false
+		}
+		for at, name := range constant.Names {
+			literal, isALiteral := constant.Values[at].(*ast.BasicLit)
+			if !name.IsExported() || !isALiteral || literal.Kind != token.STRING {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 // workloadLinesDeclaringNoPredefinedSpecification names every Workload line of

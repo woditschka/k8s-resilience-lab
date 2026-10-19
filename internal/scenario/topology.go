@@ -100,31 +100,46 @@ func (c NodeCapacity) Equal(other NodeCapacity) bool {
 
 // Node is one simulated machine a Pod can be placed on, named after the Zone it
 // belongs to and its position within that Zone, and holding the name of the
-// NodePool it belongs to. A Topology derives every Node it holds, so the type
-// carries no invariant of its own.
+// NodePool it belongs to and the labels and taints that NodePool states. A
+// Topology derives every Node it holds, so the type carries no invariant of its
+// own.
 type Node struct {
 	Name     string
 	Zone     string
 	NodePool string
 	Capacity NodeCapacity
+	Labels   NodeLabels
+	Taints   NodeTaints
 }
 
-// nodePoolNameSyntax is Kubernetes' label-value syntax, which a NodePool name
-// must meet because a Node carries that name as a label value. The domain names
-// no Kubernetes package, so the rule is held here and pinned to the client
-// library's own validation by a test in internal/cluster, per
-// docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md.
-var nodePoolNameSyntax = regexp.MustCompile(`^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$`)
+// Equal reports whether two Nodes agree in every field. It is the equality go-cmp
+// compares through, since the labels and taints a Node carries are compared by
+// value.
+func (n Node) Equal(other Node) bool {
+	return n.Name == other.Name && n.Zone == other.Zone && n.NodePool == other.NodePool &&
+		n.Capacity == other.Capacity && n.Labels.Equal(other.Labels) && n.Taints.Equal(other.Taints)
+}
 
-// maxNodePoolNameLength is the longest label value Kubernetes holds.
-const maxNodePoolNameLength = 63
+// labelValueSyntax is Kubernetes' label-value syntax, which a NodePool name and a
+// stated label value must meet because a Node carries each as a label value. The
+// domain names no Kubernetes package, so the rule is held here and pinned to the
+// client library's own validation by a test in internal/cluster, per
+// docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md.
+var labelValueSyntax = regexp.MustCompile(`^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$`)
+
+// maxLabelValueLength is the longest label value Kubernetes holds.
+const maxLabelValueLength = 63
 
 // NodePool is a group of identical Nodes every Zone of a Topology holds: how many
-// each Zone holds, the capacity each of them has, and the name its Nodes carry.
+// each Zone holds, the capacity each of them has, the name its Nodes carry, and
+// the labels it states they carry beside it, and the taints it states apart from
+// them.
 type NodePool struct {
 	name         string
 	nodesPerZone int
 	capacity     NodeCapacity
+	labels       NodeLabels
+	taints       NodeTaints
 }
 
 // NewNodePool builds one NodePool, refusing a count of no Node, an empty name, a
@@ -138,16 +153,60 @@ func NewNodePool(name string, nodesPerZone int, capacity NodeCapacity) (NodePool
 	if name == "" {
 		return NodePool{}, errors.New("a NodePool states its name, so a NodePool without one is refused")
 	}
-	if len(name) > maxNodePoolNameLength || !nodePoolNameSyntax.MatchString(name) {
+	if !isLabelValue(name) {
 		return NodePool{}, fmt.Errorf("a NodePool name is a Kubernetes label value: at most %d letters, digits, "+
 			"'-', '_' or '.', opening and closing on a letter or digit, so the name %q is refused",
-			maxNodePoolNameLength, name)
+			maxLabelValueLength, name)
 	}
 	if capacity == (NodeCapacity{}) {
 		return NodePool{}, errors.New("a NodePool states its Node capacity, so a NodePool without one is refused")
 	}
 
 	return NodePool{name: name, nodesPerZone: nodesPerZone, capacity: capacity}, nil
+}
+
+// Labelled is this NodePool with the labels added that its Nodes carry, refusing
+// a key it already holds.
+func (p NodePool) Labelled(added NodeLabels) (NodePool, error) {
+	labels, err := p.labels.Adding(added)
+	if err != nil {
+		return NodePool{}, err
+	}
+	labelled := p
+	labelled.labels = labels
+
+	return labelled, nil
+}
+
+// Labels are the labels this NodePool states its Nodes carry.
+func (p NodePool) Labels() NodeLabels {
+	return p.labels
+}
+
+// Tainted is this NodePool with the taints added that its Nodes carry, refusing
+// a key it already holds.
+func (p NodePool) Tainted(added NodeTaints) (NodePool, error) {
+	taints, err := p.taints.Adding(added)
+	if err != nil {
+		return NodePool{}, err
+	}
+	tainted := p
+	tainted.taints = taints
+
+	return tainted, nil
+}
+
+// Taints are the taints this NodePool states its Nodes carry.
+func (p NodePool) Taints() NodeTaints {
+	return p.taints
+}
+
+// Equal reports whether two NodePools agree in name, Node count, capacity,
+// labels and taints. It is the equality go-cmp compares through, since the
+// type's fields are unexported.
+func (p NodePool) Equal(other NodePool) bool {
+	return p.name == other.name && p.nodesPerZone == other.nodesPerZone && p.capacity == other.capacity &&
+		p.labels.Equal(other.labels) && p.taints.Equal(other.taints)
 }
 
 // Topology is the arrangement of Zones and Nodes a Scenario provisions: the
@@ -201,6 +260,8 @@ func (t Topology) Nodes() []Node {
 					Zone:     zoneName,
 					NodePool: pool.name,
 					Capacity: pool.capacity,
+					Labels:   pool.labels,
+					Taints:   pool.taints,
 				})
 				index++
 			}
@@ -230,6 +291,25 @@ func (t Topology) Zones() []string {
 	}
 
 	return zones
+}
+
+// LabelValues are the values the Topology's NodePools state under key, each
+// named once and in the order the NodePools are declared. A NodePool stating no
+// value of key adds none, so a key no NodePool states has no value at all.
+func (t Topology) LabelValues(key string) []string {
+	var values []string
+	for _, pool := range t.pools {
+		if value, held := pool.labels.Value(key); held && !slices.Contains(values, value) {
+			values = append(values, value)
+		}
+	}
+
+	return values
+}
+
+// HoldsNodePool reports whether one of the Topology's NodePools is named name.
+func (t Topology) HoldsNodePool(name string) bool {
+	return slices.ContainsFunc(t.pools, func(pool NodePool) bool { return pool.name == name })
 }
 
 // zoneNameAt is the name of the Zone at index, numbered from one.

@@ -51,15 +51,15 @@ func aNodeSpread(maxSkew int) scenario.TopologySpread {
 // taints a Node that stopped responding carries, for the seconds named, and
 // aTolerationOfSomeTaint one of a taint that is neither.
 func aNotReadyToleration(leavingAfter int64) scenario.Toleration {
-	return scenario.NewToleration(scenario.TaintNodeNotReady, scenario.Exists, scenario.NoExecute, leavingAfter)
+	return scenario.NewToleration(scenario.TaintNodeNotReady, scenario.Exists, "", scenario.NoExecute, leavingAfter)
 }
 
 func anUnreachableToleration(leavingAfter int64) scenario.Toleration {
-	return scenario.NewToleration(scenario.TaintNodeUnreachable, scenario.Exists, scenario.NoExecute, leavingAfter)
+	return scenario.NewToleration(scenario.TaintNodeUnreachable, scenario.Exists, "", scenario.NoExecute, leavingAfter)
 }
 
 func aTolerationOfSomeTaint(leavingAfter int64) scenario.Toleration {
-	return scenario.NewToleration(someTaint, scenario.Exists, scenario.NoExecute, leavingAfter)
+	return scenario.NewToleration(someTaint, scenario.Exists, "", scenario.NoExecute, leavingAfter)
 }
 
 // theLabsWaitInSeconds is the lab's own waiting time as the field Kubernetes

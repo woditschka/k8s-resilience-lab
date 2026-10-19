@@ -155,3 +155,69 @@ func withRequest(base Request, change func(*Request)) Request {
 
 	return base
 }
+
+// aTolerationOfADedicatedNodePool is the named default for a toleration of a
+// NoSchedule taint, which names a value and no waiting time.
+func aTolerationOfADedicatedNodePool() Toleration {
+	return Toleration{Key: "nvidia.com/gpu", Operator: Equal, Value: "present", Effect: NoSchedule}
+}
+
+// The fields a toleration requires follow its operator and effect: Equal takes a
+// value and Exists none, NoExecute takes a waiting time and NoSchedule none. A
+// field stated against them is refused as one left out is, naming the setting
+// and the field.
+func TestATolerationsFields_ShouldFollowItsOperatorAndEffect(t *testing.T) {
+	dedicated, unresponsive := aTolerationOfADedicatedNodePool(), aCompleteToleration()
+	tests := map[string]struct {
+		setting Toleration
+		refused string
+		reason  error
+	}{
+		"an Equal NoSchedule toleration": {setting: dedicated},
+		"an Exists NoExecute toleration": {setting: unresponsive},
+		"an Exists NoSchedule toleration": {
+			setting: withToleration(dedicated, func(s *Toleration) { s.Operator, s.Value = Exists, "" }),
+		},
+		"an Equal NoExecute toleration": {
+			setting: withToleration(unresponsive, func(s *Toleration) { s.Operator, s.Value = Equal, "present" }),
+		},
+		"an Equal toleration without its value": {
+			setting: withToleration(dedicated, func(s *Toleration) { s.Value = "" }),
+			refused: "pod.Toleration leaves out value:", reason: errAFieldLeftOut,
+		},
+		"an Exists toleration stating a value": {
+			setting: withToleration(unresponsive, func(s *Toleration) { s.Value = "present" }),
+			refused: "pod.Toleration states value, which the operator Exists takes none of:", reason: errAFieldStatedAgainst,
+		},
+		"a NoSchedule toleration stating a waiting time": {
+			setting: withToleration(dedicated, func(s *Toleration) { s.TolerationSeconds = 30 }),
+			refused: "pod.Toleration states tolerationSeconds, which the effect NoSchedule takes none of:", reason: errAFieldStatedAgainst,
+		},
+		"a toleration of an operator the lab does not offer": {
+			setting: withToleration(dedicated, func(s *Toleration) { s.Operator = "In" }),
+			refused: "pod.Toleration states operator In,", reason: errAFieldStatedAgainst,
+		},
+		"a toleration of an effect the lab does not offer": {
+			setting: withToleration(dedicated, func(s *Toleration) { s.Effect = "PreferNoSchedule" }),
+			refused: "pod.Toleration states effect PreferNoSchedule,", reason: errAFieldStatedAgainst,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := Predefined(defaultPlacementNamed, someStartupTime(), test.setting).Declared()
+
+			expect.Expect(t, errors.Is(err, test.reason)).To(expect.Equal(true))
+			expect.Expect(t, err == nil || strings.Contains(err.Error(), test.refused)).To(expect.Equal(true))
+		})
+	}
+}
+
+// A toleration of a NoSchedule taint is reported with its value and no waiting
+// time.
+func TestATolerationOfANoScheduleTaint_ShouldBeReadWithItsValueAndNoWaitingTime(t *testing.T) {
+	defined := Predefined(defaultPlacementNamed, someStartupTime(), aTolerationOfADedicatedNodePool())
+
+	expect.Expect(t, slices.Contains(defined.Carries(),
+		"tolerations: {key: nvidia.com/gpu, operator: Equal, value: present, effect: NoSchedule}")).To(expect.Equal(true))
+}

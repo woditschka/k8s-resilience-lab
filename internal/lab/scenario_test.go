@@ -9,6 +9,7 @@ package lab
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1387,6 +1388,12 @@ func TestARefusedNodePoolDeclaration_ShouldBeRefusedWhereItIsStated(t *testing.T
 			},
 			cause: fmt.Sprintf("a count of %d Nodes per Zone is refused", noNodePerZone),
 		},
+		"a NodePool stating a label the lab owns": {
+			declare: func(given Given) {
+				given.Topology(Zones(twoZones), theGeneralNodePool().Labels(node.Labels{node.Zone: spotCapacity}))
+			},
+			cause: node.Zone,
+		},
 	}
 
 	for line, declaration := range refused {
@@ -1402,6 +1409,162 @@ func TestARefusedNodePoolDeclaration_ShouldBeRefusedWhereItIsStated(t *testing.T
 			causeNames(t, ended, declaration.cause)
 		})
 	}
+}
+
+// The label the labelled NodePools below state, and the value each of them
+// states under it: on-demand and spot, as a cloud's capacity types are named.
+const (
+	capacityTypeLabel    = "capacity-type"
+	onDemandCapacity     = "on-demand"
+	spotCapacity         = "spot"
+	oneNodePerZoneOfEach = 1
+)
+
+// theOnDemandNodePool and theSpotNodePool are two NodePools of one Roomy Node per
+// Zone, each named after and labelled with its capacity type.
+func theOnDemandNodePool() node.DeclaredPool {
+	return node.Pool(onDemandCapacity, node.PerZone(oneNodePerZoneOfEach), roomyNodes()).
+		Labels(node.Labels{capacityTypeLabel: onDemandCapacity})
+}
+
+func theSpotNodePool() node.DeclaredPool {
+	return node.Pool(spotCapacity, node.PerZone(oneNodePerZoneOfEach), roomyNodes()).
+		Labels(node.Labels{capacityTypeLabel: spotCapacity})
+}
+
+// aTopologyOfLabelledNodePools is the Topology of zones Zones each holding those
+// two NodePools, built by the domain's own constructors.
+func aTopologyOfLabelledNodePools(t *testing.T, zones int) scenario.Topology {
+	t.Helper()
+
+	topology, err := scenario.NewTopology(zones,
+		aLabelledNodePool(t, onDemandCapacity), aLabelledNodePool(t, spotCapacity))
+	if err != nil {
+		t.Fatalf("build a Topology of %d Zones of two labelled NodePools: %v", zones, err)
+	}
+
+	return topology
+}
+
+// aLabelledNodePool is the domain's NodePool of one Roomy Node per Zone named
+// after the capacity type it states under the capacity-type label.
+func aLabelledNodePool(t *testing.T, capacityType string) scenario.NodePool {
+	t.Helper()
+
+	labels, err := scenario.NewNodeLabels(map[string]string{capacityTypeLabel: capacityType})
+	if err != nil {
+		t.Fatalf("build the label %s=%s: %v", capacityTypeLabel, capacityType, err)
+	}
+	pool, err := scenario.NewNodePool(capacityType, oneNodePerZoneOfEach, theCapacityRoomyStandsFor(t))
+	if err != nil {
+		t.Fatalf("build the NodePool %s: %v", capacityType, err)
+	}
+	labelled, err := pool.Labelled(labels)
+	if err != nil {
+		t.Fatalf("label the NodePool %s: %v", capacityType, err)
+	}
+
+	return labelled
+}
+
+// topologyStepOfLabelledNodePools is the Step a Topology line of those two
+// NodePools records: each by its name, count and capacity, then its label.
+func topologyStepOfLabelledNodePools(zones int) Step {
+	labelledPool := "a NodePool %s of %d %s Node holding %d cpu, %dGi memory and %d Pods each, labelled %s=%s"
+
+	return Step{Kind: GivenStep, Name: fmt.Sprintf("a Topology of %d Zones of "+labelledPool+"; "+labelledPool,
+		zones,
+		onDemandCapacity, oneNodePerZoneOfEach, roomyName, roomyCoresPerNode, roomyGibibytesPerNode, roomyPodsPerNode,
+		capacityTypeLabel, onDemandCapacity,
+		spotCapacity, oneNodePerZoneOfEach, roomyName, roomyCoresPerNode, roomyGibibytesPerNode, roomyPodsPerNode,
+		capacityTypeLabel, spotCapacity)}
+}
+
+// A Topology line of NodePools stating labels declares Nodes carrying them, and
+// reports each NodePool's labels after its capacity (docs/prd.md REQ-SIM-017).
+func TestAGivenTopologyStatingLabels_ShouldReportEachNodePoolsLabelsAfterItsCapacity(t *testing.T) {
+	declaring := aScenario()
+
+	declaring.Given().Topology(Zones(twoZones), theOnDemandNodePool(), theSpotNodePool())
+
+	expect.Expect(t, declaring.outcome().Steps).To(expect.Equal([]Step{topologyStepOfLabelledNodePools(twoZones)}))
+	expect.Expect(t, declaring.topology.Nodes()).To(expect.Equal(aTopologyOfLabelledNodePools(t, twoZones).Nodes()))
+}
+
+// podsPerCapacityTypeWhenEven is the share of a Pod per Node of the labelled
+// Topology above each capacity type holds: one Node of each per Zone.
+const podsPerCapacityTypeWhenEven = twoZones * oneNodePerZoneOfEach
+
+// podsPerValueOfStep is the Step the Then counting Pods per value of the
+// capacity-type label records.
+func podsPerValueOfStep(pods int, key string) Step {
+	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pods per value of %s", pods, key)}
+}
+
+// A Then counting Pods per value of a label judges every value the NodePools
+// state: an even Placement meets the count each value holds, another count is a
+// Finding, and a value whose Nodes hold no Pod counts as none, so a Placement
+// leaving one empty is a Finding too (docs/prd.md REQ-SIM-017 edge case 5).
+func TestAThenCountingPodsPerLabelValue_ShouldJudgeEveryValueTheNodePoolsState(t *testing.T) {
+	atAnotherCount := podsPerCapacityTypeWhenEven + 1
+	tests := map[string]struct {
+		placed   func(scenario.Topology) scenario.Placement
+		judgedAt int
+		findings []judgedFinding
+	}{
+		"an even Placement at its count": {
+			placed: onePodPerNodeOf, judgedAt: podsPerCapacityTypeWhenEven, findings: []judgedFinding{},
+		},
+		"an even Placement at another count": {
+			placed: onePodPerNodeOf, judgedAt: atAnotherCount,
+			findings: []judgedFinding{{Step: podsPerValueOfStep(atAnotherCount, capacityTypeLabel), Mismatching: true}},
+		},
+		"a Placement leaving one value empty": {
+			placed: everyPodOnOneNodeOf, judgedAt: podsPerCapacityTypeWhenEven,
+			findings: []judgedFinding{{Step: podsPerValueOfStep(podsPerCapacityTypeWhenEven, capacityTypeLabel), Mismatching: true}},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			judging := aScenarioOver(test.placed(aTopologyOfLabelledNodePools(t, twoZones)))
+			judging.Given().Topology(Zones(twoZones), theOnDemandNodePool(), theSpotNodePool())
+			judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement())
+
+			judging.Then().PodsPerValueOf(capacityTypeLabel, test.judgedAt)
+			judging.Then().AllPodsRunning()
+
+			judged := judging.outcome()
+			expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal(test.findings))
+			expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+				topologyStepOfLabelledNodePools(twoZones),
+				resilientPlacementWorkloadStepOf(podsOverEveryNode),
+				podsPerValueOfStep(test.judgedAt, capacityTypeLabel),
+				allPodsRunningStep(),
+			}))
+		})
+	}
+}
+
+// A Then counting Pods per value of a label no NodePool states has no value to
+// judge, so it ends the Scenario at its own line naming that label (docs/prd.md
+// REQ-SIM-017 edge case 4).
+func TestAThenStatingALabelNoNodePoolStates_ShouldEndTheScenarioAtThatThen(t *testing.T) {
+	const aLabelNoNodePoolStates = "rack"
+	ending := aScenarioOver(onePodPerNodeOf(aTopologyOfLabelledNodePools(t, twoZones)))
+	ending.Given().Topology(Zones(twoZones), theOnDemandNodePool(), theSpotNodePool())
+
+	ending.Then().PodsPerValueOf(aLabelNoNodePoolStates, podsPerCapacityTypeWhenEven)
+	ending.Then().AllPodsRunning()
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(podsPerValueOfStep(podsPerCapacityTypeWhenEven, aLabelNoNodePoolStates)))
+	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+		topologyStepOfLabelledNodePools(twoZones),
+		podsPerValueOfStep(podsPerCapacityTypeWhenEven, aLabelNoNodePoolStates),
+	}))
+	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+	causeNames(t, ended, fmt.Sprintf("%q", aLabelNoNodePoolStates))
 }
 
 func TestThenSteps_ShouldAssertThePlacementOutcome(t *testing.T) {
@@ -1987,4 +2150,252 @@ func TestEveryNodeOfATopology_ShouldBeNamedInTopologyOrder(t *testing.T) {
 	named := nodesOf(declared)
 
 	expect.Expect(t, named).To(expect.Equal([]string{nodes[0].Name, nodes[1].Name}))
+}
+
+// The label and value a Failure by label is refused for, where the refusal turns
+// on them: a key and a value no NodePool of the labelled Topology states.
+const (
+	aKeyNoNodePoolStates   = "node-class"
+	aValueNoNodePoolStates = "reserved"
+)
+
+// labelledNodesFailStepOf is the Step a When failing the Nodes carrying that
+// label records before it names what it resolved.
+func labelledNodesFailStepOf(label string) Step {
+	return Step{Kind: WhenStep, Name: "Nodes labelled " + label + " fail"}
+}
+
+// A Failure by label ends the Scenario at its When, naming what the When named,
+// when no NodePool states the label or its value and when the Scenario has not
+// Waited (docs/prd.md REQ-SIM-018 edge cases 1 and 2).
+func TestAFailureByLabelNamingWhatNoNodePoolStates_ShouldEndTheScenarioAtThatWhen(t *testing.T) {
+	labelled := aTopologyOfLabelledNodePools(t, twoZones)
+	refusals := map[string]struct {
+		scenario *Scenario
+		labels   node.Labels
+		step     string
+		cause    string
+	}{
+		"a key no NodePool states": {
+			scenario: aScenarioOver(onePodPerNodeOf(labelled)),
+			labels:   node.Labels{aKeyNoNodePoolStates: spotCapacity},
+			step:     aKeyNoNodePoolStates + "=" + spotCapacity,
+			cause:    aKeyNoNodePoolStates,
+		},
+		"a value no NodePool states for the key": {
+			scenario: aScenarioOver(onePodPerNodeOf(labelled)),
+			labels:   node.Labels{capacityTypeLabel: aValueNoNodePoolStates},
+			step:     capacityTypeLabel + "=" + aValueNoNodePoolStates,
+			cause:    aValueNoNodePoolStates,
+		},
+		"a Scenario that has not Waited": {
+			scenario: aScenario(),
+			labels:   node.Labels{capacityTypeLabel: spotCapacity},
+			step:     capacityTypeLabel + "=" + spotCapacity,
+			cause:    theWaitThatNeverStood,
+		},
+	}
+
+	for refused, refusal := range refusals {
+		t.Run(refused, func(t *testing.T) {
+			ending := refusal.scenario
+			ending.Given().Topology(Zones(twoZones), theOnDemandNodePool(), theSpotNodePool())
+
+			ending.When().NodesLabelledFail(refusal.labels)
+			ending.Then().AllPodsRunning()
+
+			ended := ending.outcome()
+			failing := labelledNodesFailStepOf(refusal.step)
+			expect.Expect(t, ended.EndedAt).To(expect.Equal(failing))
+			expect.Expect(t, ended.Steps).To(expect.Equal([]Step{topologyStepOfLabelledNodePools(twoZones), failing}))
+			expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+			causeNames(t, ended, refusal.cause)
+		})
+	}
+}
+
+// nodesOfNodePool are the Nodes of the Topology belonging to the NodePool named,
+// in the order the Topology derives them.
+func nodesOfNodePool(topology scenario.Topology, nodePool string) []scenario.Node {
+	var pooled []scenario.Node
+	for _, candidate := range topology.Nodes() {
+		if candidate.NodePool == nodePool {
+			pooled = append(pooled, candidate)
+		}
+	}
+
+	return pooled
+}
+
+// namesOf are the names of these Nodes, in the order given.
+func namesOf(nodes []scenario.Node) []string {
+	names := make([]string, 0, len(nodes))
+	for _, named := range nodes {
+		names = append(names, named.Name)
+	}
+
+	return names
+}
+
+// podsOnNodePoolStep is the Step the Then counting Pods on one NodePool records.
+func podsOnNodePoolStep(pods int, pool node.PoolName) Step {
+	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pods on the NodePool %s", pods, pool)}
+}
+
+// A Then counting Pods on one NodePool judges that NodePool's Nodes alone: an
+// even Placement meets the count it holds, another count is a Finding, and a
+// NodePool whose Nodes hold no Pod counts as none.
+func TestAThenStatingANodePoolAndAPodCount_ShouldRecordAFindingUnlessItsNodesHoldThatCount(t *testing.T) {
+	const podsOnOneNodePoolWhenEven, noPod = twoZones * oneNodePerZoneOfEach, 0
+	tests := map[string]struct {
+		placed   func(scenario.Topology) scenario.Placement
+		judgedAt int
+		findings []judgedFinding
+	}{
+		"an even Placement at its count": {
+			placed: onePodPerNodeOf, judgedAt: podsOnOneNodePoolWhenEven, findings: []judgedFinding{},
+		},
+		"an even Placement at another count": {
+			placed: onePodPerNodeOf, judgedAt: noPod,
+			findings: []judgedFinding{{Step: podsOnNodePoolStep(noPod, spotCapacity), Mismatching: true}},
+		},
+		"a Placement leaving the NodePool empty at none": {
+			placed: everyPodOnOneNodeOf, judgedAt: noPod, findings: []judgedFinding{},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			judging := aScenarioOver(test.placed(aTopologyOfLabelledNodePools(t, twoZones)))
+			judging.Given().Topology(Zones(twoZones), theOnDemandNodePool(), theSpotNodePool())
+			judging.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement())
+
+			judging.Then().PodsOnNodePool(spotCapacity, test.judgedAt)
+			judging.Then().AllPodsRunning()
+
+			judged := judging.outcome()
+			expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal(test.findings))
+			expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+				topologyStepOfLabelledNodePools(twoZones),
+				resilientPlacementWorkloadStepOf(podsOverEveryNode),
+				podsOnNodePoolStep(test.judgedAt, spotCapacity),
+				allPodsRunningStep(),
+			}))
+		})
+	}
+}
+
+// A Then counting Pods on a NodePool the Topology lacks has nothing to judge, so
+// it ends the Scenario at its own line naming that NodePool.
+func TestAThenNamingANodePoolTheTopologyLacks_ShouldEndTheScenarioAtThatThen(t *testing.T) {
+	const aNodePoolTheTopologyLacks, noPod = node.PoolName("gpu"), 0
+	ending := aScenarioOver(onePodPerNodeOf(aTopologyOfLabelledNodePools(t, twoZones)))
+	ending.Given().Topology(Zones(twoZones), theOnDemandNodePool(), theSpotNodePool())
+
+	ending.Then().PodsOnNodePool(aNodePoolTheTopologyLacks, noPod)
+	ending.Then().AllPodsRunning()
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(podsOnNodePoolStep(noPod, aNodePoolTheTopologyLacks)))
+	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+		topologyStepOfLabelledNodePools(twoZones),
+		podsOnNodePoolStep(noPod, aNodePoolTheTopologyLacks),
+	}))
+	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
+	causeNames(t, ended, fmt.Sprintf("%q", aNodePoolTheTopologyLacks))
+}
+
+// anotherWorkloadName is the name of a Workload a Scenario declares after the
+// first, which the Steps after it judge alone.
+const anotherWorkloadName WorkloadName = "another-workload"
+
+// A later Workload Given gives the Scenario its next Workload, which every Step
+// after it reads: the Placement observed before it is the earlier Workload's, so
+// a Then before the next Wait has no Placement of the newest to judge and ends
+// the Scenario there, per
+// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+func TestALaterWorkloadGiven_ShouldBeTheWorkloadEveryLaterStepReads(t *testing.T) {
+	const fewerPods = podsOverEveryNode - 1
+	declaring := aScenarioOver(onePodPerNodeOf(aTopologyOf(t, twoZones, twoNodesPerZone)))
+	declaring.Given().Topology(Zones(twoZones), theGeneralNodePool())
+	declaring.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement())
+
+	declaring.Given().Workload(anotherWorkloadName, Pods(fewerPods), resilientPlacement())
+	declaring.Then().AllPodsRunning()
+
+	declared := declaring.outcome()
+	expect.Expect(t, declaring.workload.Name()).To(expect.Equal(string(anotherWorkloadName)))
+	expect.Expect(t, declaring.workload.Pods()).To(expect.Equal(fewerPods))
+	expect.Expect(t, declared.EndedAt).To(expect.Equal(allPodsRunningStep()))
+	causeNames(t, declared, theWaitThatNeverStood)
+}
+
+// A Workload name the Scenario already declared would deploy a second Workload
+// whose Pods the first one's selector reads, so it ends the Scenario at the
+// Given declaring it again, naming it.
+func TestAWorkloadNameAlreadyDeclared_ShouldEndTheScenarioAtThatGiven(t *testing.T) {
+	declaring := aScenario()
+	declaring.Given().Topology(Zones(twoZones), theGeneralNodePool())
+	declaring.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement())
+
+	declaring.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement())
+	declaring.Then().AllPodsRunning()
+
+	ended := declaring.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(resilientPlacementWorkloadStepOf(podsOverEveryNode)))
+	expect.Expect(t, ended.Steps).To(expect.HaveLen[Step](3))
+	causeNames(t, ended, fmt.Sprintf("%q", someWorkloadName))
+}
+
+// A taint the domain refuses ends the Scenario at the Topology Given stating it,
+// naming what was refused, before any cluster is reached.
+func TestATaintTheLabCannotHold_ShouldBeRefusedWhereItIsStated(t *testing.T) {
+	tests := map[string]struct {
+		taint   node.Taint
+		refused string
+	}{
+		"a taint of another effect": {taint: node.Taint{Key: gpuTaintKey, Value: gpuTaintPresent, Effect: scenario.NoExecute}, refused: string(scenario.NoExecute)},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			ending := aScenario()
+
+			ending.Given().Topology(Zones(twoZones), theGeneralNodePool(), theGpuNodePool().Taints(test.taint))
+			ending.WaitFor().AllNodesReady()
+
+			ended := ending.outcome()
+			expect.Expect(t, ended.Steps).To(expect.HaveLen[Step](1))
+			expect.Expect(t, ended.EndedAt.Kind).To(expect.Equal(GivenStep))
+			causeNames(t, ended, test.refused)
+		})
+	}
+}
+
+// A toleration of a NoSchedule taint is reported beneath its Workload's Given
+// line by its key, operator, value and effect, and no waiting time.
+func TestATolerationOfANoScheduleTaint_ShouldBeReportedBeneathItsWorkloadsGivenLineWithNoWaitingTime(t *testing.T) {
+	tolerating := pod.Toleration{Key: gpuTaintKey, Operator: pod.Equal, Value: gpuTaintPresent, Effect: pod.NoSchedule}
+
+	declaring := aScenario()
+	declaring.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), defaultPlacement().Customize(tolerating))
+
+	expect.Expect(t, slices.Contains(declaring.outcome().Steps[0].Settings,
+		"tolerations: {key: nvidia.com/gpu, operator: Equal, value: present, effect: NoSchedule}")).To(expect.Equal(true))
+	expect.Expect(t, causeOf(declaring.outcome())).To(expect.Equal(""))
+}
+
+// A toleration of a NoSchedule taint stating a waiting time ends the Scenario at
+// the Given declaring that Workload.
+func TestANoScheduleTolerationStatingAWaitingTime_ShouldEndTheScenarioAtThatGiven(t *testing.T) {
+	const someWait = 30
+	tolerating := pod.Toleration{Key: gpuTaintKey, Operator: pod.Equal, Value: gpuTaintPresent, Effect: pod.NoSchedule}
+	waiting := tolerating
+	waiting.TolerationSeconds = someWait
+
+	refusing := aScenario()
+	refusing.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), defaultPlacement().Customize(waiting))
+
+	expect.Expect(t, refusing.outcome().EndedAt.Kind).To(expect.Equal(GivenStep))
+	causeNames(t, refusing.outcome(), "pod.Toleration states tolerationSeconds")
 }

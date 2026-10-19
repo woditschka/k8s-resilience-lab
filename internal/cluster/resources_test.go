@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -93,7 +94,7 @@ func anEvenSpreadOver(topologyKey string, maxSkew int) scenario.TopologySpread {
 // aNodeConditionToleration is a toleration of one taint a Node that stopped
 // responding carries, for the waiting time the lab sets.
 func aNodeConditionToleration(taint string) scenario.Toleration {
-	return scenario.NewToleration(taint, scenario.Exists, scenario.NoExecute, theLabsWaitInSeconds())
+	return scenario.NewToleration(taint, scenario.Exists, "", scenario.NoExecute, theLabsWaitInSeconds())
 }
 
 // theLabsWaitInSeconds is the lab's own waiting time as the field Kubernetes
@@ -263,7 +264,7 @@ func TestFullAccessWrittenBesideTheLabsOwnCustomizations_ShouldWinWhereItIsWritt
 	}
 }
 
-// Edge case 7: the specification's own tolerations are transcribed after the last
+// Edge case 4: the specification's own tolerations are transcribed after the last
 // full access, so the unresponsive-Node wait holds whatever full access left out.
 func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHolding(t *testing.T) {
 	declared := aSpecificationOf(t,
@@ -310,6 +311,8 @@ func TestEveryKubernetesNameTheLabSpells_ShouldEqualTheClientLibrarysOwnConstant
 	expect.Expect(t, string(scenario.Honor)).To(expect.Equal(string(corev1.NodeInclusionPolicyHonor)))
 	expect.Expect(t, string(scenario.Exists)).To(expect.Equal(string(corev1.TolerationOpExists)))
 	expect.Expect(t, string(scenario.NoExecute)).To(expect.Equal(string(corev1.TaintEffectNoExecute)))
+	expect.Expect(t, string(scenario.Equal)).To(expect.Equal(string(corev1.TolerationOpEqual)))
+	expect.Expect(t, string(scenario.NoSchedule)).To(expect.Equal(string(corev1.TaintEffectNoSchedule)))
 }
 
 // No Pod affinity rule is set: a required anti-affinity caps one Pod per Node
@@ -691,28 +694,132 @@ func TestAnObservedNode_ShouldBeReadWithThatNodePool(t *testing.T) {
 	expect.Expect(t, observed).To(expect.Equal([]scenario.Node{declared}))
 }
 
-// The domain holds Kubernetes' label-value syntax itself, since it names no
-// Kubernetes package, so it is held to the client library's own validation over
-// names it admits and names it refuses (docs/adr/
-// 2026-10-09-every-nodepool-is-named-where-it-is-declared.md).
+// The domain holds Kubernetes' label syntax itself, since it names no Kubernetes
+// package, so it is held to the client library's own validation over names it
+// admits and names it refuses: a NodePool name and a stated value against the
+// label-value rule, and a stated key against the qualified-name rule a label key
+// meets (docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md,
+// docs/adr/2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md).
 func TestTheNodePoolNameRule_ShouldAgreeWithTheClientLibrarysLabelValueValidation(t *testing.T) {
 	const someNodesPerZone = 1
 
-	namesALabelHolds := []string{
-		"gpu", "g", "GPU-a100", "a.b_c-d", "0pool9", strings.Repeat("a", validation.LabelValueMaxLength),
-	}
-	namesNoLabelHolds := []string{
-		strings.Repeat("a", validation.LabelValueMaxLength+1),
-		"-gpu", "gpu-", ".gpu", "gpu_", "gpu nodes", "gpu/a100", "gpü",
-	}
-
-	for _, name := range slices.Concat(namesALabelHolds, namesNoLabelHolds) {
+	for _, name := range someLabelValues() {
 		t.Run(name, func(t *testing.T) {
 			_, refusal := scenario.NewNodePool(name, someNodesPerZone, aCapacity(t))
 
-			expect.Expect(t, refusal == nil).To(expect.Equal(len(validation.IsValidLabelValue(name)) == 0))
+			expect.Expect(t, refusal == nil).To(expect.Equal(name != "" && len(validation.IsValidLabelValue(name)) == 0))
 		})
 	}
+}
+
+func TestTheNodeLabelValueRule_ShouldAgreeWithTheClientLibrarysLabelValueValidation(t *testing.T) {
+	const someKey = "some-key"
+
+	for _, value := range someLabelValues() {
+		t.Run(value, func(t *testing.T) {
+			_, refusal := scenario.NewNodeLabels(map[string]string{someKey: value})
+
+			expect.Expect(t, refusal == nil).To(expect.Equal(len(validation.IsValidLabelValue(value)) == 0))
+		})
+	}
+}
+
+func TestTheNodeLabelKeyRule_ShouldAgreeWithTheClientLibrarysQualifiedNameValidation(t *testing.T) {
+	const someValue = "some-value"
+	prefixes := []string{"", "example.com/", "a/", strings.Repeat("p", 253) + "/", strings.Repeat("p", 254) + "/",
+		"Example.com/", "-example.com/", "example..com/", "/", "a/b/"}
+
+	for _, prefix := range prefixes {
+		for _, name := range someLabelValues() {
+			key := prefix + name
+			t.Run(key, func(t *testing.T) {
+				_, refusal := scenario.NewNodeLabels(map[string]string{key: someValue})
+
+				expect.Expect(t, refusal == nil).To(expect.Equal(len(validation.IsQualifiedName(key)) == 0))
+			})
+		}
+	}
+}
+
+// someLabelValues are names Kubernetes holds as a label value and names it does
+// not, the empty one among them.
+func someLabelValues() []string {
+	return []string{
+		"gpu", "g", "GPU-a100", "a.b_c-d", "0pool9", strings.Repeat("a", validation.LabelValueMaxLength), "",
+		strings.Repeat("a", validation.LabelValueMaxLength+1),
+		"-gpu", "gpu-", ".gpu", "gpu_", "gpu nodes", "gpu/a100", "gpü",
+	}
+}
+
+// The keys the domain refuses as the lab's own are exactly the ones the mapper
+// writes on a Node stating no label, so a stated label can neither overwrite one
+// of the lab's nor be overwritten by one the domain let through.
+func TestTheLabsOwnNodeLabelKeys_ShouldBeExactlyTheOnesTheMapperWritesOnANodeStatingNone(t *testing.T) {
+	mapped := toNode(aNode(t))
+
+	expect.Expect(t, slices.Sorted(maps.Keys(mapped.Labels))).To(expect.Equal(slices.Sorted(slices.Values(scenario.LabsOwnNodeLabelKeys()))))
+}
+
+// A Node whose NodePool states labels carries them beside the lab's own, which
+// stay as the lab writes them (docs/prd.md REQ-SIM-017).
+func TestANodeStatingLabels_ShouldBeMappedCarryingThemBesideTheLabsOwn(t *testing.T) {
+	labelled := aNodeLabelled(t, map[string]string{capacityTypeLabel: spotCapacity})
+
+	mapped := toNode(labelled)
+
+	expect.Expect(t, mapped.Labels).To(expect.Equal(map[string]string{
+		capacityTypeLabel: spotCapacity,
+		zoneLabel:         labelled.Zone,
+		hostnameLabel:     labelled.Name,
+		nodePoolLabel:     labelled.NodePool,
+		fakeNodeLabel:     fakeNodeLabelValue,
+	}))
+}
+
+// An observed Node is read with the labels its NodePool stated and none of the
+// lab's own, so a labelled Node read back from the cluster equals the one its
+// Topology declared.
+func TestAnObservedLabelledNode_ShouldBeReadWithTheLabelsItsNodePoolStated(t *testing.T) {
+	declared := aNodeLabelled(t, map[string]string{capacityTypeLabel: spotCapacity})
+
+	observed, err := fromNodes([]corev1.Node{*toNode(declared)})
+	if err != nil {
+		t.Fatalf("read an observed Node: %v", err)
+	}
+
+	expect.Expect(t, observed).To(expect.Equal([]scenario.Node{declared}))
+}
+
+// The label a test of a labelled Node states, and the value it states it under.
+const (
+	capacityTypeLabel = "capacity-type"
+	spotCapacity      = "spot"
+)
+
+// aNodeLabelled is the one Node of a Topology whose one NodePool states the
+// labels named.
+func aNodeLabelled(t *testing.T, stated map[string]string) scenario.Node {
+	t.Helper()
+
+	const oneZone, oneNodePerZone = 1, 1
+	labels, err := scenario.NewNodeLabels(stated)
+	if err != nil {
+		t.Fatalf("build the Node labels %v: %v", stated, err)
+	}
+	pool, err := scenario.NewNodePool("general", oneNodePerZone, aCapacity(t))
+	if err != nil {
+		t.Fatalf("build a NodePool: %v", err)
+	}
+	labelled, err := pool.Labelled(labels)
+	if err != nil {
+		t.Fatalf("label the NodePool %v: %v", stated, err)
+	}
+	topology, err := scenario.NewTopology(oneZone, labelled)
+	if err != nil {
+		t.Fatalf("build a Topology of a labelled NodePool: %v", err)
+	}
+
+	return topology.Nodes()[0]
 }
 
 func TestAnObservedNodeWithNoUsableCapacity_ShouldBeRefused(t *testing.T) {
@@ -1024,6 +1131,120 @@ func TestAWorkloadsPodTemplate_ShouldCarryItsStartupTimeWhateverFullAccessNames(
 	for how, taken := range deployed {
 		t.Run(how, func(t *testing.T) {
 			expect.Expect(t, taken.template.Spec.Template.Annotations).To(expect.Equal(taken.carries))
+		})
+	}
+}
+
+// The taint a test of a tainted Node states: a key and value a dedicated
+// NodePool of gpu Nodes carries.
+const (
+	gpuTaintKey   = "nvidia.com/gpu"
+	gpuTaintValue = "present"
+)
+
+// aGPUTaint is the one NoSchedule taint a tainted test states.
+func aGPUTaint() scenario.Taint {
+	return scenario.Taint{Key: gpuTaintKey, Value: gpuTaintValue, Effect: scenario.NoSchedule}
+}
+
+// aNodeTainted is the one Node of a Topology whose one NodePool states the taints
+// named.
+func aNodeTainted(t *testing.T, stated ...scenario.Taint) scenario.Node {
+	t.Helper()
+
+	const oneZone, oneNodePerZone = 1, 1
+	taints, err := scenario.NewNodeTaints(stated...)
+	if err != nil {
+		t.Fatalf("build the Node taints %v: %v", stated, err)
+	}
+	pool, err := scenario.NewNodePool("gpu", oneNodePerZone, aCapacity(t))
+	if err != nil {
+		t.Fatalf("build a NodePool: %v", err)
+	}
+	tainted, err := pool.Tainted(taints)
+	if err != nil {
+		t.Fatalf("taint the NodePool %v: %v", stated, err)
+	}
+	topology, err := scenario.NewTopology(oneZone, tainted)
+	if err != nil {
+		t.Fatalf("build a Topology of a tainted NodePool: %v", err)
+	}
+
+	return topology.Nodes()[0]
+}
+
+// A Node whose NodePool states taints carries each as a Node taint, and a Node
+// stating none carries none.
+func TestANodeStatingTaints_ShouldBeMappedCarryingThemAsItsTaints(t *testing.T) {
+	expect.Expect(t, toNode(aNodeTainted(t, aGPUTaint())).Spec.Taints).To(expect.Equal([]corev1.Taint{
+		{Key: gpuTaintKey, Value: gpuTaintValue, Effect: corev1.TaintEffectNoSchedule},
+	}))
+	expect.Expect(t, toNode(aNode(t)).Spec.Taints).To(expect.HaveLen[corev1.Taint](0))
+}
+
+// An observed Node is read with the taints its NodePool stated and none the
+// control plane sets from its conditions, so a tainted Node read back from the
+// cluster equals the one its Topology declared.
+func TestAnObservedTaintedNode_ShouldBeReadWithTheTaintsItsNodePoolStated(t *testing.T) {
+	declared := aNodeTainted(t, aGPUTaint())
+	reported := toNode(declared)
+	reported.Spec.Taints = append(reported.Spec.Taints,
+		corev1.Taint{Key: corev1.TaintNodeNotReady, Effect: corev1.TaintEffectNoSchedule})
+
+	observed, err := fromNodes([]corev1.Node{*reported})
+	if err != nil {
+		t.Fatalf("read an observed Node: %v", err)
+	}
+
+	expect.Expect(t, observed).To(expect.Equal([]scenario.Node{declared}))
+}
+
+// A probe Pod tolerates its own Node's taints, so the scheduler places it on a
+// tainted Node and provisioning ends there as on any other, per
+// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+func TestAProbePodOfATaintedNode_ShouldTolerateThatNodesTaints(t *testing.T) {
+	expect.Expect(t, toProbePod(aNodeTainted(t, aGPUTaint())).Spec.Tolerations).To(expect.Equal([]corev1.Toleration{
+		{Key: gpuTaintKey, Operator: corev1.TolerationOpEqual, Value: gpuTaintValue, Effect: corev1.TaintEffectNoSchedule},
+	}))
+	expect.Expect(t, toProbePod(aNode(t)).Spec.Tolerations).To(expect.HaveLen[corev1.Toleration](0))
+}
+
+// A toleration of a NoSchedule taint is transcribed with its value and no
+// waiting time, which Kubernetes takes for NoExecute alone.
+func TestAPodSpecificationToleratingANoScheduleTaint_ShouldDeployItsPodsToleratingItWithNoWaitingTime(t *testing.T) {
+	const noWaitingTime = 0
+	tolerating := scenario.NewToleration(gpuTaintKey, scenario.Equal, gpuTaintValue, scenario.NoSchedule, noWaitingTime)
+
+	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, tolerating)))
+
+	expect.Expect(t, deployed.Spec.Template.Spec.Tolerations).To(expect.Equal([]corev1.Toleration{
+		{Key: gpuTaintKey, Operator: corev1.TolerationOpEqual, Value: gpuTaintValue, Effect: corev1.TaintEffectNoSchedule},
+		theTolerationOf(corev1.TaintNodeNotReady),
+		theTolerationOf(corev1.TaintNodeUnreachable),
+	}))
+}
+
+// The domain's taint key and value rules agree with the client library's
+// validation of a Node taint, apart from the keys under the control plane's
+// prefix, which the lab refuses on top.
+func TestTheTaintKeyAndValueRules_ShouldAgreeWithTheClientLibrarysValidation(t *testing.T) {
+	prefixes := []string{"", "example.com/", strings.Repeat("p", 254) + "/", "Example.com/", "a/b/"}
+
+	for _, prefix := range prefixes {
+		for _, name := range someLabelValues() {
+			key := prefix + name
+			t.Run("key "+key, func(t *testing.T) {
+				_, refusal := scenario.NewNodeTaints(scenario.Taint{Key: key, Value: gpuTaintValue, Effect: scenario.NoSchedule})
+
+				expect.Expect(t, refusal == nil).To(expect.Equal(len(validation.IsQualifiedName(key)) == 0))
+			})
+		}
+	}
+	for _, value := range someLabelValues() {
+		t.Run("value "+value, func(t *testing.T) {
+			_, refusal := scenario.NewNodeTaints(scenario.Taint{Key: gpuTaintKey, Value: value, Effect: scenario.NoSchedule})
+
+			expect.Expect(t, refusal == nil).To(expect.Equal(value != "" && len(validation.IsValidLabelValue(value)) == 0))
 		})
 	}
 }

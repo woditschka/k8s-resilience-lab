@@ -16,5 +16,8 @@ func All() []func(*lab.Scenario) {
 		ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding,
 		AZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding,
 		NoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending,
+		AWorkloadSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerCapacityType,
+		SpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNinePodsOnTheOnDemandNodes,
+		GeneralPodsBesideTaintedGPUNodes_ShouldStayOffThemWhileTheTolerantPodsReachThemByTheirRequest,
 	}
 }

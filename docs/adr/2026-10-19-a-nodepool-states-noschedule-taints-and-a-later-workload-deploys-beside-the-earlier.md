@@ -1,0 +1,63 @@
+# A NodePool states NoSchedule taints, and a later Workload deploys beside the earlier, judged alone
+
+**Status:** Accepted
+
+## Context
+
+REQ-SIM-019 lets a NodePool state taints its Nodes carry and a Pod specification tolerate one. Its Scenario keeps a general Workload off tainted gpu Nodes, then places a tolerating Workload on them by its Request. The owner answered the scoping questions with "yes": NoSchedule alone, and the tolerating Workload reaches the gpu NodePool by its Request, with no node selection setting.
+
+Four points constrain later slices. They are how a NodePool states a taint, which fields a toleration requires, how provisioning ends on a tainted Node, and what a second Workload Given in one Scenario means. Before this slice a second Workload Given replaced the first, and no Wait deployed it.
+
+## Options Considered
+
+How a NodePool states a taint:
+
+1. **A further call on the declared NodePool**, `.Taints(node.Taint{…})`, each taint a keyed literal of key, value and effect, as Kubernetes' own taint type names them.
+2. **A taint folded into `node.Labels`**: a taint is not a label in Kubernetes, and its effect has no place in a label map.
+
+Which fields a toleration requires:
+
+3. **Every field always**: a NoSchedule toleration would state a waiting time Kubernetes refuses.
+4. **The fields its operator and effect take**: Equal takes a value and Exists none, NoExecute takes a waiting time and NoSchedule none.
+
+What a later Workload Given means:
+
+5. **It replaces the earlier**: the earlier Workload's Pods vanish before the later one is placed, so the Scenario can never show both on one Topology.
+6. **It deploys beside the earlier, judged alone**: the next Wait deploys it, the earlier stays deployed, and every Wait, When and Then after it reads the newest Workload.
+7. **Every Then reads every deployed Workload**: Thens on one line would read different subjects, and a Then would need a Workload argument.
+
+## Decision
+
+Options 1, 4 and 6.
+
+- `node.Taint` is a keyed literal of key, value and effect. `.Taints(…)` on a declared NodePool adds them, and may be written more than once.
+- Only the NoSchedule effect is admitted. Any other effect, a field left out, a key or value outside Kubernetes' syntax, one key stated twice, and a key under the control plane's Node-condition prefix are refused at the Topology Given.
+- The domain holds the taint syntax as its own rules, naming no Kubernetes package. A mapper test pins them to the client library.
+- Each probe Pod tolerates its own Node's taints. Without it the scheduler never places a probe on a tainted Node, and provisioning fails.
+- A toleration requires the fields its operator and effect take. A field stated against them is refused at the Workload's Given, as one left out is.
+- A later Workload Given deploys at the next Wait beside the earlier ones. Every Wait, When and Then after it observes and judges the newest Workload alone. A Workload name already declared in the Scenario is refused at its Given.
+- A Then counts Pods on one NodePool, and a name the Topology lacks ends the Scenario at that Then.
+
+Option 2 departs from Kubernetes' names. Option 3 makes a Scenario state a value Kubernetes refuses. Option 5 cannot show two Workloads sharing a Topology. Option 7 gives one line's Thens different subjects and widens every Then.
+
+## Consequences
+
+A Scenario's gpu NodePool reads as a manifest's taint: `node.Pool("gpu", node.PerZone(1), GPUNodes()).Taints(node.Taint{Key: GPU, Value: GPUPresent, Effect: node.NoSchedule})`.
+
+A Scenario may judge one Workload, then place another beside it and judge that. An earlier Workload is never judged again.
+
+PreferNoSchedule and NoExecute taints stay refused until a slice admits them. NoExecute meets the Failure path, whose tolerations every specification holds.
+
+Drawing a Workload onto a NodePool by node selection or affinity stays an Open Question.
+
+## Implementation
+
+**Requirements:** REQ-SIM-019
+
+## References
+
+- [system-design.md § Contracts](../system-design.md#contracts)
+- [ADR: Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given](2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md)
+- [ADR: A NodePool states its own Node labels beside the lab's, and a Then counts Pods per value](2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md)
+- [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)
+- [ADR: Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md)

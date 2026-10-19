@@ -83,12 +83,12 @@ func leavingAnUnresponsiveNode() Customization {
 // adds to such a Node.
 func theNotReadyToleration() scenario.Toleration {
 	return scenario.NewToleration(
-		scenario.TaintNodeNotReady, scenario.Exists, scenario.NoExecute, theLabsWaitInSeconds())
+		scenario.TaintNodeNotReady, scenario.Exists, "", scenario.NoExecute, theLabsWaitInSeconds())
 }
 
 func theUnreachableToleration() scenario.Toleration {
 	return scenario.NewToleration(
-		scenario.TaintNodeUnreachable, scenario.Exists, scenario.NoExecute, theLabsWaitInSeconds())
+		scenario.TaintNodeUnreachable, scenario.Exists, "", scenario.NoExecute, theLabsWaitInSeconds())
 }
 
 // theLabsWaitInSeconds is the lab's own waiting time as the field Kubernetes
@@ -214,9 +214,9 @@ func TestASpecificationDefinedThroughTheMechanism_ShouldHoldItsNameItsStartupTim
 	}))
 }
 
-// Edge case 4: a specification that declares no spread of its own is not an empty
-// one. Its definition writes the lab's own settings, so a reader of it sees the
-// whole of what decides where its Workload's Pods sit and when they leave a Node.
+// A specification that declares no spread of its own is not an empty one. Its
+// definition writes the lab's own settings, so a reader of it sees the whole of
+// what decides where its Workload's Pods sit and when they leave a Node.
 func TestASpecificationDeclaringNoSpreadOfItsOwn_ShouldStillNameTheSettingsTheLabAdds(t *testing.T) {
 	declared := defaultPlacement().declared
 

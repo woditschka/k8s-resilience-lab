@@ -9,5 +9,9 @@ package scenarios
 
 import "github.com/woditschka/k8s-resilience-lab/internal/lab"
 
-// Checkout is the Workload the lab's Scenarios deploy today.
-const Checkout lab.WorkloadName = "checkout"
+// Checkout is the Workload every Scenario of the lab deploys, and Inference the
+// one a Scenario deploys beside it on the gpu Nodes.
+const (
+	Checkout  lab.WorkloadName = "checkout"
+	Inference lab.WorkloadName = "inference"
+)

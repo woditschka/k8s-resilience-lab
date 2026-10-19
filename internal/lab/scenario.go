@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -217,11 +218,20 @@ type Scenario struct {
 	provisioned *cluster.SimulatedCluster
 
 	topology scenario.Topology
+	// workload is the newest Workload a Given declared, which every Wait, When and
+	// Then after that Given reads alone. accesses are the full accesses its line
+	// wrote, each in the place it was written. The Step surface carries them beside
+	// the Workload, because the domain value the Workload holds carries no function
+	// value.
 	workload scenario.Workload
-	// accesses are the full accesses the Workload line wrote, each in the place it
-	// was written. The Step surface carries them beside the Workload, because the
-	// domain value the Workload holds carries no function value.
 	accesses []cluster.PodSpecAccessInPlace
+
+	// undeployed are the earlier Workloads a later Given superseded before a Wait
+	// deployed them, in the order declared, which the next Wait deploys before the
+	// newest. declaredWorkloads are the names of every Workload the Scenario
+	// declared, so none is declared twice.
+	undeployed        []declaredDeployment
+	declaredWorkloads []WorkloadName
 
 	steps    []Step
 	findings []Finding
@@ -257,6 +267,15 @@ type Scenario struct {
 
 	endedAt Step
 	cause   error
+}
+
+// declaredDeployment is one Workload as a Wait deploys it: the domain value, the
+// full accesses its line wrote, and how that line reads, which names it where the
+// control plane refuses it.
+type declaredDeployment struct {
+	workload   scenario.Workload
+	accesses   []cluster.PodSpecAccessInPlace
+	declaredAs string
 }
 
 // newScenario is the one way a Scenario comes into being: the Runner's, over the
@@ -490,16 +509,38 @@ func (s *Scenario) apply(at Step) bool {
 		}
 		s.topologyApplied = true
 	}
+	pending := slices.Clone(s.undeployed)
 	if s.workloadDeclaredAs != "" && !s.workloadDeployed {
-		if err := s.provisioned.Deploy(s.ctx, s.workload, s.accesses...); err != nil {
-			s.end(at, fmt.Errorf("deploy %s: %w", s.workloadDeclaredAs, err))
+		pending = append(pending, declaredDeployment{workload: s.workload, accesses: s.accesses, declaredAs: s.workloadDeclaredAs})
+	}
+	for _, deploying := range pending {
+		if err := s.provisioned.Deploy(s.ctx, deploying.workload, deploying.accesses...); err != nil {
+			s.end(at, fmt.Errorf("deploy %s: %w", deploying.declaredAs, err))
 
 			return false
 		}
-		s.workloadDeployed = true
 	}
+	s.undeployed, s.workloadDeployed = nil, true
 
 	return true
+}
+
+// declareWorkload makes workload the Scenario's newest, declared on the line that
+// reads as declaredAs: every Step after it reads this Workload alone, and the
+// next Wait deploys it beside the earlier ones, which stay deployed. An earlier
+// Workload no Wait has deployed yet is kept for that Wait. The Placement observed
+// before is an earlier Workload's, so it is discarded, and the next Then judges
+// the Placement a Wait reaches for this one, per
+// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+func (s *Scenario) declareWorkload(workload scenario.Workload, accesses []cluster.PodSpecAccessInPlace, declaredAs string) {
+	if s.workloadDeclaredAs != "" {
+		if !s.workloadDeployed {
+			s.undeployed = append(s.undeployed, declaredDeployment{workload: s.workload, accesses: s.accesses, declaredAs: s.workloadDeclaredAs})
+		}
+		s.observed, s.settled = scenario.Placement{}, false
+	}
+	s.workload, s.accesses, s.workloadDeclaredAs, s.workloadDeployed = workload, accesses, declaredAs, false
+	s.declaredWorkloads = append(s.declaredWorkloads, WorkloadName(workload.Name()))
 }
 
 // Given declares one part of the world a Scenario runs in. Each of its methods
@@ -527,7 +568,10 @@ func (g Given) Topology(zones Zones, pools ...node.DeclaredPool) DeclaredTopolog
 
 // Workload declares the Pod replicas the Scenario deploys: how many, under the
 // name their Pods are labelled with, and the predefined Pod specification they
-// are deployed with, customized or not. The line carries no setting of its own
+// are deployed with, customized or not. A Workload declared after another is the
+// Scenario's next: the next Wait deploys it beside the earlier ones, every Step
+// after it reads it alone, and a name the Scenario already declared ends the
+// Scenario here. The line carries no setting of its own
 // besides the Required Capacity a further call declares, per
 // docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md and
 // docs/adr/2026-10-06-required-capacity-judged-at-two-moments.md.
@@ -550,14 +594,20 @@ func (g Given) Workload(name WorkloadName, pods Pods, declares pod.Specification
 	}
 	step = g.scenario.carrying(declares.Carries())
 
+	if slices.Contains(g.scenario.declaredWorkloads, name) {
+		g.scenario.end(step, fmt.Errorf("a Scenario declares each Workload once, "+
+			"so the Workload %q declared again is refused", name))
+
+		return declared
+	}
+
 	workload, err := scenario.NewWorkload(string(name), int(pods), specification)
 	if err != nil {
 		g.scenario.end(step, err)
 
 		return declared
 	}
-	g.scenario.workload, g.scenario.accesses = workload, declares.Accesses()
-	g.scenario.workloadDeclaredAs = step.Name
+	g.scenario.declareWorkload(workload, declares.Accesses(), step.Name)
 
 	return declared
 }
@@ -818,6 +868,39 @@ func (w When) ZonesFail(zones Zones) {
 	}
 }
 
+// NodesLabelledFail stops every Node carrying the one label stated responding:
+// the Nodes the control plane still reports with that value of that key, in the
+// order the declared Topology derives them, which makes the pick the same on
+// every run. The Step is renamed to carry the Nodes resolved, so a run reports
+// which of them failed, and the Scenario is left for the next Wait to reach the
+// Placement the control plane settles at.
+//
+// A label no NodePool states, a value no NodePool states for it, a literal of
+// other than one label, and a value no Node still responding carries end the
+// Scenario at this When, naming what it named.
+func (w When) NodesLabelledFail(labels node.Labels) {
+	named := labelledNodesFailing(labels)
+	step, open := w.scenario.record(WhenStep, named)
+	if !open {
+		return
+	}
+
+	observed, seen := w.scenario.placement(step)
+	if !seen {
+		return
+	}
+
+	failure, err := scenario.NewLabelFailure(w.scenario.topology, observed, labels)
+	if err != nil {
+		w.scenario.end(step, err)
+
+		return
+	}
+	stopping := w.scenario.rename(named + ", " + strings.Join(failure.Names(), ", "))
+
+	w.scenario.stop(stopping, failure.Names())
+}
+
 // stop stops each of these Nodes responding and leaves this Scenario for the Wait
 // after it to reach a fresh Placement, ending it at the When that could not stop
 // one, and reports whether every one of them stopped. The observation held until now is the
@@ -848,8 +931,9 @@ func (s *Scenario) podsKeptRunning(observed scenario.Placement) int {
 	return len(observed.PodsRunningApartFrom(s.failed))
 }
 
-// nodesFailing and zonesFailing are how a When's line reads before it names what
-// it resolved.
+// nodesFailing, zonesFailing and labelledNodesFailing are how a When's line reads
+// before it names what it resolved. labelledNodesFailing reads the labels a When
+// names as key=value, in key order.
 func nodesFailing(count int) string {
 	return counted(count, "Node", "Nodes") + failing(count)
 }
@@ -865,6 +949,19 @@ func failing(count int) string {
 	}
 
 	return " fail"
+}
+
+func labelledNodesFailing(labels node.Labels) string {
+	stated := make([]string, 0, len(labels))
+	for _, key := range slices.Sorted(maps.Keys(labels)) {
+		stated = append(stated, key+"="+labels[key])
+	}
+
+	if len(stated) == 0 {
+		return "Nodes labelled by no label fail"
+	}
+
+	return "Nodes labelled " + strings.Join(stated, ", ") + " fail"
 }
 
 // Then judges one part of the Placement a Scenario settled at. A Then the
@@ -887,6 +984,59 @@ func (t Then) PodsPerZone(pods int) {
 	t.judge(counted(pods, "Pod", "Pods")+" per Zone", func(settled scenario.Placement, judged expect.T) {
 		expect.Expect(judged, settled.PodsPerZone()).
 			To(expect.Equal(evenlyOver(t.scenario.topology.Zones(), pods)))
+	})
+}
+
+// PodsPerValueOf asserts every value the declared Topology's NodePools state
+// under the label key holds pods Pods, including a value whose Nodes hold none.
+// A Pod is counted under the value its observed Node carries, so a Pod on a Node
+// stating no value of key counts toward none, per
+// docs/adr/2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md.
+//
+// A key no NodePool states leaves this Then no value to judge, and it ends the
+// Scenario at this Step naming that key.
+func (t Then) PodsPerValueOf(key string, pods int) {
+	step, open := t.scenario.record(ThenStep, counted(pods, "Pod", "Pods")+" per value of "+key)
+	if !open {
+		return
+	}
+
+	values := t.scenario.topology.LabelValues(key)
+	if len(values) == 0 {
+		t.scenario.end(step, fmt.Errorf("this Then counts Pods per value of the label %q, "+
+			"and no NodePool of the Topology states it", key))
+
+		return
+	}
+
+	t.judgeAt(step, func(settled scenario.Placement, judged expect.T) {
+		expect.Expect(judged, podsIn(values, settled.PodsPerLabelValue(key))).To(expect.Equal(evenlyOver(values, pods)))
+	})
+}
+
+// PodsOnNodePool asserts the Nodes of the NodePool named hold pods Pods between
+// them, none counted as zero. A Pod is counted under the NodePool its observed
+// Node belongs to, so a Pod Pending on no Node counts toward none, per
+// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+//
+// A NodePool the declared Topology lacks leaves this Then nothing to judge, and
+// it ends the Scenario at this Step naming that NodePool.
+func (t Then) PodsOnNodePool(pool node.PoolName, pods int) {
+	step, open := t.scenario.record(ThenStep, counted(pods, "Pod", "Pods")+" on the NodePool "+string(pool))
+	if !open {
+		return
+	}
+
+	if !t.scenario.topology.HoldsNodePool(string(pool)) {
+		t.scenario.end(step, fmt.Errorf("this Then counts Pods on the NodePool %q, "+
+			"and the Topology holds no NodePool of that name", pool))
+
+		return
+	}
+
+	named := []string{string(pool)}
+	t.judgeAt(step, func(settled scenario.Placement, judged expect.T) {
+		expect.Expect(judged, podsIn(named, settled.PodsPerNodePool())).To(expect.Equal(evenlyOver(named, pods)))
 	})
 }
 

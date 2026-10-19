@@ -18,10 +18,13 @@ const (
 	DoNotSchedule = scenario.DoNotSchedule
 	Honor         = scenario.Honor
 
-	// Exists matches a taint of that key whatever its value, and NoExecute is the
-	// effect a Pod is moved off a Node by.
-	Exists    = scenario.Exists
-	NoExecute = scenario.NoExecute
+	// Exists matches a taint of that key whatever its value, and Equal a taint of
+	// that key and the value named. NoExecute is the effect a Pod is moved off a
+	// Node by, and NoSchedule the one that keeps a Pod off a Node.
+	Exists     = scenario.Exists
+	Equal      = scenario.Equal
+	NoExecute  = scenario.NoExecute
+	NoSchedule = scenario.NoSchedule
 
 	// Gi is one gibibyte, the unit a Request's Memory is written in, as a
 	// manifest writes 12Gi: Memory: 12 * pod.Gi.
@@ -39,10 +42,12 @@ const (
 // Settings groups. Its method is unexported, so a Startup time, a full access or
 // another group is no Setting and does not compile inside a group.
 //
-// Each is a keyed literal under Kubernetes' names, and every field of it is
+// Each is a keyed literal under Kubernetes' names, and every field it takes is
 // required: its zero value is the field left out, which the specification it is
 // applied to carries as its refusal, naming the setting and the field, per
 // docs/adr/2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md.
+// A toleration takes the fields its operator and effect take, and one stated
+// against them is refused alike.
 // A toleration evicting at once, or a request of none, is written through full
 // access.
 type Setting interface {
@@ -57,36 +62,43 @@ type Setting interface {
 // docs/adr/2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md.
 var errAFieldLeftOut = errors.New("every field of a setting the lab offers is stated, so one left out is refused")
 
-// leftOut is the refusal of the setting named, written with that field, under its
-// Kubernetes name, left out.
-func leftOut(setting, field string) error {
-	return fmt.Errorf("pod.%s leaves out %s: %w", setting, field, errAFieldLeftOut)
-}
+// errAFieldStatedAgainst is why a setting stating a field the others rule out is
+// refused: a toleration's operator and effect decide which of its fields
+// Kubernetes takes, and the lab offers the values whose fields it knows, per
+// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+var errAFieldStatedAgainst = errors.New("a field of a setting the lab offers is stated as the setting's other fields take it, " +
+	"so one stated against them is refused")
 
-// firstLeftOut is the Kubernetes name of the first field of fields left out, in
-// the order a setting writes them, and whether any is.
-func firstLeftOut(fields []namedField) (string, bool) {
+// firstRefusal is the refusal of the setting named for the first field of fields
+// left out or stated against the others, in the order a setting writes them, or
+// nil where there is none.
+func firstRefusal(setting string, fields []namedField) error {
 	for _, field := range fields {
-		if field.leftOut {
-			return field.name, true
+		switch {
+		case field.leftOut:
+			return fmt.Errorf("pod.%s leaves out %s: %w", setting, field.name, errAFieldLeftOut)
+		case field.statedAgainst != "":
+			return fmt.Errorf("pod.%s states %s%s: %w", setting, field.name, field.statedAgainst, errAFieldStatedAgainst)
 		}
 	}
 
-	return "", false
+	return nil
 }
 
-// namedField is one field of a setting: its Kubernetes name and whether it holds
-// its zero value.
+// namedField is one field of a setting: its Kubernetes name, whether it holds the
+// zero value of a field the setting takes, and why it is refused where it is
+// stated against the setting's other fields, read on after the field's name.
 type namedField struct {
-	name    string
-	leftOut bool
+	name          string
+	leftOut       bool
+	statedAgainst string
 }
 
 // applied is the specification holding the setting that declares builds, or
-// carrying the refusal of the first field left out.
+// carrying the refusal of the first field left out or stated against the others.
 func applied(specification Specification, setting string, fields []namedField, declares func() scenario.Setting) Specification {
-	if field, missing := firstLeftOut(fields); missing {
-		return specification.refusing(leftOut(setting, field))
+	if refused := firstRefusal(setting, fields); refused != nil {
+		return specification.refusing(refused)
 	}
 
 	return specification.holding(declares())
@@ -116,14 +128,20 @@ func (c TopologySpreadConstraint) customize(specification Specification) Specifi
 
 func (TopologySpreadConstraint) settles() {}
 
-// Toleration is the setting that decides when a Workload's Pods leave a Node: the
-// taint they put up with, and for how long. The domain holds the lab's two
-// tolerations, for the not-ready and the unreachable taint, at the lab's waiting
-// time whatever is written for them, because a Scenario states no waiting time of
-// its own (docs/prd.md REQ-SIM-008).
+// Toleration is the setting that decides which tainted Nodes a Workload's Pods
+// may be placed on, and when they leave a Node: the taint they put up with, and
+// for how long. The domain holds the lab's two tolerations, for the not-ready and
+// the unreachable taint, at the lab's waiting time whatever is written for them,
+// because a Scenario states no waiting time of its own (docs/prd.md REQ-SIM-008).
+//
+// The fields it takes follow its operator and effect, as Kubernetes' do: Equal
+// takes a Value and Exists none, NoExecute takes TolerationSeconds and NoSchedule
+// none, per
+// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
 type Toleration struct {
 	Key               string
 	Operator          scenario.TolerationOperator
+	Value             string
 	Effect            scenario.TaintEffect
 	TolerationSeconds int64
 }
@@ -131,12 +149,39 @@ type Toleration struct {
 func (t Toleration) customize(specification Specification) Specification {
 	return applied(specification, "Toleration", []namedField{
 		{name: "key", leftOut: t.Key == ""},
-		{name: "operator", leftOut: t.Operator == ""},
-		{name: "effect", leftOut: t.Effect == ""},
-		{name: "tolerationSeconds", leftOut: t.TolerationSeconds == 0},
+		{name: "operator", leftOut: t.Operator == "", statedAgainst: unlessOneOf(t.Operator, Equal, Exists)},
+		{
+			name: "value", leftOut: t.Operator.TakesAValue() && t.Value == "",
+			statedAgainst: unlessTaken(t.Value != "", t.Operator.TakesAValue(), "operator", t.Operator),
+		},
+		{name: "effect", leftOut: t.Effect == "", statedAgainst: unlessOneOf(t.Effect, NoSchedule, NoExecute)},
+		{
+			name: "tolerationSeconds", leftOut: t.Effect.TakesAWaitingTime() && t.TolerationSeconds == 0,
+			statedAgainst: unlessTaken(t.TolerationSeconds != 0, t.Effect.TakesAWaitingTime(), "effect", t.Effect),
+		},
 	}, func() scenario.Setting {
-		return scenario.NewToleration(t.Key, t.Operator, t.Effect, t.TolerationSeconds)
+		return scenario.NewToleration(t.Key, t.Operator, t.Value, t.Effect, t.TolerationSeconds)
 	})
+}
+
+// unlessOneOf is why a stated value outside those the lab offers is refused, or
+// nothing where it is one of them or left out.
+func unlessOneOf[V ~string](stated V, offered ...V) string {
+	if stated == "" || slices.Contains(offered, stated) {
+		return ""
+	}
+
+	return fmt.Sprintf(" %s, which is none of the values the lab offers, %v", stated, offered)
+}
+
+// unlessTaken is why a field stated where the field deciding it takes none is
+// refused, or nothing where it is taken or not stated.
+func unlessTaken[V ~string](stated, taken bool, deciding string, decidedBy V) string {
+	if !stated || taken {
+		return ""
+	}
+
+	return fmt.Sprintf(", which the %s %s takes none of", deciding, decidedBy)
 }
 
 func (Toleration) settles() {}

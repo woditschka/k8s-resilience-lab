@@ -85,4 +85,6 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-18 | [Every predefined Pod specification is defined by the Scenarios, with its own Startup time](2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md) | Accepted, amended 2026-10-18 (twice) |
 | 2026-10-18 | [The Scenarios name leaving an unresponsive Node as one setting, and a run reports every setting a Workload's Pods carry](2026-10-18-the-scenarios-name-leaving-an-unresponsive-node-as-one-setting.md) | Accepted, amended 2026-10-18 |
 | 2026-10-18 | [Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md) | Accepted |
-| 2026-10-18 | [Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given](2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md) | Accepted |
+| 2026-10-18 | [Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given](2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md) | Accepted, amended 2026-10-19 |
+| 2026-10-18 | [A NodePool states its own Node labels beside the lab's, and a Then counts Pods per value](2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md) | Accepted |
+| 2026-10-19 | [A NodePool states NoSchedule taints, and a later Workload deploys beside the earlier, judged alone](2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md) | Accepted |

@@ -51,9 +51,9 @@ func TestARequestsFields_ShouldBeTheResourceNamesAPodAsksForUnder(t *testing.T) 
 // pod.Gi is the unit node.Gi spells, so a request and a capacity are written in
 // one unit.
 func TestThePodValues_ShouldBeTheDomainsOwnSpelling(t *testing.T) {
-	expect.Expect(t, []string{string(pod.DoNotSchedule), string(pod.Honor), string(pod.Exists), string(pod.NoExecute)}).
+	expect.Expect(t, []string{string(pod.DoNotSchedule), string(pod.Honor), string(pod.Exists), string(pod.Equal), string(pod.NoExecute), string(pod.NoSchedule)}).
 		To(expect.Equal([]string{
-			string(scenario.DoNotSchedule), string(scenario.Honor), string(scenario.Exists), string(scenario.NoExecute),
+			string(scenario.DoNotSchedule), string(scenario.Honor), string(scenario.Exists), string(scenario.Equal), string(scenario.NoExecute), string(scenario.NoSchedule),
 		}))
 	expect.Expect(t, pod.Gi).To(expect.Equal(node.Gi))
 }

@@ -11,6 +11,8 @@ package lab
 import (
 	"context"
 	"log/slog"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +35,8 @@ const (
 	theNothingDeclaredScenario = "a-wait-with-nothing-declared"
 	theNodePoolsScenario       = "a-topology-of-node-pools"
 	theGpuRequestScenario      = "a-request-only-gpu-nodes-hold"
+	theLabelFailureScenario    = "a-failure-by-label"
+	theNextWorkloadScenario    = "a-next-workload"
 )
 
 // atOnce is the time a Wait with nothing to wait for is reached inside. The
@@ -272,7 +276,7 @@ func expectReachedAtOnce(t *testing.T, recorded []Step) {
 	}
 }
 
-// Edge case 8: a value the control plane refuses ends the Scenario at the Wait
+// Edge case 5: a value the control plane refuses ends the Scenario at the Wait
 // that deployed its Workload, naming that Step and what was refused. A Given
 // declares and reaches no cluster, so the Wait below it is the Step that applied
 // the declaration and the Step the ending names, with the declaration in its
@@ -355,4 +359,115 @@ func onEveryNodeOf(topology scenario.Topology, nodePool string, pods int) map[st
 	}
 
 	return counts
+}
+
+// A Failure by label stops every Node the control plane reports carrying the
+// value, in every Zone, in one Step: the Step reports the Nodes it resolved, the
+// Pods are moved to the Nodes still responding, and none stays on a Node that
+// stopped (docs/prd.md REQ-SIM-018).
+func TestAFailureByLabel_ShouldStopEveryNodeCarryingThatValueInOneStep(t *testing.T) {
+	t.Parallel()
+	const (
+		threeZones         = 3
+		twoOnDemandPerZone = 2
+		ninePods           = 9
+	)
+	stopping := aScenarioOnAClusterFor(t, theLabelFailureScenario)
+	stopping.Given().Topology(Zones(threeZones),
+		node.Pool(onDemandCapacity, node.PerZone(twoOnDemandPerZone), roomyNodes()).
+			Labels(node.Labels{capacityTypeLabel: onDemandCapacity}),
+		theSpotNodePool())
+	stopping.WaitFor().AllNodesReady()
+	stopping.Given().Workload(someWorkloadName, Pods(ninePods), resilientPlacement())
+	stopping.WaitFor().AllPodsReady()
+	spotNodes := namesOf(nodesOfNodePool(stopping.topology, spotCapacity))
+
+	stopping.When().NodesLabelledFail(node.Labels{capacityTypeLabel: spotCapacity})
+	stopping.WaitFor().AllPodsReady()
+
+	stopped := stopping.outcome()
+	expect.Expect(t, causeOf(stopped)).To(expect.Equal(""))
+	expect.Expect(t, stopping.failed).To(expect.Equal(spotNodes))
+	expect.Expect(t, namesOfWhensIn(stopped.Steps)).To(expect.Equal([]string{
+		"Nodes labelled " + capacityTypeLabel + "=" + spotCapacity + " fail, " + strings.Join(spotNodes, ", "),
+	}))
+	expect.Expect(t, stopped.Placement.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](ninePods))
+	expect.Expect(t, podsOn(stopped.Placement, spotNodes)).To(expect.HaveLen[scenario.Pod](0))
+}
+
+// podsOn are the Pods of the Placement sitting on one of these Nodes.
+func podsOn(placed scenario.Placement, nodes []string) []scenario.Pod {
+	return slices.DeleteFunc(placed.Pods(), func(sitting scenario.Pod) bool { return !slices.Contains(nodes, sitting.Node) })
+}
+
+// namesOfWhensIn are the names of the When Steps among these, as they read.
+func namesOfWhensIn(steps []Step) []string {
+	var names []string
+	for _, step := range steps {
+		if step.Kind == WhenStep {
+			names = append(names, step.Name)
+		}
+	}
+
+	return names
+}
+
+// The taint the gpu NodePool of the tests below states, as a dedicated NodePool
+// of gpu Nodes is tainted.
+const (
+	gpuTaintKey     = "nvidia.com/gpu"
+	gpuTaintPresent = "present"
+)
+
+// theTaintedGpuNodePool is the gpu NodePool tainted NoSchedule, which keeps off
+// it every Pod not tolerating the taint.
+func theTaintedGpuNodePool() node.DeclaredPool {
+	return theGpuNodePool().Taints(node.Taint{Key: gpuTaintKey, Value: gpuTaintPresent, Effect: node.NoSchedule})
+}
+
+// toleratingTheGpuTaint is the toleration of that taint, naming its value and no
+// waiting time.
+func toleratingTheGpuTaint() pod.Toleration {
+	return pod.Toleration{Key: gpuTaintKey, Operator: pod.Equal, Value: gpuTaintPresent, Effect: pod.NoSchedule}
+}
+
+// aboveRoomyRequest is a Request only a gpu Node has room for, one Pod of it per
+// gpu Node, so room alone decides where such Pods land.
+func aboveRoomyRequest() pod.Request {
+	return pod.Request{CPU: roomyCoresPerNode + 1, Memory: (roomyGibibytesPerNode + 1) * pod.Gi}
+}
+
+// A later Workload is deployed by the next Wait beside the earlier, which stays
+// Running where it was placed, and every Step after it judges the later one
+// alone: the Pods tolerating the taint and asking for more than a general Node
+// holds are Running on the gpu Nodes, and none on a general Node.
+func TestALaterWorkload_ShouldBeDeployedBesideTheEarlierAndJudgedAlone(t *testing.T) {
+	t.Parallel()
+	gpuNodes := twoZones * oneGpuNodePerZone
+	generalPods := twoZones * twoNodesPerZone
+	const noPod = 0
+	deploying := aScenarioOnAClusterFor(t, theNextWorkloadScenario)
+	deploying.Given().Topology(Zones(twoZones), theGeneralNodePool(), theTaintedGpuNodePool())
+	deploying.WaitFor().AllNodesReady()
+	deploying.Given().Workload(someWorkloadName, Pods(generalPods), resilientPlacement())
+	deploying.WaitFor().AllPodsReady()
+	earlier := deploying.workload
+
+	deploying.Given().Workload(anotherWorkloadName, Pods(gpuNodes),
+		defaultPlacement().Customize(aboveRoomyRequest(), toleratingTheGpuTaint()))
+	deploying.WaitFor().AllPodsReady()
+	deploying.Then().AllPodsRunning()
+	deploying.Then().PodsOnNodePool(gpuNodePool, gpuNodes)
+	deploying.Then().PodsOnNodePool(generalNodePool, noPod)
+
+	judged := deploying.outcome()
+	expect.Expect(t, causeOf(judged)).To(expect.Equal(""))
+	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{}))
+	expect.Expect(t, judged.Placement.Pods()).To(expect.HaveLen[scenario.Pod](gpuNodes))
+	stillPlaced, err := deploying.provisioned.Observe(t.Context(), earlier)
+	if err != nil {
+		t.Fatalf("observe the earlier Workload: %v", err)
+	}
+	expect.Expect(t, stillPlaced.PodsPerNodePool()).
+		To(expect.Equal(map[string]int{string(generalNodePool): generalPods, string(gpuNodePool): noPod}))
 }

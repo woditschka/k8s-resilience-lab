@@ -178,3 +178,53 @@ func TestAPodInsideItsStartupTime_ShouldBeCountedPendingOnItsNode(t *testing.T) 
 	expect.Expect(t, placement.PodsPerNode()[nextNode]).To(expect.Equal(theStartingPodAlone))
 	expect.Expect(t, placement.PodsInPhase(scenario.PodPending)).To(expect.Equal([]scenario.Pod{starting, unplaced}))
 }
+
+// A Placement counts Pods per value of a label by the value their observed Node
+// carries: a value whose Nodes hold no Pod counts as none, and a Pod on a Node
+// carrying no such label, on a Node the observation does not hold, or on no Node
+// at all counts toward no value (docs/prd.md REQ-SIM-017 edge cases 5 and 6).
+func TestAPlacement_ShouldCountPodsPerValueOfALabelTheirNodesCarry(t *testing.T) {
+	const oneZone, oneNodePerZone = 1, 1
+	topology, err := scenario.NewTopology(oneZone,
+		labelledNodePool(t, onDemand, labelsOf(t, map[string]string{capacityType: onDemand})),
+		labelledNodePool(t, spot, labelsOf(t, map[string]string{capacityType: spot})),
+		aNodePool(t, theGeneralNodePool, oneNodePerZone, aCapacity(t)),
+	)
+	if err != nil {
+		t.Fatalf("build a Topology of labelled NodePools: %v", err)
+	}
+	const onTheOnDemandNode, onTheUnlabelledNode, onANodeNotObserved = "zone-1-node-1", "zone-1-node-3", "zone-9-node-1"
+	const podLeftUnplaced = "web-5"
+	placed := scenario.NewPlacement(topology.Nodes(), []scenario.Pod{
+		{Name: firstPodOnTheFullestNode, Node: onTheOnDemandNode, Phase: scenario.PodRunning},
+		{Name: secondPodOnTheFullestNode, Node: onTheOnDemandNode, Phase: scenario.PodRunning},
+		{Name: podOnTheNextNode, Node: onTheUnlabelledNode, Phase: scenario.PodRunning},
+		{Name: podOnNoNodeAtAll, Node: onANodeNotObserved, Phase: scenario.PodRunning},
+		{Name: podLeftUnplaced, Phase: scenario.PodPending},
+	})
+
+	expect.Expect(t, placed.PodsPerLabelValue(capacityType)).To(expect.Equal(map[string]int{onDemand: 2, spot: 0}))
+}
+
+// A Placement counts Pods per NodePool by the NodePool their observed Node
+// belongs to: a NodePool whose Nodes hold no Pod counts as none, and a Pod on a
+// Node the observation does not hold, or on no Node at all, counts toward none.
+func TestAPlacement_ShouldCountPodsPerNodePoolOfTheirNodes(t *testing.T) {
+	const oneZone, oneNodePerZone, twoNodesPerZone, gpu = 1, 1, 2, "gpu"
+	topology, err := scenario.NewTopology(oneZone,
+		aNodePool(t, theGeneralNodePool, twoNodesPerZone, aCapacity(t)),
+		aNodePool(t, gpu, oneNodePerZone, aCapacity(t)),
+	)
+	if err != nil {
+		t.Fatalf("build a Topology of two NodePools: %v", err)
+	}
+	const onTheFirstGeneralNode, onTheSecondGeneralNode, onANodeNotObserved = "zone-1-node-1", "zone-1-node-2", "zone-9-node-1"
+	placed := scenario.NewPlacement(topology.Nodes(), []scenario.Pod{
+		{Name: firstPodOnTheFullestNode, Node: onTheFirstGeneralNode, Phase: scenario.PodRunning},
+		{Name: podOnTheNextNode, Node: onTheSecondGeneralNode, Phase: scenario.PodRunning},
+		{Name: podOnNoNodeAtAll, Node: onANodeNotObserved, Phase: scenario.PodRunning},
+		{Name: secondPodOnTheFullestNode, Phase: scenario.PodPending},
+	})
+
+	expect.Expect(t, placed.PodsPerNodePool()).To(expect.Equal(map[string]int{theGeneralNodePool: 2, gpu: 0}))
+}

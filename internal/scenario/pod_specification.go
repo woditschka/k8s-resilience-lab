@@ -44,14 +44,32 @@ const Honor NodeInclusionPolicy = "Honor"
 // TolerationOperator is how a toleration matches the taint it names.
 type TolerationOperator string
 
-// Exists matches a taint of that key whatever value the control plane set it to.
-const Exists TolerationOperator = "Exists"
+// Exists matches a taint of that key whatever value the control plane set it to,
+// and Equal matches a taint of that key and the value the toleration names.
+const (
+	Exists TolerationOperator = "Exists"
+	Equal  TolerationOperator = "Equal"
+)
+
+// TakesAValue reports whether a toleration matching this way names the value of
+// the taint it tolerates: Equal does, and Exists matches every value.
+func (o TolerationOperator) TakesAValue() bool {
+	return o == Equal
+}
 
 // TaintEffect is what a taint does to a Pod that does not tolerate it.
 type TaintEffect string
 
 // NoExecute moves such a Pod off the Node.
 const NoExecute TaintEffect = "NoExecute"
+
+// TakesAWaitingTime reports whether a toleration of a taint of this effect states
+// how long a Pod stays on the Node: NoExecute moves a Pod off after it, and
+// NoSchedule moves no Pod at all, so Kubernetes takes a waiting time for
+// NoExecute alone.
+func (e TaintEffect) TakesAWaitingTime() bool {
+	return e == NoExecute
+}
 
 // UnresponsiveNodeWait is how long a Pod stays on a Node that stopped
 // responding, and DefaultUnresponsiveNodeWait the admission default the lab's
@@ -216,6 +234,7 @@ func (s TopologySpread) field() settingField {
 type Toleration struct {
 	key               string
 	operator          TolerationOperator
+	value             string
 	effect            TaintEffect
 	tolerationSeconds int64
 }
@@ -225,10 +244,11 @@ type Toleration struct {
 func NewToleration(
 	key string,
 	operator TolerationOperator,
+	value string,
 	effect TaintEffect,
 	tolerationSeconds int64,
 ) Toleration {
-	return Toleration{key: key, operator: operator, effect: effect, tolerationSeconds: tolerationSeconds}
+	return Toleration{key: key, operator: operator, value: value, effect: effect, tolerationSeconds: tolerationSeconds}
 }
 
 // Key is the taint this toleration names.
@@ -239,6 +259,12 @@ func (t Toleration) Key() string {
 // Operator is how this toleration matches that taint.
 func (t Toleration) Operator() TolerationOperator {
 	return t.operator
+}
+
+// Value is the value of that taint this toleration matches, which an Equal
+// toleration names and an Exists one leaves empty.
+func (t Toleration) Value() string {
+	return t.value
 }
 
 // Effect is the effect of that taint this toleration puts up with.
@@ -430,7 +456,7 @@ func withTheLabsTolerations(settings []Setting) []Setting {
 	}
 	for _, taint := range theLabsTaints {
 		if !slices.ContainsFunc(holding, func(setting Setting) bool { return setting.field() == tolerationOf(taint) }) {
-			holding = append(holding, NewToleration(taint, Exists, NoExecute, theLabsWaitInSeconds))
+			holding = append(holding, NewToleration(taint, Exists, "", NoExecute, theLabsWaitInSeconds))
 		}
 	}
 

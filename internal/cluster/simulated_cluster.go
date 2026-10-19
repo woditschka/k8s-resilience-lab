@@ -649,7 +649,8 @@ func podNamesOf(pods []scenario.Pod) []string {
 // hasSettled — the Pods created of the Pods declared, the Ready Nodes they were
 // read against, the Pods on a Node the observation does not hold, and the placed
 // Pods still inside their Startup time — so a reader of an expired wait can tell
-// which clause held it open (PRD edge case 3).
+// which clause held it open (docs/prd.md REQ-SIM-006: a Wait the lab's waiting time
+// outlasts ends the Scenario naming what was not Ready).
 func didNotSettle(workload scenario.Workload, observed scenario.Placement) error {
 	return fmt.Errorf("the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold and %d still starting",
 		workload.Name(), scenario.WaitingTime, len(observed.Pods()), workload.Pods(), len(observed.Nodes()),
@@ -664,7 +665,7 @@ func didNotSettle(workload scenario.Workload, observed scenario.Placement) error
 // moment after the Deployment does. Two observations taken in that moment agree
 // on finding nothing, which is an early Placement rather than a settled one. A
 // Pod that cannot be placed still counts, because the control plane creates it
-// and reports it Pending (edge case 1).
+// and reports it Pending (REQ-SIM-001 edge case 1).
 //
 // A Pod on a Node the observation does not hold is the same kind of early
 // Placement, after a Failure rather than after a Deployment: a Node that stopped

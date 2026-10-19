@@ -83,7 +83,7 @@ func TestANodePoolDeclared_ShouldBeTheDomainsNodePoolOfTheNameTheCountAndTheCapa
 	declared, err := node.Pool("general", 2, node.Named("medium", node.Capacity{CPU: 4, Memory: 16 * node.Gi, Pods: 10})).Declared()
 
 	expect.Expect(t, err).To(expect.Equal[error](nil))
-	expect.Expect(t, declared == want).To(expect.Equal(true))
+	expect.Expect(t, declared).To(expect.Equal(want))
 }
 
 func TestANodePoolRead_ShouldNameItsCountItsCapacityAndTheNameOfTheCapacityWhereItHasOne(t *testing.T) {
@@ -107,4 +107,159 @@ func TestANodePoolRead_ShouldNameItsCountItsCapacityAndTheNameOfTheCapacityWhere
 			expect.Expect(t, test.pool.Reads()).To(expect.Equal(test.reads))
 		})
 	}
+}
+
+// The label a test of a labelled NodePool states, the two values it states under
+// it, and a key and value no test turns on.
+const (
+	capacityType = "capacity-type"
+	spot         = "spot"
+	onDemand     = "on-demand"
+	someKey      = "some-key"
+	someValue    = "some-value"
+)
+
+// aPool is the named default for a NodePool a labelled test adds its labels to.
+func aPool() node.DeclaredPool {
+	return node.Pool("spot", 1, node.Capacity{CPU: 4, Memory: 16 * node.Gi, Pods: 10})
+}
+
+// A NodePool states its own labels alone and each once, under keys and values
+// Kubernetes holds; each refusal is carried to the Topology line, which ends the
+// Scenario with it, and names what was refused (docs/prd.md REQ-SIM-017 edge
+// cases 1 and 2). A refused NodePool stays refused whatever is labelled after.
+func TestARefusedNodeLabel_ShouldBeRefusedWhereItIsStated(t *testing.T) {
+	tests := map[string]struct {
+		pool    node.DeclaredPool
+		refused string
+	}{
+		"the Zone label": {pool: aPool().Labels(node.Labels{node.Zone: someValue}), refused: node.Zone},
+		"one key in two calls": {
+			pool:    aPool().Labels(node.Labels{capacityType: spot}).Labels(node.Labels{capacityType: onDemand}),
+			refused: capacityType,
+		},
+		"a label after a refused capacity": {
+			pool:    node.Pool("spot", 1, node.Capacity{}).Labels(node.Labels{capacityType: spot}),
+			refused: "Node capacity",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := test.pool.Declared()
+
+			expect.Expect(t, err != nil && strings.Contains(err.Error(), test.refused)).To(expect.Equal(true))
+		})
+	}
+}
+
+// A NodePool labelled in two calls declares the domain's NodePool holding both.
+func TestANodePoolLabelledInTwoCalls_ShouldDeclareTheDomainsNodePoolHoldingBothLabels(t *testing.T) {
+	both, err := scenario.NewNodeLabels(map[string]string{capacityType: spot, someKey: someValue})
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	unlabelled, err := aPool().Declared()
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	want, err := unlabelled.Labelled(both)
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+
+	declared, err := aPool().Labels(node.Labels{capacityType: spot}).Labels(node.Labels{someKey: someValue}).Declared()
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, declared).To(expect.Equal(want))
+}
+
+// A NodePool's line reports its stated labels after its capacity, in key order
+// whichever call stated them, and a NodePool stating none reads as before.
+func TestALabelledNodePoolRead_ShouldNameItsLabelsAfterItsCapacityInKeyOrder(t *testing.T) {
+	labelled := aPool().Labels(node.Labels{someKey: someValue}).Labels(node.Labels{capacityType: spot})
+
+	expect.Expect(t, labelled.Reads()).To(expect.Equal(
+		"a NodePool spot of 1 Node holding 4 cpu, 16Gi memory and 10 Pods each, labelled capacity-type=spot, some-key=some-value"))
+}
+
+// The taint a test states on a dedicated NodePool, and the effect it takes.
+const (
+	gpuKey     = "nvidia.com/gpu"
+	gpuPresent = "present"
+)
+
+// aGPUTaint is the named default for the one taint a tainted test states.
+func aGPUTaint() node.Taint {
+	return node.Taint{Key: gpuKey, Value: gpuPresent, Effect: node.NoSchedule}
+}
+
+// A taint is Kubernetes' own type under its own name, its fields Kubernetes'
+// names, and its one effect the domain's spelling, so a Scenario's literal reads
+// as the manifest it becomes.
+func TestATaint_ShouldBeTheKubernetesTypeOfItsNameUnderTheDomainsSpelling(t *testing.T) {
+	kubernetes := reflect.TypeFor[corev1.Taint]()
+	var missing []string
+	for field := range reflect.TypeFor[node.Taint]().Fields() {
+		if _, held := kubernetes.FieldByName(field.Name); !held {
+			missing = append(missing, field.Name)
+		}
+	}
+
+	expect.Expect(t, reflect.TypeFor[node.Taint]().Name()).To(expect.Equal(kubernetes.Name()))
+	expect.Expect(t, missing).To(expect.HaveLen[string](0))
+	expect.Expect(t, node.NoSchedule).To(expect.Equal(scenario.NoSchedule))
+}
+
+// A NodePool tainted in two calls declares the domain's NodePool holding both
+// taints.
+func TestANodePoolTaintedInTwoCalls_ShouldDeclareTheDomainsNodePoolHoldingBothTaints(t *testing.T) {
+	other := node.Taint{Key: someKey, Value: someValue, Effect: node.NoSchedule}
+	both, err := scenario.NewNodeTaints(scenario.Taint(aGPUTaint()), scenario.Taint(other))
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	untainted, err := aPool().Declared()
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	want, err := untainted.Tainted(both)
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+
+	declared, err := aPool().Taints(aGPUTaint()).Taints(other).Declared()
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, declared).To(expect.Equal(want))
+}
+
+// A taint the domain refuses, or a key stated in an earlier call, is carried to
+// the Topology line, the first refusal standing.
+func TestARefusedTaint_ShouldBeRefusedWhereItIsStated(t *testing.T) {
+	const noExecute = scenario.NoExecute
+	tests := map[string]struct {
+		pool    node.DeclaredPool
+		refused string
+	}{
+		"a taint of another effect": {
+			pool:    aPool().Taints(node.Taint{Key: gpuKey, Value: gpuPresent, Effect: noExecute}),
+			refused: string(noExecute),
+		},
+		"one key in two calls": {
+			pool:    aPool().Taints(aGPUTaint()).Taints(node.Taint{Key: gpuKey, Value: someValue, Effect: node.NoSchedule}),
+			refused: gpuKey,
+		},
+		"a taint after a refused label": {
+			pool:    aPool().Labels(node.Labels{node.Zone: someValue}).Taints(aGPUTaint()),
+			refused: node.Zone,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := test.pool.Declared()
+
+			expect.Expect(t, err != nil && strings.Contains(err.Error(), test.refused)).To(expect.Equal(true))
+		})
+	}
+}
+
+// A NodePool's line reports its stated taints after its labels, as kubectl
+// writes one, in key order whichever call stated them.
+func TestATaintedNodePoolRead_ShouldNameItsTaintsAfterItsLabelsInKeyOrder(t *testing.T) {
+	tainted := aPool().Taints(aGPUTaint()).Labels(node.Labels{capacityType: spot}).
+		Taints(node.Taint{Key: someKey, Value: someValue, Effect: node.NoSchedule})
+
+	expect.Expect(t, tainted.Reads()).To(expect.Equal(
+		"a NodePool spot of 1 Node holding 4 cpu, 16Gi memory and 10 Pods each, labelled capacity-type=spot, " +
+			"tainted nvidia.com/gpu=present:NoSchedule, some-key=some-value:NoSchedule"))
 }

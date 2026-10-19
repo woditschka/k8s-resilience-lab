@@ -164,6 +164,89 @@ const (
 	capacityHeldWithNoRoomLeftJudged = theCapacityJudged + "6 at the moment of the Failure and 6 once Settled"
 )
 
+// The lines a run of the Spot nodes stop responding Scenario is read by: its
+// heading, the Topology line of the two NodePools, the When Step naming the
+// label and the three spot Nodes it resolved, one in each Zone, and the counts
+// its capacity judgement states — the spot Nodes hold three of the nine Pods, so
+// exactly the minimum of six is left Running at that moment and all nine once
+// the Placement has settled (docs/prd.md REQ-SIM-018).
+const (
+	spotNodesStopRespondingReported = aScenarioHeading + "spot-nodes-stop-responding"
+	theOnDemandAndSpotNodesDeclared = "Given a Topology of 3 Zones of " +
+		"a NodePool on-demand of 2 Standard Nodes holding 16 cpu, 64Gi memory and 10 Pods each, " +
+		"labelled capacity-type=on-demand; " +
+		"a NodePool spot of 1 Standard Node holding 16 cpu, 64Gi memory and 10 Pods each, labelled capacity-type=spot"
+	theSpotNodesFailReported = "When Nodes labelled capacity-type=spot fail, " +
+		"zone-1-node-3, zone-2-node-3, zone-3-node-3"
+	capacityHeldWhenTheSpotNodesStoppedJudged = theCapacityJudged + "6 at the moment of the Failure and 9 once Settled"
+)
+
+// The lines a run of the Spread over on-demand and spot Scenario is read by: its
+// heading, the Topology line naming both NodePools with the capacity-type label
+// each states, the Workload line of the specification spreading over Zones and
+// over that label, and the three Thens it judges the Placement by. Each Zone
+// holds one on-demand and one spot Node, so six Pods spread evenly put two in
+// each Zone and three on each capacity type (docs/prd.md REQ-SIM-017).
+const (
+	spreadOverOnDemandAndSpotReported = aScenarioHeading + "spread-over-on-demand-and-spot"
+	theLabelledNodePoolsDeclared      = "Given a Topology of 3 Zones of " +
+		"a NodePool on-demand of 1 Standard Node holding 16 cpu, 64Gi memory and 10 Pods each, " +
+		"labelled capacity-type=on-demand; " +
+		"a NodePool spot of 1 Standard Node holding 16 cpu, 64Gi memory and 10 Pods each, labelled capacity-type=spot"
+	spreadOverOnDemandAndSpotDeclared = "Given a Workload checkout of 6 Pods declaring Spread over on-demand and spot, " +
+		"each Pod starting in 500ms to 1s"
+	everyPodRunningJudged          = "Then every Pod Running"
+	twoPodsPerZoneJudged           = "Then 2 Pods per Zone"
+	threePodsPerCapacityTypeJudged = "Then 3 Pods per value of capacity-type"
+)
+
+// spreadOverOnDemandAndSpotCarries are the lines the Given declaring Spread over
+// on-demand and spot reports under it: the two tolerations of leaving an
+// unresponsive Node, then the Even spread over Zones and over the capacity-type
+// label, each in full.
+func spreadOverOnDemandAndSpotCarries() string {
+	return theLabsTolerationCarried("node.kubernetes.io/not-ready") +
+		theLabsTolerationCarried("node.kubernetes.io/unreachable") +
+		aSettingCarried + "topologySpreadConstraints: {topologyKey: topology.kubernetes.io/zone, maxSkew: 1, " +
+		"whenUnsatisfiable: DoNotSchedule, nodeTaintsPolicy: Honor}" +
+		aSettingCarried + "topologySpreadConstraints: {topologyKey: capacity-type, maxSkew: 1, " +
+		"whenUnsatisfiable: DoNotSchedule, nodeTaintsPolicy: Honor}"
+}
+
+// The lines a run of the General Pods stay off gpu Nodes Scenario is read by: its
+// heading, the Topology line naming the gpu NodePool's taint after its capacity,
+// the Workload line of the specification tolerating that taint by its key,
+// operator, value and effect and no waiting time, and the Thens counting the Pods
+// on each NodePool for each Workload in turn. Six general Pods fill the six
+// general Nodes and none reaches a gpu Node, and three tolerating Pods, each
+// asking for more than a general Node holds, take the three gpu Nodes.
+const (
+	generalPodsStayOffGpuNodesReported = aScenarioHeading + "general-pods-stay-off-gpu-nodes"
+	theTaintedGpuNodePoolDeclared      = "Given a Topology of 3 Zones of " +
+		"a NodePool general of 2 Standard Nodes holding 16 cpu, 64Gi memory and 10 Pods each; " +
+		"a NodePool gpu of 1 GPU Node holding 32 cpu, 128Gi memory and 10 Pods each, " +
+		"tainted nvidia.com/gpu=present:NoSchedule"
+	sixGeneralPodsDeclared = "Given a Workload checkout of 6 Pods declaring Resilient placement, " +
+		"each Pod starting in 500ms to 1s"
+	toleratingGpuNodesDeclared = "Given a Workload inference of 3 Pods declaring Tolerating GPU Nodes, " +
+		"each Pod starting in 500ms to 1s"
+	sixPodsOnTheGeneralNodePoolJudged = "Then 6 Pods on the NodePool general"
+	noPodOnTheGpuNodePoolJudged       = "Then 0 Pods on the NodePool gpu"
+	threePodsOnTheGpuNodePoolJudged   = "Then 3 Pods on the NodePool gpu"
+	noPodOnTheGeneralNodePoolJudged   = "Then 0 Pods on the NodePool general"
+)
+
+// toleratingGpuNodesCarries are the lines the Given declaring Tolerating GPU
+// Nodes reports under it: the two tolerations of leaving an unresponsive Node,
+// the toleration of the gpu taint with its value and no waiting time, and the
+// request only a gpu Node has room for.
+func toleratingGpuNodesCarries() string {
+	return theLabsTolerationCarried("node.kubernetes.io/not-ready") +
+		theLabsTolerationCarried("node.kubernetes.io/unreachable") +
+		aSettingCarried + "tolerations: {key: nvidia.com/gpu, operator: Equal, value: present, effect: NoSchedule}" +
+		aSettingCarried + "resources.requests: {cpu: 24, memory: 96Gi}"
+}
+
 // theNodeCapacityDeclared is the Topology line of that Scenario: its one NodePool
 // general, stating its cpu, memory and Pod count.
 const theNodeCapacityDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Nodes holding " +
@@ -364,7 +447,8 @@ func theLineOpeningWith(reported, label string) string {
 // Resilient placement names the Even spread over Zones and over Nodes, and the
 // Given declaring a Workload of it reports both spreads in full beneath its line,
 // each value under its Kubernetes name, so a reader of the run sees what the
-// Named setting stands for (docs/prd.md REQ-SIM-016 edge case 5).
+// Named setting stands for (docs/prd.md REQ-SIM-016: a Workload declaring Resilient
+// placement reports both spreads in full beneath its Given line).
 func TestAWorkloadDeclaringResilientPlacement_ShouldReportBothSpreadsInFullBeneathItsGivenLine(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -453,6 +537,75 @@ func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndTh
 	reportShows(t, reported, threePodsPendingJudged)
 	reportShows(t, reported, capacityHeldWithNoRoomLeftJudged)
 	reportLacks(t, reported, aFindingReported)
+}
+
+// The Spot nodes stop responding Scenario runs in the same suite for the same
+// reason, and what only its run can report is the label it failed and the Nodes
+// the lab resolved from it, every spot Node and no other, with the capacity held
+// at both moments (docs/prd.md REQ-SIM-018).
+func TestSpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNinePodsOnTheOnDemandNodes(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), spotNodesStopRespondingReported)
+
+	reportShows(t, reported, theOnDemandAndSpotNodesDeclared)
+	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries())
+	reportShows(t, reported, onePodPerNodeJudged)
+	reportShows(t, reported, theSpotNodesFailReported)
+	reportShows(t, reported, theStatedRestoreTimeAwaited)
+	reportShows(t, reported, threePodsPerZoneJudged)
+	reportShows(t, reported, noPodOnTheFailedNodesJudged)
+	reportShows(t, reported, capacityHeldWhenTheSpotNodesStoppedJudged)
+	reportLacks(t, reported, aFindingReported)
+}
+
+// The Spread over on-demand and spot Scenario runs in the same suite for the same
+// reason, and what only its run can report is read off its own part of the
+// report: the labels each NodePool states on the Topology line, both spreads its
+// Workload's Pods carry, and the Thens counting Pods per Zone and per value of
+// the label, met with no Finding.
+func TestSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerLabelValue(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), spreadOverOnDemandAndSpotReported)
+
+	reportShows(t, reported, theLabelledNodePoolsDeclared)
+	reportShows(t, reported, spreadOverOnDemandAndSpotDeclared+spreadOverOnDemandAndSpotCarries())
+	reportShows(t, reported, everyPodRunningJudged)
+	reportShows(t, reported, twoPodsPerZoneJudged)
+	reportShows(t, reported, threePodsPerCapacityTypeJudged)
+	reportLacks(t, reported, aFindingReported)
+}
+
+// The General Pods stay off gpu Nodes Scenario runs in the same suite for the
+// same reason, and what only its run can report is the taint on the Topology
+// line, the toleration its second Workload's Pods carry, and the Thens counting
+// each Workload's Pods on each NodePool, met with no Finding.
+func TestGeneralPodsStayOffGpuNodes_ShouldPlaceTheGeneralPodsOnGeneralNodesAndTheTolerantPodsOnGpuNodes(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), generalPodsStayOffGpuNodesReported)
+
+	reportShows(t, reported, theTaintedGpuNodePoolDeclared)
+	reportShows(t, reported, sixGeneralPodsDeclared+resilientPlacementCarries())
+	reportShows(t, reported, sixPodsOnTheGeneralNodePoolJudged)
+	reportShows(t, reported, noPodOnTheGpuNodePoolJudged)
+	reportShows(t, reported, toleratingGpuNodesDeclared+toleratingGpuNodesCarries())
+	reportShows(t, reported, threePodsOnTheGpuNodePoolJudged)
+	reportShows(t, reported, noPodOnTheGeneralNodePoolJudged)
+	reportLacks(t, reported, aFindingReported)
+}
+
+// theScenarioSectionHeaded is the part of a report under the Scenario heading
+// named, so a line another Scenario also reports is read for this one alone.
+func theScenarioSectionHeaded(t *testing.T, reported, heading string) string {
+	t.Helper()
+
+	for _, section := range theScenarioSectionsOf(t, reported) {
+		if aScenarioHeading+theScenarioNamedIn(section) == heading {
+			return section
+		}
+	}
+	t.Fatalf("the run reports a section headed %q, but reported:\n%s", heading, reported)
+
+	return ""
 }
 
 // Every control-plane setting the lab makes is reported against the default it
@@ -649,6 +802,8 @@ func TestARunOfEveryScenario_ShouldReportEachScenariosLinesTogetherInDeclaredOrd
 	declared := []string{
 		resilientPlacementReported, nodeStopsRespondingReported,
 		zoneStopsRespondingReported, noRoomAfterAZoneStopsRespondingReported,
+		spreadOverOnDemandAndSpotReported, spotNodesStopRespondingReported,
+		generalPodsStayOffGpuNodesReported,
 	}
 
 	reported := theRunOfEveryScenario(t)

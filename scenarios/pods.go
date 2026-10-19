@@ -35,6 +35,30 @@ func DefaultPlacement() pod.Specification {
 		LeaveUnresponsiveNodes())
 }
 
+// SpreadOverOnDemandAndSpot spreads a Workload's Pods as evenly over the Zones of
+// its Topology, and over the values of the CapacityType label its NodePools
+// state, as the control plane can place them, so losing the spot Nodes takes the
+// fewest Pods with it. Its Pods start as Resilient placement's do.
+func SpreadOverOnDemandAndSpot() pod.Specification {
+	return pod.Predefined("Spread over on-demand and spot", pod.StartupMillisBetween(500, 1000),
+		LeaveUnresponsiveNodes(),
+		EvenSpreadOver(node.Zone),
+		EvenSpreadOver(CapacityType),
+	)
+}
+
+// ToleratingGPUNodes lets a Workload's Pods onto the Nodes tainted GPU, and asks
+// for more cpu and memory than a Standard Node holds, so only a GPU Node has room
+// for one of its Pods: the toleration permits them there, and the request is what
+// draws them there. Its Pods start as Resilient placement's do.
+func ToleratingGPUNodes() pod.Specification {
+	return pod.Predefined("Tolerating GPU Nodes", pod.StartupMillisBetween(500, 1000),
+		LeaveUnresponsiveNodes(),
+		pod.Toleration{Key: GPU, Operator: pod.Equal, Value: GPUPresent, Effect: pod.NoSchedule},
+		pod.Request{CPU: 24, Memory: 96 * pod.Gi},
+	)
+}
+
 // LeaveUnresponsiveNodes is the Named setting for Pods leaving a Node that
 // stopped responding after the lab's waiting time. It stands for exactly the
 // not-ready and the unreachable toleration, under their Kubernetes names, and
