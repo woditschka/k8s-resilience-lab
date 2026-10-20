@@ -1,8 +1,5 @@
-// The lab's Scenarios: All, the list a run carries out, then every Scenario as a
-// function of its own in the order All names them. Adding a Scenario is a function in this
-// file and a line in All, so the place an engineer finds the experiments in is
-// the only place a Scenario is written down, per
-// docs/adr/2026-10-03-scenarios-as-go-functions.md.
+// The lab's Scenarios, in the order All names them. Adding a Scenario is a
+// function in this file and a line in All.
 
 package scenarios
 
@@ -12,9 +9,8 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
 )
 
-// All is every Scenario of the lab, in the order a run carries them out. It is a
-// function rather than a variable, because no package of the lab holds mutable
-// process-wide state.
+// All is a function rather than a variable, because no package of the lab holds
+// mutable process-wide state.
 func All() []func(*lab.Scenario) {
 	return []func(*lab.Scenario){
 		AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode,

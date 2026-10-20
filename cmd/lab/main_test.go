@@ -21,29 +21,21 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// aVersionWithNoClusterImage is a Kubernetes version the lab cannot obtain: it is
-// a well-formed version, so it passes validation and fails at the pull, which is
-// the path edge case 4 describes.
+// A well-formed version, so it passes validation and fails at the image pull.
 const aVersionWithNoClusterImage = "1.0.0"
 
-// aValueThatIsNotAVersion is refused by validation, before the run reaches the
-// engine at all.
 const aValueThatIsNotAVersion = "latest"
 
-// versionReported and placementSettled are the lines of the run's report these
-// tests read it by. The report is the whole surface a user of the lab sees, so a
-// run is asserted through it rather than through anything the run holds inside.
+// The report is the whole surface a user of the lab sees, so a run is asserted
+// through it rather than through anything the run holds inside.
 const (
 	versionReported  = "Kubernetes version: "
 	placementSettled = "Placement settled"
 )
 
-// The lines a run of the lab's own Scenarios is read by: the Resilient placement
-// Scenario's heading under the Scenario name derived for it, the two Then Steps its
-// Placement has to meet, and what a Finding is reported under.
 const (
-	// aScenarioHeading opens each Scenario's own part of a report, which is the
-	// boundary a Timeline's count and its printed entries are read inside.
+	// A Timeline's count and its printed entries are read inside one Scenario's
+	// part of the report.
 	aScenarioHeading = "Scenario "
 
 	resilientPlacementReported = aScenarioHeading + "a-workload-placed-for-resilience"
@@ -51,48 +43,32 @@ const (
 	onePodPerNodeJudged        = "Then 1 Pod per Node"
 	aFindingReported           = "Finding"
 
-	// resilientPlacementDeclared is the Workload's own Given line, which names the
-	// predefined Pod specification its Pods are deployed with and the Startup time
-	// that specification's definition in the Scenarios' place names: the Step's name
-	// is derived from both, so a run is where the definition and the line meet.
+	// The Step's name is derived from the predefined Pod specification and the
+	// Startup time its definition names, so a run is where the definition and
+	// the line meet.
 	resilientPlacementDeclared = "Given a Workload checkout of 9 Pods declaring Resilient placement, " +
 		"each Pod starting in 500ms to 1s"
 )
 
-// The two Wait lines every Scenario of the lab reports, read by the prefix each
-// opens with: a Wait that was reached names the time it took, and how long that
-// is belongs to the run rather than to what a Scenario asserts.
+// A reached Wait names the time it took, which belongs to the run, so these
+// lines are read by prefix.
 const (
 	allNodesReadyAwaited = "Wait for all Nodes Ready, reached in "
 	allPodsReadyAwaited  = "Wait for all Pods Ready, reached in "
 
-	// theStatedRestoreTimeAwaited is how such a line closes where the Scenario
-	// stated the time the Wait must be reached in, which the Wait after a Failure
-	// does: the time it was held to follows the time it took, marked as stated, so
-	// the two are never read for one another. The seconds are the ones those
-	// Scenarios write on that line.
+	// The seconds are the ones the Failure Scenarios state on that line.
 	theStatedRestoreTimeAwaited = " of the 30s stated"
 )
 
-// The lines both Failure Scenarios share: the Given line above renamed by the
-// fewest Pods their Workload must keep Running through a Failure, and the opening
-// of the Then that judges that minimum. A declaration renames the line it is
-// written on, so the renamed Given is the one such a run reports, and the Then
-// names the minimum before the Pods it counted at each moment.
+// A declaration renames the line it is written on, so the renamed Given is the
+// one a Failure Scenario reports.
 const (
 	theRequiredCapacityDeclared = resilientPlacementDeclared + ", keeping at least 6 Pods Running"
 	theCapacityJudged           = "Then the Required Capacity held: a minimum of 6 Pods, "
 )
 
-// aSettingCarried opens each line a Workload's Given reports a setting its Pods
-// carry on: one level deeper than the Given it belongs to.
 const aSettingCarried = "\n    "
 
-// resilientPlacementCarries are the lines the Given declaring Resilient placement
-// reports under it, one per setting its Pods carry under its Kubernetes name: the
-// two tolerations the Named setting for leaving an unresponsive Node stands for,
-// at the lab's waiting time, then the Even spread its definition names over
-// Zones and over Nodes, each in full (docs/prd.md REQ-SIM-016).
 func resilientPlacementCarries() string {
 	return theLabsTolerationCarried("node.kubernetes.io/not-ready") +
 		theLabsTolerationCarried("node.kubernetes.io/unreachable") +
@@ -102,25 +78,15 @@ func resilientPlacementCarries() string {
 		"whenUnsatisfiable: DoNotSchedule, nodeTaintsPolicy: Honor}"
 }
 
-// theLabsTolerationCarried is the line reporting a toleration of that taint at
-// the lab's waiting time, read from the constant that sets it.
 func theLabsTolerationCarried(taint string) string {
 	return aSettingCarried + "tolerations: {key: " + taint + ", operator: Exists, effect: NoExecute, tolerationSeconds: " +
 		strconv.FormatInt(int64(scenario.UnresponsiveNodeWait/time.Second), 10) + "}"
 }
 
-// theRequestCarried is the line reporting the request the No room Scenario
-// customizes Resilient placement with, after the settings its definition sets.
 const theRequestCarried = aSettingCarried + "resources.requests: {cpu: 3, memory: 12Gi}"
 
-// The lines a run of the Node stops responding Scenario is read by: its heading
-// under the Scenario name derived for it, the When Step naming the Node the lab
-// picked, the Then that judges what the Failure left behind, and the counts its
-// capacity judgement states — eight Pods left Running by a Node holding one,
-// and the ninth placed again once the Placement has settled.
-//
-// theNodePickedToFail is the first Node the Scenario's Topology derives, which is
-// the pick a run has to report and has to repeat on every run.
+// theNodePickedToFail is the first Node the Topology derives, the pick a run
+// has to repeat on every run.
 const (
 	nodeStopsRespondingReported = aScenarioHeading + "a-node-that-stops-responding"
 	theNodePickedToFail         = "zone-1-node-1"
@@ -130,15 +96,8 @@ const (
 	capacityHeldWhenTheNodeStoppedJudged = theCapacityJudged + "8 at the moment of the Failure and 9 once Settled"
 )
 
-// The lines a run of the Zone stops responding Scenario is read by, in the same
-// parts: its heading, the When Step naming the Zone the lab picked, the Then
-// that judges what the Failure left in it, and the counts its capacity
-// judgement states — a lost Zone takes three of the nine Pods, so exactly the
-// minimum is left Running at that moment and all nine once the Placement has
-// settled.
-//
-// theZonePickedToFail is the first Zone the Scenario's Topology derives, which is
-// the pick a run has to report and has to repeat on every run.
+// A lost Zone takes three of the nine Pods, so exactly the minimum is left
+// Running at the moment of the Failure.
 const (
 	zoneStopsRespondingReported = aScenarioHeading + "a-zone-that-stops-responding"
 	theZonePickedToFail         = "zone-1"
@@ -148,14 +107,8 @@ const (
 	capacityHeldWhenTheZoneStoppedJudged = theCapacityJudged + "6 at the moment of the Failure and 9 once Settled"
 )
 
-// The lines a run of the No room after a Zone stops responding Scenario is read
-// by, in the same parts: its heading, the capacity its Topology declares, the
-// Wait for the Placement alone standing after the Failure, the Then counting the
-// Pods the Placement left Pending, and the counts its capacity judgement states.
-// Each Pod of this Workload asks for more than half of what a Node holds, so the
-// six Nodes still responding have room for six of the nine Pods: exactly the
-// minimum, at the moment of the Failure and once Settled, with the other three
-// left Pending.
+// Each Pod asks for more than half of what a Node holds, so the six Nodes still
+// responding have room for six of the nine Pods, leaving three Pending.
 const (
 	noRoomAfterAZoneStopsRespondingReported = aScenarioHeading + "no-room-after-a-zone-stops-responding"
 	thePlacementSettledAwaited              = "Wait for the Placement Settled, reached in "
@@ -164,12 +117,8 @@ const (
 	capacityHeldWithNoRoomLeftJudged = theCapacityJudged + "6 at the moment of the Failure and 6 once Settled"
 )
 
-// The lines a run of the Spot nodes stop responding Scenario is read by: its
-// heading, the Topology line of the two NodePools, the When Step naming the
-// label and the three spot Nodes it resolved, one in each Zone, and the counts
-// its capacity judgement states — the spot Nodes hold three of the nine Pods, so
-// exactly the minimum of six is left Running at that moment and all nine once
-// the Placement has settled (docs/prd.md REQ-SIM-018).
+// The spot Nodes hold three of the nine Pods, so exactly the minimum of six is
+// left Running at the moment of the Failure.
 const (
 	spotNodesStopRespondingReported = aScenarioHeading + "spot-nodes-that-stop-responding"
 	theOnDemandAndSpotNodesDeclared = "Given a Topology of 3 Zones of " +
@@ -181,12 +130,8 @@ const (
 	capacityHeldWhenTheSpotNodesStoppedJudged = theCapacityJudged + "6 at the moment of the Failure and 9 once Settled"
 )
 
-// The lines a run of the Spread over on-demand and spot Scenario is read by: its
-// heading, the Topology line naming both NodePools with the capacity-type label
-// each states, the Workload line of the specification spreading over Zones and
-// over that label, and the three Thens it judges the Placement by. Each Zone
-// holds one on-demand and one spot Node, so six Pods spread evenly put two in
-// each Zone and three on each capacity type (docs/prd.md REQ-SIM-017).
+// Each Zone holds one on-demand and one spot Node, so six Pods spread evenly
+// put two in each Zone and three on each capacity type.
 const (
 	spreadOverOnDemandAndSpotReported = aScenarioHeading + "a-workload-spread-over-on-demand-and-spot"
 	theLabelledNodePoolsDeclared      = "Given a Topology of 3 Zones of " +
@@ -200,10 +145,6 @@ const (
 	threePodsPerCapacityTypeJudged = "Then 3 Pods per value of capacity-type"
 )
 
-// spreadOverOnDemandAndSpotCarries are the lines the Given declaring Spread over
-// on-demand and spot reports under it: the two tolerations of leaving an
-// unresponsive Node, then the Even spread over Zones and over the capacity-type
-// label, each in full.
 func spreadOverOnDemandAndSpotCarries() string {
 	return theLabsTolerationCarried("node.kubernetes.io/not-ready") +
 		theLabsTolerationCarried("node.kubernetes.io/unreachable") +
@@ -213,12 +154,7 @@ func spreadOverOnDemandAndSpotCarries() string {
 		"whenUnsatisfiable: DoNotSchedule, nodeTaintsPolicy: Honor}"
 }
 
-// The lines a run of the General Pods stay off gpu Nodes Scenario is read by: its
-// heading, the Topology line naming the gpu NodePool's taint after its capacity,
-// the Workload line of the specification tolerating that taint by its key,
-// operator, value and effect and no waiting time, and the Thens counting the Pods
-// on each NodePool for each Workload in turn. Six general Pods fill the six
-// general Nodes and none reaches a gpu Node, and three tolerating Pods, each
+// Six general Pods fill the six general Nodes, and three tolerating Pods, each
 // asking for more than a general Node holds, take the three gpu Nodes.
 const (
 	generalPodsStayOffGpuNodesReported = aScenarioHeading + "general-pods-beside-tainted-gpu-nodes"
@@ -236,10 +172,6 @@ const (
 	noPodOnTheGeneralNodePoolJudged   = "Then 0 Pods on the NodePool general"
 )
 
-// toleratingGpuNodesCarries are the lines the Given declaring Tolerating GPU
-// Nodes reports under it: the two tolerations of leaving an unresponsive Node,
-// the toleration of the gpu taint with its value and no waiting time, and the
-// request only a gpu Node has room for.
 func toleratingGpuNodesCarries() string {
 	return theLabsTolerationCarried("node.kubernetes.io/not-ready") +
 		theLabsTolerationCarried("node.kubernetes.io/unreachable") +
@@ -247,60 +179,42 @@ func toleratingGpuNodesCarries() string {
 		aSettingCarried + "resources.requests: {cpu: 24, memory: 96Gi}"
 }
 
-// theNodeCapacityDeclared is the Topology line of that Scenario: its one NodePool
-// general, stating its cpu, memory and Pod count.
 const theNodeCapacityDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Nodes holding " +
 	"4 cpu, 16Gi memory and 10 Pods each"
 
-// theStandardNodesDeclared is the Topology line of the Scenarios naming
-// Standard: its one NodePool general, by the name and the cpu, memory and Pod
-// count the Scenarios' definition of Standard gives. aStandardNodeSetting is the
-// run-start line the lab reported Standard on while it defined Standard itself.
+// aStandardNodeSetting is the run-start line the lab reported Standard on while
+// it defined Standard itself.
 const (
 	theStandardNodesDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Standard Nodes holding " +
 		"16 cpu, 64Gi memory and 10 Pods each"
 	aStandardNodeSetting = "Standard Node:"
 )
 
-// The labels a run opens each of its control-plane settings with. What such a
-// line has to carry is the pair the declaring package holds — the value the lab
-// sets and the default it replaces — rather than a wording this suite repeats.
+// A line is checked for the value and the default the declaring package holds
+// rather than for a wording this suite repeats.
 const (
 	unresponsiveNodeSetting = "unresponsive Node:"
 	nodeHeartbeatSetting    = "Node heartbeats:"
 	nodeEvictionSetting     = "Node eviction rate:"
 
-	// The lab's own waiting time is reported beside them under a label of its own,
-	// because it is the longest the lab itself waits rather than a setting it makes
-	// on the control plane.
 	labWaitingTime = "lab waiting time:"
 
-	// aPodStartupTimeSetting is the label a Startup time of the lab's own was
-	// reported under, which a run no longer opens a line with: every Pod
-	// specification names its own (docs/prd.md REQ-SIM-015).
+	// A run no longer opens a line with this label: every Pod specification
+	// names its own Startup time.
 	aPodStartupTimeSetting = "Pod startup time:"
 )
 
-// wholeTimelineAsked is the argument an engineer asks a run for every entry of
-// its Timelines with, and noEntryPrinted is how many entry lines a run that was
-// not asked prints.
 const (
 	wholeTimelineAsked = "--whole-timeline"
 	noEntryPrinted     = 0
 )
 
-// theWorkloadOfEveryScenario opens the name of each Pod the control plane makes
-// for the Workload every Scenario of the lab deploys, named on its Given line.
 const theWorkloadOfEveryScenario = "checkout-"
 
-// noPodShared is how many Pods the Timelines of two Scenarios of one run hold
-// in common, each Scenario having a cluster of its own.
 const noPodShared = 0
 
-// requireEngine is the one guard every test that needs a container engine goes
-// through; on a machine where none answers the calling test fails here, naming
-// why, and it fails on its own, so every test that needs no engine still runs
-// (docs/testing-principles.md § Mocking Policy).
+// requireEngine fails only the calling test where no engine answers, so every
+// test that needs no engine still runs.
 func requireEngine(t *testing.T) {
 	t.Helper()
 
@@ -309,9 +223,8 @@ func requireEngine(t *testing.T) {
 	}
 }
 
-// aRun runs the lab with the arguments given and returns what it reported. It
-// files its Timelines under a directory of the test's own, so a suite run leaves
-// nothing in the repository.
+// aRun files its Timelines under the test's own directory, so a suite run
+// leaves nothing in the repository.
 func aRun(t *testing.T, arguments ...string) (string, error) {
 	t.Helper()
 
@@ -321,9 +234,7 @@ func aRun(t *testing.T, arguments ...string) (string, error) {
 	return reported.String(), err
 }
 
-// sharedRunTimelines is the folder the shared run below files its Timelines
-// under. TestMain makes it before the first test and removes it after the last,
-// so a suite run leaves nothing behind and no single test's lifetime owns it.
+// TestMain owns this folder, because the shared run outlives any single test.
 var sharedRunTimelines string
 
 func TestMain(m *testing.M) {
@@ -342,12 +253,9 @@ func TestMain(m *testing.M) {
 	os.Exit(passed)
 }
 
-// aRunOfEveryScenario is one run of the lab with no arguments, carried out the
-// first time a test asks and shared by every test that judges such a run's
-// lines, so the suite provisions every Scenario's cluster once rather than once
-// per test. It is shared because it is immutable: a report, an error, and filed
-// Timelines no test writes (docs/testing-principles.md § Never Share Mutable
-// Fixtures). It runs under its own context, because it outlives the test that
+// aRunOfEveryScenario is shared so the suite provisions every Scenario's
+// cluster once rather than once per test. Sharing is safe because the result is
+// immutable. It runs under its own context, because it outlives the test that
 // starts it.
 var aRunOfEveryScenario = sync.OnceValues(func() (string, error) {
 	var reported, warned bytes.Buffer
@@ -356,9 +264,6 @@ var aRunOfEveryScenario = sync.OnceValues(func() (string, error) {
 	return reported.String(), err
 })
 
-// theRunOfEveryScenario is what the shared run reported, for a test that judges
-// it. The test fails where no engine answers, and where a Scenario of the lab
-// reported a Finding, ended at a Step or could not be carried out.
 func theRunOfEveryScenario(t *testing.T) string {
 	t.Helper()
 
@@ -371,9 +276,6 @@ func theRunOfEveryScenario(t *testing.T) string {
 	return reported
 }
 
-// reportShows and reportLacks are how a run's report is read: a line that is
-// missing, or one that should not be there, is named against the whole report,
-// since the report is what a user would be looking at.
 func reportShows(t *testing.T, reported, line string) {
 	t.Helper()
 
@@ -390,10 +292,8 @@ func reportLacks(t *testing.T, reported, line string) {
 	}
 }
 
-// theScenarioSectionsOf are the parts of a report that are one Scenario each. A
-// run carries out every Scenario of the lab and reports each under its own
-// heading, each with a Timeline of its own; a reported entry count and the
-// entries printed under it are therefore only comparable inside one section.
+// A reported entry count and the entries printed under it are only comparable
+// inside one Scenario's section.
 func theScenarioSectionsOf(t *testing.T, reported string) []string {
 	t.Helper()
 
@@ -405,18 +305,14 @@ func theScenarioSectionsOf(t *testing.T, reported string) []string {
 	return sections[1:]
 }
 
-// theScenarioNamedIn is the Scenario name the heading of one such section carries,
-// which is what names the case reading it.
 func theScenarioNamedIn(section string) string {
 	named, _, _ := strings.Cut(section, ",")
 
 	return named
 }
 
-// reportLineNames asserts the line a run opens with label names every one of
-// these values. A setting is read this way rather than as a whole line, because
-// what the run owes a reader is the pair of values and not the wording around
-// them.
+// reportLineNames reads a setting by its values rather than as a whole line,
+// because the run owes a reader the values and not the wording around them.
 func reportLineNames(t *testing.T, reported, label string, named ...string) {
 	t.Helper()
 
@@ -432,8 +328,6 @@ func reportLineNames(t *testing.T, reported, label string, named ...string) {
 	}
 }
 
-// theLineOpeningWith is the reported line that starts with label, and empty when
-// the report holds none.
 func theLineOpeningWith(reported, label string) string {
 	for line := range strings.SplitSeq(reported, "\n") {
 		if strings.HasPrefix(line, label) {
@@ -444,11 +338,6 @@ func theLineOpeningWith(reported, label string) string {
 	return ""
 }
 
-// Resilient placement names the Even spread over Zones and over Nodes, and the
-// Given declaring a Workload of it reports both spreads in full beneath its line,
-// each value under its Kubernetes name, so a reader of the run sees what the
-// Named setting stands for (docs/prd.md REQ-SIM-016: a Workload declaring Resilient
-// placement reports both spreads in full beneath its Given line).
 func TestAWorkloadDeclaringResilientPlacement_ShouldReportBothSpreadsInFullBeneathItsGivenLine(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -456,11 +345,8 @@ func TestAWorkloadDeclaringResilientPlacement_ShouldReportBothSpreadsInFullBenea
 	reportShows(t, reported, resilientPlacementDeclared+resilientPlacementCarries())
 }
 
-// This is where the lab's own Scenarios run: on a Simulated Cluster the run
-// provisions for each of them, which is what makes the Placement the control
-// plane's own doing. A Scenario has no test of its own — it is itself the check —
-// so the command's suite is what fails when one reports a Finding or ends at a
-// Step (docs/adr/2026-10-03-scenarios-as-go-functions.md).
+// A Scenario has no test of its own, so the command's suite is what fails when
+// one reports a Finding or ends at a Step.
 func TestResilientPlacementWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNode(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -474,10 +360,6 @@ func TestResilientPlacementWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNo
 	reportLacks(t, reported, aFindingReported)
 }
 
-// The Node stops responding Scenario runs in the same suite and for the same
-// reason: the Placement it judges after the Failure is the control plane's own
-// doing, and the Scenario is itself the check. Its When Step is read too,
-// because the Node the lab picked is something only the run can report.
 func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFailedNode(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -494,13 +376,8 @@ func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFai
 	reportLacks(t, reported, aFindingReported)
 }
 
-// The Zone stops responding Scenario runs in the same suite for the same reason,
-// and the Zone the lab picked is read out of its When Step: the Scenario names
-// no Zone, so which one stopped is something only the run can report. The count
-// of Pods per Zone is not read after the Failure — two Zones carry nine Pods,
-// so the Placement is skewed and the Scenario judges the capacity alone, by
-// hand and against the minimum its Workload declares (docs/prd.md REQ-SIM-008,
-// REQ-SIM-010).
+// Pods per Zone are not read after the Failure: two Zones carry nine Pods, so
+// the Placement is skewed and the Scenario judges the capacity alone.
 func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -516,12 +393,6 @@ func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *tes
 	reportLacks(t, reported, aFindingReported)
 }
 
-// The Scenario of a Workload the Nodes still responding have no room for runs in
-// the same suite for the same reason, and what only a run can report is where the
-// control plane settles: the Wait after the Failure holds for the Placement alone,
-// so it is reached with the three Pods that no longer fit left Pending, and the
-// Required Capacity of six is met at both moments it is judged at (docs/prd.md
-// REQ-SIM-011).
 func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -539,10 +410,6 @@ func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndTh
 	reportLacks(t, reported, aFindingReported)
 }
 
-// The Spot nodes stop responding Scenario runs in the same suite for the same
-// reason, and what only its run can report is the label it failed and the Nodes
-// the lab resolved from it, every spot Node and no other, with the capacity held
-// at both moments (docs/prd.md REQ-SIM-018).
 func TestSpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNinePodsOnTheOnDemandNodes(t *testing.T) {
 	t.Parallel()
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), spotNodesStopRespondingReported)
@@ -558,11 +425,6 @@ func TestSpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNine
 	reportLacks(t, reported, aFindingReported)
 }
 
-// The Spread over on-demand and spot Scenario runs in the same suite for the same
-// reason, and what only its run can report is read off its own part of the
-// report: the labels each NodePool states on the Topology line, both spreads its
-// Workload's Pods carry, and the Thens counting Pods per Zone and per value of
-// the label, met with no Finding.
 func TestSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerLabelValue(t *testing.T) {
 	t.Parallel()
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), spreadOverOnDemandAndSpotReported)
@@ -575,10 +437,6 @@ func TestSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerLabelValu
 	reportLacks(t, reported, aFindingReported)
 }
 
-// The General Pods stay off gpu Nodes Scenario runs in the same suite for the
-// same reason, and what only its run can report is the taint on the Topology
-// line, the toleration its second Workload's Pods carry, and the Thens counting
-// each Workload's Pods on each NodePool, met with no Finding.
 func TestGeneralPodsStayOffGpuNodes_ShouldPlaceTheGeneralPodsOnGeneralNodesAndTheTolerantPodsOnGpuNodes(t *testing.T) {
 	t.Parallel()
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), generalPodsStayOffGpuNodesReported)
@@ -593,8 +451,6 @@ func TestGeneralPodsStayOffGpuNodes_ShouldPlaceTheGeneralPodsOnGeneralNodesAndTh
 	reportLacks(t, reported, aFindingReported)
 }
 
-// theScenarioSectionHeaded is the part of a report under the Scenario heading
-// named, so a line another Scenario also reports is read for this one alone.
 func theScenarioSectionHeaded(t *testing.T, reported, heading string) string {
 	t.Helper()
 
@@ -608,12 +464,6 @@ func theScenarioSectionHeaded(t *testing.T, reported, heading string) string {
 	return ""
 }
 
-// Every control-plane setting the lab makes is reported against the default it
-// replaces, so a reader of a run can tell which of the timings it watched are
-// the lab's doing and which are Kubernetes' own. The lab's own waiting time is
-// reported beside them, because a time a Wait states is refused against it and an
-// engineer writing one cannot otherwise see the number. One run is read for all
-// four, because each of them holds for the whole run.
 func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaitingTime(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -627,9 +477,6 @@ func TestARun_ShouldReportTheSettingsItMakesAgainstTheirDefaultsAndItsOwnWaiting
 	reportLineNames(t, reported, labWaitingTime, scenario.WaitingTime.String())
 }
 
-// The lab holds no Startup time of its own, so a run's start reports none beside
-// its settings: each Pod specification names its own, and the Given line
-// declaring a Workload reports it (docs/prd.md REQ-SIM-015).
 func TestARunsStart_ShouldReportNoStartupTimeOfTheLabsOwn(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -637,9 +484,6 @@ func TestARunsStart_ShouldReportNoStartupTimeOfTheLabsOwn(t *testing.T) {
 	reportLacks(t, reported, aPodStartupTimeSetting)
 }
 
-// The lab defines no Node capacity of its own, so a run's start reports none
-// beside its settings: the Scenarios define each Named Node capacity, and the
-// Given line naming one reports what it stands for (docs/prd.md REQ-SIM-015).
 func TestARunsStart_ShouldReportNoNodeCapacityOfTheLabsOwn(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -647,9 +491,6 @@ func TestARunsStart_ShouldReportNoNodeCapacityOfTheLabsOwn(t *testing.T) {
 	reportLacks(t, reported, aStandardNodeSetting)
 }
 
-// A NodePool naming Standard reports, on the Given line declaring it, the name
-// and what Standard stands for: cpu, memory, then Pod count, the order every
-// reported capacity names (docs/prd.md REQ-SIM-015).
 func TestARunOfANodePoolNamingStandard_ShouldReportWhatStandardStandsForOnItsGivenLine(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
@@ -701,8 +542,8 @@ func TestATimelineSummary_ShouldOpenWithTheEntryCountAndTheFileItWasFiledAt(t *t
 func TestARemovedSimulatedCluster_ShouldLeaveItsTimelineFileReadable(t *testing.T) {
 	t.Parallel()
 
-	// Every Simulated Cluster a run provisions is removed before the run returns,
-	// so by the time the file below is opened the cluster it describes is gone.
+	// Every cluster is removed before the run returns, so the file below
+	// outlives the cluster it describes.
 	reported := theRunOfEveryScenario(t)
 
 	filed := theTimelineFiledBy(t, reported)
@@ -759,8 +600,8 @@ func TestARunNamingAVersion_ShouldMirrorAndReportThatVersion(t *testing.T) {
 	t.Parallel()
 	requireEngine(t)
 	named := cluster.DefaultKubernetesVersion().String()
-	// The version is named without its leading v, so the report also shows that
-	// the run mirrors the validated version rather than the string it was given.
+	// The version is named without its leading v, so the report shows the
+	// validated version rather than the string given.
 	asTheRunNamesIt := strings.TrimPrefix(named, "v")
 
 	reported, err := aRun(t, "--k8s-version", asTheRunNamesIt)
@@ -811,10 +652,9 @@ func TestARunOfEveryScenario_ShouldReportEachScenariosLinesTogetherInDeclaredOrd
 	expect.Expect(t, theHeadingsOf(t, reported)).To(expect.Equal(declared))
 }
 
-// Node names are derived from the Topology, and the lab names each Pod it probes
-// a Node with after that Node, so every cluster of a run names those alike. The
-// names of a Workload's Pods are each control plane's own, which makes them what
-// shows whether one Scenario's record reached into another's cluster.
+// Node names are derived from the Topology, so every cluster names them alike;
+// Pod names are each control plane's own, which makes them what shows whether
+// one Scenario's record reached into another's cluster.
 func TestScenariosCarriedOutAtOnce_ShouldEachNameOnlyTheirOwnNodesAndPods(t *testing.T) {
 	t.Parallel()
 
@@ -824,7 +664,6 @@ func TestScenariosCarriedOutAtOnce_ShouldEachNameOnlyTheirOwnNodesAndPods(t *tes
 	expect.Expect(t, thePodsFiledByMoreThanOneScenario(t, reported)).To(expect.HaveLen[string](noPodShared))
 }
 
-// theHeadingsOf are the Scenario headings of a report, in the order printed.
 func theHeadingsOf(t *testing.T, reported string) []string {
 	t.Helper()
 
@@ -836,8 +675,6 @@ func theHeadingsOf(t *testing.T, reported string) []string {
 	return headings
 }
 
-// theClustersReportedPerScenario is the Simulated Cluster each Scenario's heading
-// names, and theClustersFiledPerScenario the one its filed Timeline names.
 func theClustersReportedPerScenario(t *testing.T, reported string) map[string]string {
 	t.Helper()
 
@@ -869,8 +706,6 @@ func theClustersFiledPerScenario(t *testing.T, reported string) map[string]strin
 	return clusters
 }
 
-// thePodsFiledByMoreThanOneScenario are the Workload's Pods whose changes the
-// filed Timeline of more than one Scenario holds.
 func thePodsFiledByMoreThanOneScenario(t *testing.T, reported string) []string {
 	t.Helper()
 
@@ -924,9 +759,6 @@ func TestARunNamingOneScenario_ShouldReportItAsARunOfEveryScenarioReportsIt(t *t
 	expect.Expect(t, theScenarioSectionsOf(t, alone)[0]).To(expect.Equal(theScenarioSectionsOf(t, amongOthers)[0]))
 }
 
-// aScenarioThatHeld and aScenarioWhoseClusterDidNotStart are two Scenarios of one
-// run as the Runner hands them back: one that reported, and one the engine could
-// not start a Simulated Cluster for, which reported nothing of its own.
 func aScenarioThatHeld() lab.Carried {
 	return lab.Carried{Outcome: lab.Outcome{
 		Name: theScenarioReported, Cluster: itsCluster,
@@ -943,8 +775,6 @@ func aScenarioWhoseClusterDidNotStart() lab.Carried {
 	}
 }
 
-// whatTheRunReportsForEach is what a run writes about every Scenario it carried
-// out, and the failure it exits with.
 func whatTheRunReportsForEach(t *testing.T, carried []lab.Carried) (string, error) {
 	t.Helper()
 
@@ -954,10 +784,8 @@ func whatTheRunReportsForEach(t *testing.T, carried []lab.Carried) (string, erro
 	return reported.String(), err
 }
 
-// The Outcomes that TestAScenarioThatFailsPartWay_ and
-// TestATimelineThatCannotBeWritten_ report are built here rather than run,
-// because a Scenario whose Steps fail part-way cannot be written as a Scenario
-// source: the Scenarios' place holds the lab's own experiments, which pass.
+// These Outcomes are built rather than run, because a Scenario whose Steps fail
+// part-way cannot be written as a Scenario source.
 const (
 	theScenarioReported = "a-workload-placed-for-resilience"
 	itsCluster          = "k8s-resilience-lab-a-workload-placed-for-resilience-7f3a9c"
@@ -972,8 +800,6 @@ const (
 	whyTheClusterDidNotStart = "the Scenario " + theScenarioNotStarted + ": start the Simulated Cluster: port already allocated"
 )
 
-// The changes the Timelines above hold: a Node the Topology brought up, and the
-// Placement the control plane reported for a Pod.
 const (
 	whenTheNodeWasAdded    = 120 * time.Millisecond
 	theNodeAdded           = "zone-1-node-1"
@@ -985,12 +811,8 @@ const (
 	whereThePodWasPlaced   = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-1-node-1"
 )
 
-// theScenarioRecorded is what the header of a filed Timeline names its Scenario
-// in, which is how a file read back is recognised as the right one.
 const theScenarioRecorded = `"scenario":"` + theScenarioReported + `"`
 
-// What a Timeline is read out of a report by: the line it is reported under, and
-// where that line names the file it was filed at.
 const (
 	onACluster       = ", on "
 	timelineReported = "Timeline, "
@@ -998,8 +820,6 @@ const (
 	filedAt          = ", filed at "
 )
 
-// aTopologyStep and aThenStep are the Steps the built Outcomes report, named the
-// way the Resilient placement Scenario names its own.
 func aTopologyStep() lab.Step {
 	return lab.Step{Kind: lab.GivenStep, Name: aTopologyStepName}
 }
@@ -1008,8 +828,6 @@ func aThenStep() lab.Step {
 	return lab.Step{Kind: lab.ThenStep, Name: theThenStepName}
 }
 
-// aTimelineOfTwoChanges is the record the built Outcomes carry: as much of a
-// Timeline as a report needs to be read by.
 func aTimelineOfTwoChanges() scenario.Timeline {
 	return scenario.NewTimeline([]scenario.Entry{
 		{
@@ -1023,8 +841,6 @@ func aTimelineOfTwoChanges() scenario.Timeline {
 	})
 }
 
-// whatTheRunReportsFor is what a run asked for the setting given writes about
-// one Scenario's Outcome, which is the surface a user reads a Timeline from.
 func whatTheRunReportsFor(t *testing.T, outcome lab.Outcome, asked runSetting) string {
 	t.Helper()
 
@@ -1034,16 +850,12 @@ func whatTheRunReportsFor(t *testing.T, outcome lab.Outcome, asked runSetting) s
 	return reported.String()
 }
 
-// theSummaryAlone is what a run was asked to print when it was given no
-// argument about its Timelines. It names no Kubernetes version, because no
-// report reads one.
 func theSummaryAlone() runSetting {
 	return runSetting{}
 }
 
-// reportShowsTheSummary asserts every line of a Timeline's summary is in the
-// report, in the form the summary itself reads as. What those lines say is
-// internal/scenario's own to assert; this is that the run printed them.
+// What the summary lines say is internal/scenario's to assert; this asserts
+// only that the run printed them.
 func reportShowsTheSummary(t *testing.T, reported string, recorded scenario.Timeline) {
 	t.Helper()
 
@@ -1052,9 +864,6 @@ func reportShowsTheSummary(t *testing.T, reported string, recorded scenario.Time
 	}
 }
 
-// theEntriesPrintedIn are the times the entries of a printed Timeline were
-// received, read out of the report line by line, because the report is the whole
-// surface a user sees.
 func theEntriesPrintedIn(t *testing.T, reported string) []float64 {
 	t.Helper()
 
@@ -1079,8 +888,6 @@ func theEntriesPrintedIn(t *testing.T, reported string) []float64 {
 	return received
 }
 
-// theEntryCountReportedIn is how many entries the run says the Timeline holds,
-// which every printed and every filed entry is counted against.
 func theEntryCountReportedIn(t *testing.T, reported string) int {
 	t.Helper()
 
@@ -1098,10 +905,8 @@ func theEntryCountReportedIn(t *testing.T, reported string) int {
 	return held
 }
 
-// theTimelineFiledBy are the lines of the file a run says it filed its Timeline
-// at. Taking the path out of the report is what asserts the run names where the
-// record went, and reading it afterwards is what asserts the record outlives the
-// Simulated Cluster it describes.
+// Reading the file back asserts the record outlives the Simulated Cluster it
+// describes.
 func theTimelineFiledBy(t *testing.T, reported string) []string {
 	t.Helper()
 
@@ -1119,7 +924,6 @@ func theTimelineFiledBy(t *testing.T, reported string) []string {
 	return strings.Split(strings.TrimSuffix(string(filed), "\n"), "\n")
 }
 
-// expectNamed asserts an error names what a reader needs to act on it.
 func expectNamed(t *testing.T, err error, named string) {
 	t.Helper()
 

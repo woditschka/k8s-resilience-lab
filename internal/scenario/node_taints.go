@@ -7,35 +7,26 @@ import (
 	"strings"
 )
 
-// NoSchedule keeps every Pod not tolerating the taint off the Node, and leaves
-// the Pods already on it there. It is the one effect a NodePool's taint takes,
-// per docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+// NoSchedule keeps every Pod not tolerating the taint off the Node and leaves
+// the Pods already on it. It is the one effect a NodePool's taint may take.
 const NoSchedule TaintEffect = "NoSchedule"
 
-// controlPlanesTaintPrefix is the prefix of every taint key the control plane
-// sets on a Node from its conditions, the not-ready and the unreachable taint
-// among them. A NodePool states none, so no stated taint stands in for a Failure.
+// A NodePool states no taint under this prefix, so no stated taint stands in
+// for a Failure.
 const controlPlanesTaintPrefix = "node.kubernetes.io/"
 
-// Taint is one taint a NodePool states its Nodes carry, under Kubernetes' names:
-// its key, its value and the effect it has on a Pod not tolerating it.
 type Taint struct {
 	Key    string
 	Value  string
 	Effect TaintEffect
 }
 
-// NodeTaints are the taints a NodePool states its Nodes carry, held in key
-// order. The zero value holds none.
 type NodeTaints struct {
 	taints []Taint
 }
 
-// NewNodeTaints builds the taints stated, refusing a taint leaving out a field,
-// one of an effect other than NoSchedule, one under a key the control plane
-// sets, a key or value Kubernetes cannot hold, and one key stated twice. The
-// first refusal in key order is the one given, so the same taints are always
-// refused alike.
+// NewNodeTaints gives the first refusal in key order, so the same taints are
+// always refused alike.
 func NewNodeTaints(stated ...Taint) (NodeTaints, error) {
 	taints := slices.SortedStableFunc(slices.Values(stated), byKey)
 	for at, taint := range taints {
@@ -50,12 +41,10 @@ func NewNodeTaints(stated ...Taint) (NodeTaints, error) {
 	return NodeTaints{taints: taints}, nil
 }
 
-// byKey orders two taints by their keys.
 func byKey(a, b Taint) int {
 	return cmp.Compare(a.Key, b.Key)
 }
 
-// refusalOfTaint is why one stated taint is refused, or nil where it is not.
 func refusalOfTaint(taint Taint) error {
 	for _, field := range []struct {
 		name    string
@@ -91,24 +80,19 @@ func refusalOfTaint(taint Taint) error {
 	return nil
 }
 
-// IsControlPlanesTaint reports whether key is one the control plane sets on a
-// Node from its conditions, which a NodePool states none of.
 func IsControlPlanesTaint(key string) bool {
 	return strings.HasPrefix(key, controlPlanesTaintPrefix)
 }
 
-// taintStatedAgain is the refusal of a key a NodePool states a taint under twice.
 func taintStatedAgain(key string) error {
 	return fmt.Errorf("a NodePool states each taint key once, so the key %q stated again is refused", key)
 }
 
-// String is the taint as the Topology's Given line reports it, as kubectl writes
-// one: key=value:Effect.
+// String writes the taint as kubectl does: key=value:Effect.
 func (t Taint) String() string {
 	return t.Key + "=" + t.Value + ":" + string(t.Effect)
 }
 
-// Adding is these taints and the ones added, refusing a key both state.
 func (t NodeTaints) Adding(added NodeTaints) (NodeTaints, error) {
 	for _, taint := range added.taints {
 		if slices.ContainsFunc(t.taints, func(held Taint) bool { return held.Key == taint.Key }) {
@@ -119,13 +103,12 @@ func (t NodeTaints) Adding(added NodeTaints) (NodeTaints, error) {
 	return NodeTaints{taints: slices.SortedStableFunc(slices.Values(slices.Concat(t.taints, added.taints)), byKey)}, nil
 }
 
-// Taints are every taint held, in key order.
 func (t NodeTaints) Taints() []Taint {
 	return slices.Clone(t.taints)
 }
 
-// Equal reports whether two sets of taints hold the same taints. It is the
-// equality go-cmp compares through, since the type's field is unexported.
+// Equal is the equality go-cmp compares through, since the type's field is
+// unexported.
 func (t NodeTaints) Equal(other NodeTaints) bool {
 	return slices.Equal(t.taints, other.taints)
 }

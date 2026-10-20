@@ -7,16 +7,11 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 )
 
-// someElapsed is how long after the record started the entries below were
-// received, and elapsedAsRead is how that time reads in a printed line.
 const (
 	someElapsed   = 3470 * time.Millisecond
 	elapsedAsRead = "+3.470s"
 )
 
-// The values the entries below name: the Pod a Placement was reported for, the
-// reason the control plane gave for it, the Workload and the Node a change was
-// about, and the gap a Timeline notes about itself.
 const (
 	aPodName         = "web-5d8f9b7c6-2xk4m"
 	scheduledReason  = "Scheduled"
@@ -27,10 +22,8 @@ const (
 	aStreamGap       = "the Pod stream closed and could not be re-opened"
 )
 
-// The Topology, the Workloads and the Pods the summaries below are read
-// against: the Nodes the lab brought up, a probe Pod of its own provisioning,
-// two Workloads whose names nest, the Pods placed for them, and the replica set
-// the control plane made for the first Workload.
+// The two Workload names nest, and a probe Pod belongs to provisioning rather
+// than to either.
 const (
 	someNodeCapacity        = "4 cpu, 16Gi memory and 10 Pods"
 	aSecondNodeName         = "zone-3-node-1"
@@ -41,8 +34,6 @@ const (
 	aReplicaSetName         = aWorkloadName + "-5d8f9b7c6"
 )
 
-// The words the control plane gave about those Workloads and Pods: how much of
-// each Workload it reported ready, and why it left a Pod Pending.
 const (
 	noneOfTwoReady = "0 of 2 Pods ready"
 	twoOfTwoReady  = "2 of 2 Pods ready"
@@ -53,7 +44,6 @@ const (
 	refusedMessage = "0/2 nodes are available: 2 node(s) didn't match pod topology spread constraints"
 )
 
-// When each of those changes was received, and how that time reads in a summary.
 const (
 	whenTheFirstNodeWasReady = 120 * time.Millisecond
 	whenTheLastNodeWasReady  = 220 * time.Millisecond
@@ -76,8 +66,6 @@ const (
 	workloadReadyAsRead  = "3.400s"
 )
 
-// noPodLeftPending and noWorkloadDeployed are how a summary says a Scenario left
-// nothing to name.
 const (
 	noPodLeftPending   = "Pending   none"
 	noWorkloadDeployed = "Workload  none"
@@ -348,8 +336,8 @@ func TestAScenarioWithTwoWorkloads_ShouldGiveEachWorkloadItsOwnCountAndPodLines(
 }
 
 func TestAnEntryNamingNoObjectTheSummaryGroupsBy_ShouldReadInTheEntryCountAlone(t *testing.T) {
-	// The count is every entry the Timeline holds: the four grouped under a Node,
-	// a Workload and a Pod below, and the fifth that is grouped under none.
+	// Four entries are grouped under a Node, a Workload and a Pod, and the
+	// fifth under none.
 	const everyEntryRecorded = 5
 
 	ungrouped := map[string]Entry{
@@ -397,8 +385,7 @@ func TestAnEntryNamingNoObjectTheSummaryGroupsBy_ShouldReadInTheEntryCountAlone(
 	}
 }
 
-// anEntry and aDifferentEntry are entries whose values do not matter to the test
-// that asks for one, only that the two are not the same entry.
+// Only that the two entries differ matters.
 func anEntry() Entry {
 	return Entry{Elapsed: someElapsed, Change: ChangeNoted, Detail: aStreamGap}
 }

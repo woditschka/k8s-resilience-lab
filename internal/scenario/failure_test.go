@@ -10,30 +10,21 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// theTopologyAFailureIsResolvedAgainst is the shape of the Topology the Failures
-// below are resolved against: small enough for a reader to hold every derived
-// name at once, and holding more than one Node per Zone, so the first Nodes of
-// the derivation and the first Nodes of a Zone are not the same set.
+// More than one Node per Zone, so the first Nodes of the derivation and the
+// first Nodes of a Zone are not the same set.
 const (
 	twoZones        = 2
 	twoNodesPerZone = 2
 
-	// everyNode is how many Nodes that Topology holds, which is the largest
-	// Failure it admits.
 	everyNode = twoZones * twoNodesPerZone
 
-	// everyZone is how many Zones that Topology holds, which is the largest Zone
-	// Failure it admits.
 	everyZone = twoZones
 
-	// oneNode and twoNodes are the counts a Failure is asked for below, and oneZone
-	// the count a Zone Failure is asked for.
 	oneNode  = 1
 	twoNodes = 2
 	oneZone  = 1
 )
 
-// aTopologyOfTwoZones is the Topology every Failure below is resolved against.
 func aTopologyOfTwoZones(t *testing.T) scenario.Topology {
 	t.Helper()
 
@@ -45,7 +36,6 @@ func aTopologyOfTwoZones(t *testing.T) scenario.Topology {
 	return topology
 }
 
-// aFailureOf is the Failure stopping count Nodes of that Topology.
 func aFailureOf(t *testing.T, topology scenario.Topology, count int) scenario.NodeFailure {
 	t.Helper()
 
@@ -57,7 +47,6 @@ func aFailureOf(t *testing.T, topology scenario.Topology, count int) scenario.No
 	return failure
 }
 
-// aZoneFailureOf is the Failure stopping count Zones of that Topology.
 func aZoneFailureOf(t *testing.T, topology scenario.Topology, count int) scenario.ZoneFailure {
 	t.Helper()
 
@@ -69,9 +58,8 @@ func aZoneFailureOf(t *testing.T, topology scenario.Topology, count int) scenari
 	return failure
 }
 
-// theFirstZonesOf and theNodesOfTheFirstZonesOf are the Zones a Zone Failure of
-// count stops and the Nodes it stops in them, derived here rather than written
-// out, so the expectation follows the Topology that is asked.
+// Derived here rather than written out, so the expectation follows the Topology
+// asked.
 func theFirstZonesOf(topology scenario.Topology, count int) []string {
 	return topology.Zones()[:count]
 }
@@ -89,9 +77,8 @@ func theNodesOfTheFirstZonesOf(topology scenario.Topology, count int) []string {
 	return names
 }
 
-// theFirstNamesOf are the names of the first count Nodes the Topology derives,
-// derived here rather than written out, so the expectation follows the Topology
-// that is asked rather than repeating its naming rule.
+// Derived here rather than written out, so the expectation follows the Topology
+// asked rather than repeating its naming rule.
 func theFirstNamesOf(topology scenario.Topology, count int) []string {
 	derived := topology.Nodes()[:count]
 	names := make([]string, 0, count)
@@ -118,9 +105,8 @@ func TestTwoFailuresOfTheSameCount_ShouldStopTheSameNodes(t *testing.T) {
 	expect.Expect(t, secondRun.Names()).To(expect.Equal(firstRun.Names()))
 }
 
-// A Zone Failure is the Node Failure over a whole Zone: it names the Zones it
-// stops, and the Nodes it stops are every Node those Zones hold rather than the
-// first the Topology derives, which is what makes a Zone the unit it fails.
+// A Zone Failure stops every Node the Zones hold rather than the first the
+// Topology derives, which makes a Zone the unit it fails.
 func TestAZoneFailure_ShouldStopEveryNodeOfThatZoneResponding(t *testing.T) {
 	declared := aTopologyOfTwoZones(t)
 

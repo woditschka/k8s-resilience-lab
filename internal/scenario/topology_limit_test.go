@@ -8,12 +8,9 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 )
 
-// The Zone limit is a constant of the package's own, so the tests that hold a
-// Topology to it live here, inside the package, and read maxZones rather than
-// restating the count a second time.
+// maxZones is unexported, so the tests holding a Topology to it live inside the
+// package rather than restating the count.
 
-// aCapacity is the named default for a Node capacity no test in this file cares
-// about: what these tests turn on is the Zone count.
 func aCapacity(t *testing.T) NodeCapacity {
 	t.Helper()
 
@@ -26,8 +23,6 @@ func aCapacity(t *testing.T) NodeCapacity {
 	return capacity
 }
 
-// topologyOfOneNodePool is a Topology of zones Zones each holding one NodePool of
-// nodesPerZone Nodes at capacity, or the refusal either constructor gave.
 func topologyOfOneNodePool(zones, nodesPerZone int, capacity NodeCapacity) (Topology, error) {
 	pool, err := NewNodePool("general", nodesPerZone, capacity)
 	if err != nil {

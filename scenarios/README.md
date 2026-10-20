@@ -107,7 +107,7 @@ func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *la
 }
 ```
 
-Every line is one Step opened on `s`, so a reader scans the Step kinds in one column and a line is inserted, removed or reordered on its own. The Scenarios here are held to that layout by a rule test, per [the layout ADR](../docs/adr/2026-10-07-the-labs-scenarios-write-one-step-per-line.md).
+Every line is one Step opened on `s`, so a reader scans the Step kinds in one column and a line is inserted, removed or reordered on its own. The Scenarios here are held to that layout by a rule test, per [the layout ADR](../docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md).
 
 The Scenario runs under its Scenario name, the words of the condition before `_Should` in lowercase joined by hyphens, so the function above runs as `a-workload-placed-for-resilience` and renaming the function renames the Scenario. A run of capitals is one word, so `GPUNodes` reads `gpu-nodes`. A condition holding anything but ASCII letters and digits, and two Scenarios naming one condition, are refused before any Simulated Cluster is provisioned. A new Scenario is a function in `scenarios.go`, after the last one, and one line at the end of `All`.
 

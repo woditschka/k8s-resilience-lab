@@ -7,19 +7,13 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// twoLabelledZones is how many Zones the Topology below holds, each holding one
-// Node labelled on-demand and one labelled spot.
 const twoLabelledZones = 2
 
-// How many of the Topology's Nodes an observation keeps, by the order the
-// Topology derives them.
 const (
 	nodesBeforeTheSecondZonesSpotNode = 3
 	onlyTheFirstZonesOnDemandNode     = 1
 )
 
-// aTopologyOfOnDemandAndSpotNodes is two Zones each holding a Node of a NodePool
-// stating capacity-type=on-demand and a Node of one stating capacity-type=spot.
 func aTopologyOfOnDemandAndSpotNodes(t *testing.T) scenario.Topology {
 	t.Helper()
 
@@ -33,14 +27,10 @@ func aTopologyOfOnDemandAndSpotNodes(t *testing.T) scenario.Topology {
 	return topology
 }
 
-// observedAsDeclared is the Placement observing every Node the Topology derives,
-// carrying the labels its NodePools state, and no Pod.
 func observedAsDeclared(topology scenario.Topology) scenario.Placement {
 	return scenario.NewPlacement(topology.Nodes(), nil)
 }
 
-// A Failure by label stops every observed Node carrying the value, in every Zone,
-// in the order the Topology derives the Nodes (docs/prd.md REQ-SIM-018).
 func TestALabelFailure_ShouldStopEveryNodeCarryingThatValueInTheTopologysOrder(t *testing.T) {
 	declared := aTopologyOfOnDemandAndSpotNodes(t)
 
@@ -50,8 +40,6 @@ func TestALabelFailure_ShouldStopEveryNodeCarryingThatValueInTheTopologysOrder(t
 	expect.Expect(t, failure.Names()).To(expect.Equal([]string{"zone-1-node-2", "zone-2-node-2"}))
 }
 
-// A value is stopped as the control plane carries it, so a Node the observation
-// no longer holds, such as one that already stopped, is not stopped again.
 func TestALabelFailure_ShouldStopOnlyTheNodesTheObservationStillHolds(t *testing.T) {
 	declared := aTopologyOfOnDemandAndSpotNodes(t)
 	observed := scenario.NewPlacement(declared.Nodes()[:nodesBeforeTheSecondZonesSpotNode], nil)

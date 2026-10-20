@@ -7,7 +7,7 @@ This document carries the tactical pattern catalog this project builds with. It 
 
 ## Design Principles
 
-The high-level laws designs are evaluated against. The `design-validation` skill enforces them at triage. Rewrite the list to fit this project; keep it short and enforceable.
+The high-level laws designs are evaluated against. The `design-validation` skill enforces them at triage.
 
 1. **Security and reliability are emergent** — must be designed in, not retrofitted.
 2. **Consistency over novelty** — match existing patterns unless there is a compelling reason. A security law is always that reason: a neighbor's weakness is never a pattern to match.
@@ -124,6 +124,7 @@ An interface is declared in the package that consumes it, sized to the methods t
 | **Standard library first** | `slices`, `maps`, `cmp`, `errors`, `log/slog`, and `net/http` before a dependency or a hand-written equivalent. | Fewer dependencies; idioms every Go reader knows. |
 | **Packages over helper types** | A stateless function set over a type the project does not own is a subject-named package (`slug`). No `Helper` type, and no `util`, `common`, or `misc` package. | The package is Go's native form of the utility class (§ Naming). |
 | **Names read by subject** | An exported name sits in a package named for its subject and does not repeat it; no dot import. A value of several fields is written as a keyed composite literal whose field names are the external model's own. No function exists only to label an argument's position. | Go qualifies every identifier with its package name, so the qualifier reads as the noun (§ Naming). |
+| **Comments say what a name cannot** | A comment carries a why: a constraint, a quirk of a system the project does not own, a consequence the code does not show. An exported identifier keeps a one-sentence doc comment, opening with its name as `go doc` expects, where its name alone does not state its contract. A comment never restates a name, narrates the statements beneath it, or cites an ADR or another document. | Intention-revealing names carry the what; a comment that repeats them rots when the name changes, and a decision record belongs in the decision log, not beside the code it governs. |
 
 These principles apply equally to production code and test code. Tests are first-class code: they use the same constructors, `With` copies, and keyed literals as production.
 

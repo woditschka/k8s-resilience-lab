@@ -1,10 +1,6 @@
-// The tests in this file drive the name a Scenario runs under, and how a run
-// carries out its Scenarios at once. The name comes from the condition half of
-// the Scenario's function's name, so no run input reaches it and no Scenario
-// carries a name of its own. They reach no engine: a function naming no
-// condition, or two naming one, stops the run before a Simulated Cluster is
-// provisioned, and carrying out Scenarios at once is driven with functions in
-// memory (docs/system-design.md, lab.Runner).
+// These tests reach no engine: an underivable or duplicate Scenario name stops
+// the run before a cluster is provisioned, and carrying out Scenarios at once
+// is driven with functions in memory.
 package lab
 
 import (
@@ -19,13 +15,11 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
 )
 
-// someScenariosPackage is the package path the Go runtime writes before a
-// function's own name. Only the name after it bears on the Scenario name, so the
-// path stands for any.
+// Only the name after the package path bears on the Scenario name, so the path
+// stands for any.
 const someScenariosPackage = "github.com/woditschka/k8s-resilience-lab/scenarios."
 
-// The functions below are Scenarios a refusal is driven with. Each is declared
-// at the top level, because a closure's runtime name is itself one naming no
+// Each is declared at the top level, because a closure's runtime name names no
 // condition.
 const (
 	theFunctionNamingNoCondition = "aFunctionNamingNoCondition"
@@ -39,10 +33,8 @@ func ATwinCondition_ShouldReachOneOutcome(*Scenario) {}
 
 func ATwinCondition_ShouldReachAnotherOutcome(*Scenario) {}
 
-// aRunnerReachingNoEngine is the Runner a refusal is driven through. A Scenario
-// name that cannot be derived stops the run before anything is provisioned, so
-// the engine this runner holds is never dialed and the Timeline folder it files
-// into is never created; both stand for any.
+// A refused name stops the run before anything is provisioned, so the engine
+// and Timeline folder here are never used and stand for any.
 func aRunnerReachingNoEngine(t *testing.T) *Runner {
 	t.Helper()
 
@@ -140,19 +132,15 @@ func TestTwoScenariosNamingTheSameCondition_ShouldStopTheRunBeforeCarryingOutAny
 	expect.Expect(t, strings.Contains(err.Error(), theSecondOfTheTwins)).To(expect.Equal(true))
 }
 
-// threeScenariosOfARun are the Scenario names the Scenarios carried out at once
-// below run under. Which names they are bears on nothing; that there are several, each
-// distinct, is what a run carrying them out at once is judged by.
+// Which names these are bears on nothing; that there are several, each
+// distinct, is what the run is judged by.
 var threeScenariosOfARun = []string{"some-scenario", "another-scenario", "a-third-scenario"}
 
-// longerThanCarryingThemOutTakes bounds how long a Scenario below waits for the
-// others. Carried out at once they meet within milliseconds; carried out one
-// after another they never meet, and the deadline is what turns that into a
-// failing test rather than a hung one.
+// Carried out at once the Scenarios meet within milliseconds; one after another
+// they never meet, and the deadline turns that into a failing test rather than
+// a hung one.
 const longerThanCarryingThemOutTakes = 10 * time.Second
 
-// noScenarioWentWrong is how many Scenarios a run that carried out every one to
-// its end names as having gone wrong.
 const noScenarioWentWrong = 0
 
 func TestARunOfEveryScenario_ShouldStartEachScenarioWithoutWaitingForAnotherToEnd(t *testing.T) {
@@ -184,12 +172,8 @@ func TestAScenarioThatFailsPartWayAmongOthers_ShouldLeaveTheOthersToReachTheirOw
 	expect.Expect(t, strings.Contains(theFailureOf(carried, thePanickingScenario), whatThePanicSaid)).To(expect.Equal(true))
 }
 
-// whatThePanicSaid is the value a Scenario panics with above, which the run
-// names so a reader can find what panicked.
 const whatThePanicSaid = "a Step's own code panicked"
 
-// oneOfThemPanicking carries out the Scenario named panicking by panicking, and
-// every other Scenario by reporting an Outcome under its own name.
 func oneOfThemPanicking(named []string, panicking string) func(int) (Outcome, error) {
 	return func(declared int) (Outcome, error) {
 		if named[declared] == panicking {
@@ -200,9 +184,8 @@ func oneOfThemPanicking(named []string, panicking string) func(int) (Outcome, er
 	}
 }
 
-// aMeetingOfEveryScenario carries out a Scenario by waiting until every one of
-// the run has started, so it ends only when they all run at once. One that waits
-// past the deadline ends naming why.
+// aMeetingOfEveryScenario ends a Scenario only when every one of the run has
+// started, so it passes only when they all run at once.
 func aMeetingOfEveryScenario(t *testing.T, scenarios int) func(int) (Outcome, error) {
 	t.Helper()
 
@@ -228,9 +211,8 @@ func aMeetingOfEveryScenario(t *testing.T, scenarios int) func(int) (Outcome, er
 	}
 }
 
-// aRunFinishingInReverse carries out each Scenario by waiting for the one
-// declared after it to finish, so the last declared finishes first and the first
-// declared last.
+// The last declared finishes first, so the order handed back is not the order
+// finished.
 func aRunFinishingInReverse(t *testing.T, named []string) func(int) (Outcome, error) {
 	t.Helper()
 
@@ -254,8 +236,6 @@ func aRunFinishingInReverse(t *testing.T, named []string) func(int) (Outcome, er
 	}
 }
 
-// theNamesReportedIn are the Scenario names of what a run carried out, in the order
-// it handed them back.
 func theNamesReportedIn(carried []Carried) []string {
 	named := make([]string, 0, len(carried))
 	for _, each := range carried {
@@ -265,8 +245,6 @@ func theNamesReportedIn(carried []Carried) []string {
 	return named
 }
 
-// theScenariosThatWentWrongIn are the Scenario names of the Scenarios the lab could
-// not carry out to their end.
 func theScenariosThatWentWrongIn(carried []Carried) []string {
 	var wentWrong []string
 	for _, each := range carried {
@@ -278,8 +256,6 @@ func theScenariosThatWentWrongIn(carried []Carried) []string {
 	return wentWrong
 }
 
-// theFailureOf is what the run names as having gone wrong for the Scenario
-// named, and empty where nothing did.
 func theFailureOf(carried []Carried, named string) string {
 	for _, each := range carried {
 		if each.Outcome.Name == named && each.Err != nil {

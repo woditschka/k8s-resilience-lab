@@ -8,9 +8,6 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// The Node labels a test states where it turns on a stated label: a key outside
-// every key the lab owns, the two values a NodePool of on-demand and one of spot
-// state under it, and some key and value no test turns on.
 const (
 	capacityType = "capacity-type"
 	onDemand     = "on-demand"
@@ -19,8 +16,6 @@ const (
 	someValue    = "some-value"
 )
 
-// labelsOf is the Node labels stated as that map, which a test building labels
-// the domain admits states.
 func labelsOf(t *testing.T, stated map[string]string) scenario.NodeLabels {
 	t.Helper()
 
@@ -32,8 +27,7 @@ func labelsOf(t *testing.T, stated map[string]string) scenario.NodeLabels {
 	return labels
 }
 
-// A NodePool's labels are read in key order whatever order they were stated in,
-// so a run reports them alike every time.
+// Key order makes a run report the labels alike every time.
 func TestNodeLabels_ShouldBeReadInKeyOrder(t *testing.T) {
 	labels := labelsOf(t, map[string]string{someKey: someValue, capacityType: spot})
 
@@ -43,10 +37,9 @@ func TestNodeLabels_ShouldBeReadInKeyOrder(t *testing.T) {
 	}))
 }
 
-// A NodePool may state its own keys alone: the lab writes the Zone, hostname,
-// NodePool and simulator selection labels on every Node, and owns every key under
-// its prefix. A key or value Kubernetes cannot hold as a label is refused, an
-// empty value being one it holds (docs/prd.md REQ-SIM-017 edge case 1).
+// The lab writes the Zone, hostname, NodePool and simulator selection labels on
+// every Node and owns every key under its prefix. An empty value is one
+// Kubernetes holds.
 func TestNodeLabels_ShouldRefuseAKeyTheLabOwnsAndOneKubernetesCannotHold(t *testing.T) {
 	const noValue = ""
 	tests := map[string]struct {
@@ -81,13 +74,10 @@ func TestNodeLabels_ShouldRefuseAKeyTheLabOwnsAndOneKubernetesCannotHold(t *test
 	}
 }
 
-// refusalNaming reports whether err is a refusal naming what was refused.
 func refusalNaming(err error, refused string) bool {
 	return err != nil && strings.Contains(err.Error(), refused)
 }
 
-// Labels added to labels already stated hold both, and a key stated in both is
-// refused naming that key (docs/prd.md REQ-SIM-017 edge case 2).
 func TestNodeLabelsAdded_ShouldHoldBothAndRefuseAKeyStatedTwice(t *testing.T) {
 	stated := labelsOf(t, map[string]string{capacityType: spot})
 
@@ -109,9 +99,6 @@ func TestNodeLabels_ShouldReadTheValueOfAKeyTheyHoldAndNoneOfOneTheyDoNot(t *tes
 	expect.Expect(t, held).To(expect.Equal(false))
 }
 
-// A NodePool's Nodes carry its labels, and the Topology names the values its
-// NodePools state for a key once each, in declaration order, a NodePool stating
-// no value of that key adding none.
 func TestATopologyOfLabelledNodePools_ShouldLabelTheirNodesAndNameEachValueStatedOnce(t *testing.T) {
 	const oneZone, oneNodePerZone = 1, 1
 	onDemandLabels := labelsOf(t, map[string]string{capacityType: onDemand})
@@ -136,7 +123,6 @@ func TestATopologyOfLabelledNodePools_ShouldLabelTheirNodesAndNameEachValueState
 	}))
 }
 
-// A NodePool labelled twice holds both labels, and refuses a key it already holds.
 func TestANodePoolLabelledTwice_ShouldHoldBothAndRefuseAKeyItAlreadyHolds(t *testing.T) {
 	const oneNodePerZone = 1
 	pool := labelledNodePool(t, spot, labelsOf(t, map[string]string{capacityType: spot}))
@@ -150,8 +136,6 @@ func TestANodePoolLabelledTwice_ShouldHoldBothAndRefuseAKeyItAlreadyHolds(t *tes
 	expect.Expect(t, aNodePool(t, spot, oneNodePerZone, aCapacity(t)).Labels()).To(expect.Equal(scenario.NodeLabels{}))
 }
 
-// labelledNodePool is a NodePool of one Node per Zone under name, carrying the
-// labels named.
 func labelledNodePool(t *testing.T, name string, labels scenario.NodeLabels) scenario.NodePool {
 	t.Helper()
 
@@ -164,9 +148,8 @@ func labelledNodePool(t *testing.T, name string, labels scenario.NodeLabels) sce
 	return labelled
 }
 
-// Two Nodes, two NodePools or two sets of Node labels alike in all else are equal
-// exactly when their labels are, so comparing Placements or Topologies notices a
-// label the control plane added or dropped (docs/prd.md REQ-SIM-017).
+// Comparing Placements or Topologies then notices a label the control plane
+// added or dropped.
 func TestTwoValuesAlikeButForTheirNodeLabels_ShouldBeEqualOnlyWhenTheirLabelsAre(t *testing.T) {
 	capacity := aCapacity(t)
 	nodes := func(left, right scenario.NodeLabels) bool {

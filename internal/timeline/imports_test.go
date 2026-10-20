@@ -7,18 +7,12 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/modulerules"
 )
 
-// timelinePackageDir is where go test runs this suite: the package's own source
-// directory, so the pattern below covers this module and nothing above it.
 const timelinePackageDir = "."
 
-// everyPackageUnderTimeline scopes the rule to this module's own packages, which
-// is the subtree the layering rule governs.
 const everyPackageUnderTimeline = "./..."
 
-// deniedKubernetesImport is the prefix of every Kubernetes package. Where a
-// Timeline is kept is the lab's own concern: the published line format would
-// become the Kubernetes client's shape the moment one of its types reached here
-// (docs/system-design.md § Package Structure).
+// The published line format would become the Kubernetes client's shape the
+// moment one of its types reached this package.
 const deniedKubernetesImport = "k8s.io"
 
 func TestTheTimelinePackage_ShouldImportNoKubernetesPackage(t *testing.T) {

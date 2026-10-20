@@ -24,8 +24,7 @@ const (
 	podOnNoNodeAtAll          = "web-4"
 )
 
-// twoZonesOfTwoNodes is the named default for the Nodes an observation is read
-// against: enough Nodes for one to stay empty and for two Zones to differ.
+// Enough Nodes for one to stay empty and for two Zones to differ.
 func twoZonesOfTwoNodes(t *testing.T) []scenario.Node {
 	t.Helper()
 
@@ -38,8 +37,7 @@ func twoZonesOfTwoNodes(t *testing.T) []scenario.Node {
 	return topology.Nodes()
 }
 
-// threePlacedPodsOverTwoZones leaves two Nodes of four empty and the two Zones
-// one Pod apart, so every count below is distinguishable from every other.
+// Every count below is distinguishable from every other.
 func threePlacedPodsOverTwoZones() []scenario.Pod {
 	return []scenario.Pod{
 		{Name: firstPodOnTheFullestNode, Node: fullestNode, Phase: scenario.PodRunning},
@@ -125,9 +123,6 @@ func TestAPlacement_ShouldReportThePodsOfOnePhaseAlone(t *testing.T) {
 	expect.Expect(t, placement.PodsInPhase(scenario.PodPending)).To(expect.Equal([]scenario.Pod{pending}))
 }
 
-// A Wait for every Pod Ready ends the Scenario naming the Pods it did not reach,
-// so a Placement reports the ones it does not hold Ready (docs/prd.md
-// REQ-SIM-006).
 func TestAPlacement_ShouldNameThePodsItDoesNotReportReady(t *testing.T) {
 	ready := scenario.Pod{Name: firstPodOnTheFullestNode, Node: fullestNode, Phase: scenario.PodRunning, Ready: true}
 	notReadyYet := scenario.Pod{Name: podOnTheNextNode, Node: nextNode, Phase: scenario.PodRunning}
@@ -138,9 +133,6 @@ func TestAPlacement_ShouldNameThePodsItDoesNotReportReady(t *testing.T) {
 	expect.Expect(t, placement.PodsNotReady()).To(expect.Equal([]scenario.Pod{notReadyYet, pending}))
 }
 
-// What a Workload kept at the moment a Failure stopped a Node is read off the
-// observation taken before it: the Pods Running anywhere but on the Nodes that
-// stopped (docs/prd.md REQ-SIM-010).
 func TestAPlacement_ShouldReportThePodsRunningApartFromTheNodesNamed(t *testing.T) {
 	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), threePlacedPodsOverTwoZones())
 
@@ -164,8 +156,6 @@ func TestTwoObservationsOfTheSamePodsOnTheSameNodes_ShouldAgree(t *testing.T) {
 	expect.Expect(t, secondObservation).To(expect.Equal(firstObservation))
 }
 
-// A placed Pod inside its Startup time stands on its Node and is not yet Running,
-// which is what keeps its Placement from being Settled (docs/prd.md REQ-SIM-012).
 func TestAPodInsideItsStartupTime_ShouldBeCountedPendingOnItsNode(t *testing.T) {
 	const theStartingPodAlone = 1
 	starting := scenario.Pod{Name: podOnTheNextNode, Node: nextNode, Phase: scenario.PodPending}
@@ -179,10 +169,6 @@ func TestAPodInsideItsStartupTime_ShouldBeCountedPendingOnItsNode(t *testing.T) 
 	expect.Expect(t, placement.PodsInPhase(scenario.PodPending)).To(expect.Equal([]scenario.Pod{starting, unplaced}))
 }
 
-// A Placement counts Pods per value of a label by the value their observed Node
-// carries: a value whose Nodes hold no Pod counts as none, and a Pod on a Node
-// carrying no such label, on a Node the observation does not hold, or on no Node
-// at all counts toward no value (docs/prd.md REQ-SIM-017 edge cases 5 and 6).
 func TestAPlacement_ShouldCountPodsPerValueOfALabelTheirNodesCarry(t *testing.T) {
 	const oneZone, oneNodePerZone = 1, 1
 	topology, err := scenario.NewTopology(oneZone,
@@ -206,9 +192,6 @@ func TestAPlacement_ShouldCountPodsPerValueOfALabelTheirNodesCarry(t *testing.T)
 	expect.Expect(t, placed.PodsPerLabelValue(capacityType)).To(expect.Equal(map[string]int{onDemand: 2, spot: 0}))
 }
 
-// A Placement counts Pods per NodePool by the NodePool their observed Node
-// belongs to: a NodePool whose Nodes hold no Pod counts as none, and a Pod on a
-// Node the observation does not hold, or on no Node at all, counts toward none.
 func TestAPlacement_ShouldCountPodsPerNodePoolOfTheirNodes(t *testing.T) {
 	const oneZone, oneNodePerZone, twoNodesPerZone, gpu = 1, 1, 2, "gpu"
 	topology, err := scenario.NewTopology(oneZone,

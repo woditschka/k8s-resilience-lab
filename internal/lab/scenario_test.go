@@ -1,10 +1,6 @@
-// The tests in this file drive the Step surface a Scenario's lines run against.
-// They reach no cluster and no engine: a Given is judged by the immutable
+// These tests reach no cluster and no engine: a Given is judged by the
 // internal/scenario value it constructs, and a Then by a Placement the test
-// built, so the surface is driven over real values alone and no stand-in for the
-// Simulated Cluster exists (docs/testing-principles.md § Mocking Policy). They
-// sit in the package because a Scenario's declarations and its recorded Steps are
-// what the Runner beside them reads.
+// built, so no stand-in for the Simulated Cluster exists.
 package lab
 
 import (
@@ -22,141 +18,85 @@ import (
 )
 
 const (
-	// twoZones and twoNodesPerZone shape a Topology small enough for a reader to
-	// hold every derived name at once, and still hold more than one Node per Zone,
-	// which is what makes an even Placement a decision rather than the only one
-	// available.
+	// More than one Node per Zone makes an even Placement a decision rather
+	// than the only one available.
 	twoZones        = 2
 	twoNodesPerZone = 2
 
-	// podsOverEveryNode is the Workload the Thens below judge: one Pod for each
-	// Node of that Topology.
 	podsOverEveryNode = twoZones * twoNodesPerZone
 
-	// podsPerZoneWhenEven and podsPerNodeWhenEven are the shares an even Placement
-	// of that Workload gives each domain.
 	podsPerZoneWhenEven = podsOverEveryNode / twoZones
 	podsPerNodeWhenEven = 1
 
-	// twoPodsPerNode is the Pod count of a Node capacity a Scenario states
-	// outright: below roomyPodsPerNode, so a Topology declared at it differs from
-	// one naming Roomy. someCoresPerNode and someGibibytesPerNode are the other
-	// two dimensions such a line states, which no test here turns on, and
-	// someCPUSpelled and someMemorySpelled are how Kubernetes spells them on the
-	// renamed line.
+	// twoPodsPerNode is below roomyPodsPerNode, so a Topology declared at it
+	// differs from one naming Roomy. No test here turns on the cpu and memory.
 	twoPodsPerNode       = 2
 	someCoresPerNode     = 4
 	someGibibytesPerNode = 16
 	someCPUSpelled       = "4"
 	someMemorySpelled    = "16Gi"
 
-	// roomForOnePodPerNode is a Node capacity a Workload can fill, and
-	// podsBeyondEveryNode a Workload of one Pod more than a Topology at that
-	// capacity holds: onePodLeftPending is what no Node then has room for, whatever
-	// the scheduler tries. noPodPending is the count such a Placement does not
-	// hold, which is what a Then it does not meet is written with.
 	roomForOnePodPerNode = 1
 	onePodLeftPending    = 1
 	podsBeyondEveryNode  = podsOverEveryNode + onePodLeftPending
 	noPodPending         = 0
 
-	// noNodeDeclared is how many Nodes a Placement holds where no Topology was
-	// declared above the Wait that reached it.
 	noNodeDeclared = 0
 
-	// theMinimumKept is the Required Capacity the Workloads below declare: one Pod
-	// fewer than the Workload runs, so one Node stopping leaves exactly the minimum
-	// and the declaration is one the domain admits.
+	// theMinimumKept is one Pod fewer than the Workload runs, so one Node
+	// stopping leaves exactly the minimum.
 	theMinimumKept = podsOverEveryNode - onePodLeftBehind
 
-	// aMinimumNoWorkloadCouldKeep is a Required Capacity above the Pods the Workload
-	// declares, so the Given declaring one is a Step that cannot be carried out.
 	aMinimumNoWorkloadCouldKeep = podsOverEveryNode + 1
 
-	// podsShortOfTheMinimum is a count of Pods Running below the minimum those
-	// Workloads declare, which is what a moment missed is counted at.
 	podsShortOfTheMinimum = theMinimumKept - 1
 
-	// noNodesPerZone and noPods are each a declaration the internal/scenario
-	// constructor refuses, so the Given declaring one is a Step that cannot be
-	// carried out. A specification setting nothing is the third, and it is the
-	// zero value of the type rather than a count.
 	noNodesPerZone = 0
 	noPods         = 0
 
-	// moreNodesThanTheTopologyHolds and moreZonesThanTheTopologyHolds are Failures
-	// that Topology cannot satisfy, so the When asking for one is a Step that cannot
-	// be carried out.
 	moreNodesThanTheTopologyHolds = twoZones*twoNodesPerZone + 1
 	moreZonesThanTheTopologyHolds = twoZones + 1
 
-	// theWhenThatNeverRan is what a Then reading the Nodes a Failure stopped names
-	// when no When ran before it, which is what a reader has to add.
 	theWhenThatNeverRan = "no When"
 
-	// oneNodeFailing is a Failure the declared Topology can satisfy, which is what
-	// a When reading the Placement before it has to be to get as far as that read.
 	oneNodeFailing = 1
 
-	// theMinimumNeverDeclared is what the Then judging a Required Capacity names
-	// when the Workload declared none, which is the other way it has nothing to
-	// judge.
 	theMinimumNeverDeclared = "declares no Required Capacity"
 
-	// noMomentNamed is how a Finding naming neither of the two moments is read, so
-	// one that named none is visible in the comparison rather than missing from it.
+	// noMomentNamed makes a Finding that named neither moment visible in the
+	// comparison rather than missing from it.
 	noMomentNamed = "no moment"
 
-	// noSpecificationAtAll is how a Workload line reads when it declares the zero
-	// specification: it names nothing, which is the Given's own refusal.
 	noSpecificationAtAll = ""
 
-	// onePodLeftBehind is the Pod the control plane has not moved off the Node that
-	// stopped responding, and podLeftOnTheFailedNode what it is called there.
 	onePodLeftBehind       = 1
 	podLeftOnTheFailedNode = string(someWorkloadName) + "-left-behind"
 
-	// podLeftPending is what the Pod no Node had room for is called in a Placement
-	// that left it on none.
 	podLeftPending = string(someWorkloadName) + "-left-pending"
 
-	// aFinelyStatedWait is a time a Wait held for, stated more finely than a report
-	// states it, which is what the rounding below is read on.
+	// aFinelyStatedWait is stated more finely than a report states it, so the
+	// rounding is read on it.
 	aFinelyStatedWait = 6234 * time.Millisecond
 
-	// aTimeAWaitStates is a time a Wait of the tests below states it must be
-	// reached in, and aWaitPastTheTimeItStates a time such a Wait took past it.
 	aTimeAWaitStates         = 15
 	aWaitPastTheTimeItStates = 25500 * time.Millisecond
 
-	// aWaitOfNoMeasuredTime is what a Wait with nothing to wait for took, which is
-	// why a line reads whether such a Wait was reached off the Step rather than off
-	// this time (docs/prd.md REQ-SIM-006 edge case 2).
+	// A Wait with nothing to wait for takes no measured time, so whether it was
+	// reached is read off the Step rather than off this time.
 	aWaitOfNoMeasuredTime = 0
 
-	// theWaitsOwnStep is where the one Wait of a Scenario recorded nothing else
-	// stands in that Scenario's report.
 	theWaitsOwnStep = 0
 
-	// theWaitingTimeInSeconds is the lab's own waiting time in the whole seconds a
-	// Wait states a time in, which is the longest time a Wait may state.
 	theWaitingTimeInSeconds = int(scenario.WaitingTime / time.Second)
 
-	// theSecondsAboveTheLabsWaitingTime and noSecondsAtAll are the two times no
-	// Wait may state: one second more than the lab waits for a state of the
-	// cluster, and no time at all.
 	theSecondsAboveTheLabsWaitingTime = theWaitingTimeInSeconds + 1
 	noSecondsAtAll                    = 0
 
-	// someWorkloadName is the name a Workload's Pods are labelled with. A Then
-	// counts Pods per domain and reads no meaning into the name, so it stands for
-	// any. It is named here rather than taken from the Scenarios' place, which
-	// internal/lab does not import.
+	// someWorkloadName is named here rather than taken from the Scenarios'
+	// place, which internal/lab does not import.
 	someWorkloadName WorkloadName = "some-workload"
 )
 
-// aWaitStating is the time a Wait of that many whole seconds is held to, built
-// the way the Step surface builds one.
 func aWaitStating(t *testing.T, seconds int) scenario.StatedWait {
 	t.Helper()
 
@@ -168,28 +108,18 @@ func aWaitStating(t *testing.T, seconds int) scenario.StatedWait {
 	return stated
 }
 
-// aScenario is a Scenario whose Steps declare alone. No Placement has been
-// observed and none is needed: the Givens below reach no cluster.
 func aScenario() *Scenario {
 	return &Scenario{}
 }
 
-// aScenarioOver is a Scenario that has already settled at placed, which is the
-// world every Then judges in.
 func aScenarioOver(placed scenario.Placement) *Scenario {
 	return &Scenario{observed: placed, settled: true}
 }
 
-// aScenarioAfterFailing is a Scenario whose When stopped these Nodes responding
-// and which has settled at placed since, which is the world a Then reading the
-// Failure judges in.
 func aScenarioAfterFailing(placed scenario.Placement, stopped ...string) *Scenario {
 	return &Scenario{observed: placed, settled: true, failed: stopped}
 }
 
-// aScenarioAtAWaitFor is a Scenario whose Wait for that state of the cluster has
-// been recorded and not yet judged, which is the world a Wait's times are
-// recorded and judged in.
 func aScenarioAtAWaitFor(state string) *Scenario {
 	waiting := aScenario()
 	waiting.record(WaitStep, state)
@@ -197,16 +127,10 @@ func aScenarioAtAWaitFor(state string) *Scenario {
 	return waiting
 }
 
-// aScenarioAfterFailingWithNoWaitSince is a Scenario whose When stopped this Node
-// responding and which has not Waited since, which is the world a Then standing
-// straight after a Failure judges in.
 func aScenarioAfterFailingWithNoWaitSince(placed scenario.Placement, stopped string) *Scenario {
 	return &Scenario{observed: placed, failed: []string{stopped}}
 }
 
-// aScenarioAfterFailingWhichKept is that Scenario once its When has also derived
-// what the Workload kept Running at the moment the Failure was injected, which is
-// the earlier of the two moments a Required Capacity is judged at.
 func aScenarioAfterFailingWhichKept(placed scenario.Placement, kept int, stopped ...string) *Scenario {
 	failing := aScenarioAfterFailing(placed, stopped...)
 	failing.runningAtTheFailure = kept
@@ -214,17 +138,12 @@ func aScenarioAfterFailingWhichKept(placed scenario.Placement, kept int, stopped
 	return failing
 }
 
-// aScenarioAfterFailingAZone is a Scenario whose When stopped this Zone whole and
-// which has settled at placed, which is the world a Then reading the Zones that
-// failed judges in.
 func aScenarioAfterFailingAZone(placed scenario.Placement, stopped string) *Scenario {
 	return &Scenario{observed: placed, settled: true, failedZones: []string{stopped}}
 }
 
-// The Named Node capacity this suite defines under a name of its own, as a
-// Scenario's place defines Standard: the lab defines none, so a test needing one
-// defines it. Its Pod count leaves room for more than one Pod per Node, and its
-// cpu and memory are spelled as Kubernetes spells them on the line naming it.
+// The lab defines no Named Node capacity, so this suite defines its own. Its
+// Pod count leaves room for more than one Pod per Node.
 const roomyName node.CapacityName = "Roomy"
 
 const (
@@ -233,21 +152,16 @@ const (
 	roomyPodsPerNode      = 10
 )
 
-// roomyNodes is that Named Node capacity as a NodePool names it.
 func roomyNodes() node.Capacity {
 	return node.Named(roomyName, node.Capacity{CPU: roomyCoresPerNode, Memory: roomyGibibytesPerNode * node.Gi, Pods: roomyPodsPerNode})
 }
 
-// aTopologyOf is the Topology of the stated shape, its Nodes holding the
-// capacity Roomy stands for, which theGeneralNodePool names.
 func aTopologyOf(t *testing.T, zones, nodesPerZone int) scenario.Topology {
 	t.Helper()
 
 	return aTopologyHolding(t, zones, nodesPerZone, theCapacityRoomyStandsFor(t))
 }
 
-// theCapacityRoomyStandsFor is the domain's capacity of the values Roomy's
-// definition gives.
 func theCapacityRoomyStandsFor(t *testing.T) scenario.NodeCapacity {
 	t.Helper()
 
@@ -259,9 +173,6 @@ func theCapacityRoomyStandsFor(t *testing.T) scenario.NodeCapacity {
 	return capacity
 }
 
-// aTopologyAt is the Topology of the stated shape with every Node holding
-// podsPerNode Pods, the cpu and memory being the ones a line here states, which
-// is the capacity a Given names outright.
 func aTopologyAt(t *testing.T, zones, nodesPerZone, podsPerNode int) scenario.Topology {
 	t.Helper()
 
@@ -273,8 +184,6 @@ func aTopologyAt(t *testing.T, zones, nodesPerZone, podsPerNode int) scenario.To
 	return aTopologyHolding(t, zones, nodesPerZone, capacity)
 }
 
-// aTopologyHolding is the Topology of the stated shape whose every Node holds the
-// capacity named.
 func aTopologyHolding(t *testing.T, zones, nodesPerZone int, capacity scenario.NodeCapacity) scenario.Topology {
 	t.Helper()
 
@@ -290,8 +199,6 @@ func aTopologyHolding(t *testing.T, zones, nodesPerZone int, capacity scenario.N
 	return topology
 }
 
-// aWorkloadDeclaringResilientPlacementOf is the Workload a Given declares when
-// it names that specification for pods Pods.
 func aWorkloadDeclaringResilientPlacementOf(t *testing.T, pods int) scenario.Workload {
 	t.Helper()
 
@@ -307,8 +214,6 @@ func aWorkloadDeclaringResilientPlacementOf(t *testing.T, pods int) scenario.Wor
 	return workload
 }
 
-// aWorkloadKeepingOf is that Workload once it declares the fewest Pods it must
-// keep Running through a Failure.
 func aWorkloadKeepingOf(t *testing.T, pods, minimum int) scenario.Workload {
 	t.Helper()
 
@@ -320,8 +225,6 @@ func aWorkloadKeepingOf(t *testing.T, pods, minimum int) scenario.Workload {
 	return workload
 }
 
-// onePodPerNodeOf is a Placement of one Running Pod on every Node of topology,
-// which is the even Placement the Thens below are met by.
 func onePodPerNodeOf(topology scenario.Topology) scenario.Placement {
 	nodes := topology.Nodes()
 	placed := make([]scenario.Pod, 0, len(nodes))
@@ -336,9 +239,6 @@ func onePodPerNodeOf(topology scenario.Topology) scenario.Placement {
 	return scenario.NewPlacement(nodes, placed)
 }
 
-// onePodLeftPendingBesideOnePerNodeOf is the Placement a Workload of one Pod more
-// than its Nodes hold settles at: one Pod Running on each Node of topology, and
-// the Pod no Node had room for left Pending on none of them.
 func onePodLeftPendingBesideOnePerNodeOf(topology scenario.Topology) scenario.Placement {
 	placed := onePodPerNodeOf(topology).Pods()
 	pending := scenario.Pod{Name: podLeftPending, Phase: scenario.PodPending}
@@ -346,25 +246,21 @@ func onePodLeftPendingBesideOnePerNodeOf(topology scenario.Topology) scenario.Pl
 	return scenario.NewPlacement(topology.Nodes(), append(placed, pending))
 }
 
-// theNodeThatStopped is the Node a When of one Node stops responding: the first
-// the Topology derives, which is the pick internal/scenario makes.
+// The first Node the Topology derives is the pick internal/scenario makes.
 func theNodeThatStopped(topology scenario.Topology) string {
 	return topology.Nodes()[0].Name
 }
 
-// everyPodBackOnTheRespondingNodesOf is the Placement a Failure settles at: every
-// Pod the Workload declared Running on a Node still responding, and none on the
-// Node that stopped. That Node is no Ready Node, so the observation is read
-// against the rest.
+// The stopped Node is no Ready Node, so the observation is read against the
+// rest.
 func everyPodBackOnTheRespondingNodesOf(topology scenario.Topology, stopped string) scenario.Placement {
 	responding := theNodesStillRespondingIn(topology, stopped)
 
 	return scenario.NewPlacement(responding, podsRunningOver(responding, podsOverEveryNode))
 }
 
-// onePodLeftOnTheFailedNodeOf is the same Placement observed while the control
-// plane has not moved one Pod off the Node that stopped: the Pod is counted under
-// that Node's name, because the report states what was observed.
+// The left-behind Pod is counted under that Node's name, because the report
+// states what was observed.
 func onePodLeftOnTheFailedNodeOf(topology scenario.Topology, stopped string) scenario.Placement {
 	responding := theNodesStillRespondingIn(topology, stopped)
 	moved := podsRunningOver(responding, podsOverEveryNode-onePodLeftBehind)
@@ -373,34 +269,27 @@ func onePodLeftOnTheFailedNodeOf(topology scenario.Topology, stopped string) sce
 	return scenario.NewPlacement(responding, append(moved, leftBehind))
 }
 
-// podsRunningShortOfTheMinimumOn is the Placement a Failure settled at while the
-// control plane has yet to place every Pod again: fewer Pods Running on the Nodes
-// still responding than the Workload's Required Capacity names.
 func podsRunningShortOfTheMinimumOn(topology scenario.Topology, stopped string) scenario.Placement {
 	responding := theNodesStillRespondingIn(topology, stopped)
 
 	return scenario.NewPlacement(responding, podsRunningOver(responding, podsShortOfTheMinimum))
 }
 
-// theZoneThatStopped is the Zone a When of one Zone stops responding: the first
-// the Topology derives, which is the pick internal/scenario makes.
+// The first Zone the Topology derives is the pick internal/scenario makes.
 func theZoneThatStopped(topology scenario.Topology) string {
 	return topology.Zones()[0]
 }
 
-// everyPodBackOnTheRespondingZonesOf is the Placement a Zone Failure settles at:
-// every Pod the Workload declared Running in a Zone still responding. The stopped
-// Zone's Nodes are no Ready Nodes, so the observation is read against the rest and
-// that Zone is in it no longer.
+// The stopped Zone's Nodes are no Ready Nodes, so that Zone is in the
+// observation no longer.
 func everyPodBackOnTheRespondingZonesOf(topology scenario.Topology, stopped string) scenario.Placement {
 	responding := theNodesOutside(topology, stopped)
 
 	return scenario.NewPlacement(responding, podsRunningOver(responding, podsOverEveryNode))
 }
 
-// onePodLeftInTheFailedZoneOf is the same Placement observed while one Node of the
-// stopped Zone is still Ready and still holds a Pod: a Zone's Nodes stop one after
-// another, so an observation taken between them reads against one of them still.
+// A Zone's Nodes stop one after another, so an observation taken between them
+// reads against one of them still.
 func onePodLeftInTheFailedZoneOf(topology scenario.Topology, stopped string) scenario.Placement {
 	responding := theNodesOutside(topology, stopped)
 	moved := podsRunningOver(responding, podsOverEveryNode-onePodLeftBehind)
@@ -410,8 +299,6 @@ func onePodLeftInTheFailedZoneOf(topology scenario.Topology, stopped string) sce
 	return scenario.NewPlacement(append(responding, stillReady), append(moved, leftBehind))
 }
 
-// theNodesOutside are the Nodes of every Zone but this one, and theFirstNodeIn the
-// first Node the Topology derives in it.
 func theNodesOutside(topology scenario.Topology, zone string) []scenario.Node {
 	declared := topology.Nodes()
 	outside := make([]scenario.Node, 0, len(declared))
@@ -434,8 +321,7 @@ func theFirstNodeIn(topology scenario.Topology, zone string) scenario.Node {
 	return scenario.Node{}
 }
 
-// theNodesStillRespondingIn are the Nodes an observation is read against once
-// stopped has left it, which a Node that stopped responding does at once.
+// A Node that stopped responding leaves the observation at once.
 func theNodesStillRespondingIn(topology scenario.Topology, stopped string) []scenario.Node {
 	declared := topology.Nodes()
 	responding := make([]scenario.Node, 0, len(declared))
@@ -448,8 +334,7 @@ func theNodesStillRespondingIn(topology scenario.Topology, stopped string) []sce
 	return responding
 }
 
-// podsRunningOver is pods Running Pods dealt over these Nodes in turn, so a Node
-// takes a second Pod only once every Node holds one.
+// A Node takes a second Pod only once every Node holds one.
 func podsRunningOver(nodes []scenario.Node, pods int) []scenario.Pod {
 	placed := make([]scenario.Pod, 0, pods)
 	for at := range pods {
@@ -463,8 +348,6 @@ func podsRunningOver(nodes []scenario.Node, pods int) []scenario.Pod {
 	return placed
 }
 
-// everyPodOnOneNodeOf is a Placement of the same Pods crowded onto the first Node
-// of topology, which no even Then is met by.
 func everyPodOnOneNodeOf(topology scenario.Topology) scenario.Placement {
 	nodes := topology.Nodes()
 	crowded := onePodPerNodeOf(topology).Pods()
@@ -475,12 +358,8 @@ func everyPodOnOneNodeOf(topology scenario.Topology) scenario.Placement {
 	return scenario.NewPlacement(nodes, crowded)
 }
 
-// topologyStepOf, workloadStepOf and the Then Steps below are the Steps the
-// Scenarios in this file record. A Step's name is what a report shows and what a
-// Finding points at, so this suite states it.
-//
-// topologyStepOf is the line of a NodePool naming Roomy, which it reads by that
-// name and the values Roomy stands for.
+// A Step's name is what a report shows and what a Finding points at, so this
+// suite states it.
 func topologyStepOf(zones, nodesPerZone int) Step {
 	return Step{
 		Kind: GivenStep,
@@ -489,10 +368,6 @@ func topologyStepOf(zones, nodesPerZone int) Step {
 	}
 }
 
-// topologyStepHoldingOf is the Step a Topology line records once its NodePool
-// states the capacity its Nodes hold, and topologyStepHoldingOnePodOf is that
-// line at a capacity of one Pod, which reads in the singular as the counted Steps
-// below do.
 func topologyStepHoldingOf(zones, nodesPerZone, podsPerNode int) Step {
 	return topologyStepHolding(zones, nodesPerZone, fmt.Sprintf("%d Pods", podsPerNode))
 }
@@ -506,8 +381,7 @@ func topologyStepHolding(zones, nodesPerZone int, podsSpelled string) Step {
 		fmt.Sprintf("%s cpu, %s memory and %s", someCPUSpelled, someMemorySpelled, podsSpelled))
 }
 
-// topologyStepHoldingCapacity is how any such line reads, whichever capacity it
-// states: one template, so the lines cannot drift apart here.
+// One template, so the lines cannot drift apart here.
 func topologyStepHoldingCapacity(zones, nodesPerZone int, capacity string) Step {
 	return Step{
 		Kind: GivenStep,
@@ -516,9 +390,6 @@ func topologyStepHoldingCapacity(zones, nodesPerZone int, capacity string) Step 
 	}
 }
 
-// workloadStepOf is the Step a Workload line records: its Pods, and the intent of
-// the specification it declares. resilientPlacementWorkloadStepOf is that line
-// for the specification the Scenarios in this file declare.
 func workloadStepOf(pods int, declaring string) Step {
 	return Step{
 		Kind: GivenStep,
@@ -530,25 +401,19 @@ func resilientPlacementWorkloadStepOf(pods int) Step {
 	return carrying(workloadStepOf(pods, resilientPlacementReads()), resilientPlacementCarries()...)
 }
 
-// resilientPlacementReads is how Resilient placement is named on the Given line
-// declaring it: its name, then the Startup time its Pods take.
 func resilientPlacementReads() string {
 	return fmt.Sprintf("%s, each Pod starting in %s to %s", resilientPlacementNamed,
 		someShortestStartupMillis*time.Millisecond, someLongestStartupMillis*time.Millisecond)
 }
 
-// carrying is that Step reporting the settings its Workload's Pods carry, one
-// line each.
 func carrying(step Step, settings ...string) Step {
 	step.Settings = settings
 
 	return step
 }
 
-// aTolerationLine, aSpreadLine and aRequestLine are how a Given reports one
-// setting its Workload's Pods carry: as a manifest writes it, the Pod-spec field
-// it fills, then each field's Kubernetes API name and value. A toleration is
-// reported at the lab's waiting time, the one time the domain holds it at.
+// A toleration is reported at the lab's waiting time, the one time the domain
+// holds it at.
 func aTolerationLine(taint string) string {
 	return fmt.Sprintf("tolerations: {key: %s, operator: Exists, effect: NoExecute, tolerationSeconds: %d}",
 		taint, theLabsWaitInSeconds())
@@ -564,12 +429,8 @@ func aRequestLine(cores, gibibytes int) string {
 	return fmt.Sprintf("resources.requests: {cpu: %d, memory: %dGi}", cores, gibibytes)
 }
 
-// aFullAccessLine is how a Given reports a full access its Workload's Pods carry.
 const aFullAccessLine = "a full access to the Kubernetes Pod specification applies"
 
-// theLeavingLines are the two settings the Named setting for leaving an
-// unresponsive Node stands for, and resilientPlacementCarries every setting
-// Resilient placement's Pods carry, in the order the domain holds them.
 func theLeavingLines() []string {
 	return []string{aTolerationLine(scenario.TaintNodeNotReady), aTolerationLine(scenario.TaintNodeUnreachable)}
 }
@@ -578,8 +439,7 @@ func resilientPlacementCarries() []string {
 	return append(theLeavingLines(), aSpreadLine(scenario.ZoneLabel, anEvenSkew), aSpreadLine(scenario.HostnameLabel, anEvenSkew))
 }
 
-// workloadStepKeepingOf is that line once it names the fewest Pods the Workload
-// must keep Running, which renames the line rather than adding one.
+// Naming the minimum renames the line rather than adding one.
 func workloadStepKeepingOf(pods, minimum int) Step {
 	keeping := resilientPlacementWorkloadStepOf(pods)
 	keeping.Name = fmt.Sprintf("%s, keeping at least %d Pods Running", keeping.Name, minimum)
@@ -599,15 +459,12 @@ func podsPerNodeStepOf(pods int) Step {
 	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pod per Node", pods)}
 }
 
-// nodesFailStepOf and zonesFailStepOf are the Steps a When records before it
-// resolves what it stops; once it has them, it renames that line to carry their
-// names, which only a run against a cluster reaches.
+// Once a When resolves what it stops it renames its line, which only a run
+// against a cluster reaches.
 func nodesFailStepOf(nodes int) Step {
 	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Nodes fail", nodes)}
 }
 
-// oneNodeFailsStep is the Step a When of one Node records, which reads in the
-// singular where the counted Steps above read in the plural.
 func oneNodeFailsStep() Step {
 	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Node fails", oneNodeFailing)}
 }
@@ -616,9 +473,6 @@ func zonesFailStepOf(zones int) Step {
 	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Zones fail", zones)}
 }
 
-// allNodesReadyStep, allPodsReadyStep and settledPlacementStep are the Steps the
-// three Waits record: a Wait line of their own, whichever way the Scenario wrote
-// them.
 func allNodesReadyStep() Step {
 	return Step{Kind: WaitStep, Name: allNodesReady}
 }
@@ -631,9 +485,6 @@ func settledPlacementStep() Step {
 	return Step{Kind: WaitStep, Name: theSettledPlacement}
 }
 
-// podsPendingStepOf is the Step the Then counting the Pods left Pending records,
-// and onePodPendingStep that line where one Pod is left, which reads in the
-// singular as the counted Steps above do.
 func podsPendingStepOf(pods int) Step {
 	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pods Pending", pods)}
 }
@@ -650,10 +501,8 @@ func noPodsInTheFailedZonesStep() Step {
 	return Step{Kind: ThenStep, Name: "no Pod in the Zones that failed"}
 }
 
-// requiredCapacityStep is the Step the Then judging a Required Capacity records
-// before it has the counts, which is the line a Scenario with nothing to judge
-// ends at. requiredCapacityStepOf is that line once it states the minimum and both
-// counts, which it is renamed to before it judges them.
+// requiredCapacityStep is the line a Scenario with nothing to judge ends at,
+// recorded before any count.
 func requiredCapacityStep() Step {
 	return Step{Kind: ThenStep, Name: "the Required Capacity held"}
 }
@@ -666,15 +515,12 @@ func requiredCapacityStepOf(minimum, atTheFailure, onceSettled int) Step {
 	}
 }
 
-// judgedFinding is one Finding as this suite reads it: the Step it names, and
-// whether it carried the mismatch. The mismatch text is what internal/expect
-// reported and is not this suite's to pin.
+// The mismatch text is internal/expect's and is not this suite's to pin.
 type judgedFinding struct {
 	Step        Step
 	Mismatching bool
 }
 
-// asJudged is every Finding reported, read that way.
 func asJudged(findings []Finding) []judgedFinding {
 	judged := make([]judgedFinding, 0, len(findings))
 	for _, finding := range findings {
@@ -684,9 +530,8 @@ func asJudged(findings []Finding) []judgedFinding {
 	return judged
 }
 
-// momentsNamedIn is the moment each Finding names, of the two a Required Capacity
-// is judged at: one judgement reports both moments under one Step, so what tells
-// its Findings apart is the moment each of them names.
+// One judgement reports both moments under one Step, so the moment named is
+// what tells its Findings apart.
 func momentsNamedIn(findings []Finding) []string {
 	named := make([]string, 0, len(findings))
 	for _, finding := range findings {
@@ -706,12 +551,7 @@ func momentNamedBy(finding Finding) string {
 	return noMomentNamed
 }
 
-// A Wait's line names the time it took where it was reached, and the time it was
-// held to where it was not, so a reader of a restore time never reads one for the
-// other. A stated time is marked as stated and the lab's own waiting time is not,
-// and the time it took is stated to the tenth of a second such a reader acts on.
-// The three Wait kinds read the same way, each line being composed from the Step's
-// own values (docs/prd.md REQ-SIM-006).
+// A reader of a restore time must never read one time for the other.
 func TestAWaitsLine_ShouldTellTheTimeItTookFromTheTimeItWasHeldTo(t *testing.T) {
 	statingATime := aWaitStating(t, aTimeAWaitStates)
 	statingNone := scenario.NewWaitStatingNoTime()
@@ -754,21 +594,14 @@ func TestAWaitsLine_ShouldTellTheTimeItTookFromTheTimeItWasHeldTo(t *testing.T) 
 	}
 }
 
-// A Step of any other kind waited for nothing and reads as its kind and the name
-// it reports alone, which is what the time a Wait was held to tells apart: a Wait
-// with nothing to wait for was still held to a time, and reports being reached in
-// no measured time rather than reading as a Given does.
 func TestAStepThatIsNotAWait_ShouldReadAsItsKindAndNameAlone(t *testing.T) {
 	declared := topologyStepOf(twoZones, twoNodesPerZone)
 
 	expect.Expect(t, declared.String()).To(expect.Equal("Given " + declared.Name))
 }
 
-// A Wait reached later than the time it states ends the Scenario at that Wait,
-// whose line names that time alone: the time it took is left off, because what a
-// reader acts on there is the time the Scenario called and missed. The judgement
-// takes the time measured rather than reading a clock, which is what lets it run
-// over no cluster (docs/prd.md REQ-SIM-006).
+// The time it took is left off, because what a reader acts on is the time the
+// Scenario called and missed.
 func TestAWaitNotReachedInTheTimeItStates_ShouldEndTheScenarioNamingThatTimeAlone(t *testing.T) {
 	ending := aScenarioAtAWaitFor(allPodsReady)
 
@@ -780,10 +613,8 @@ func TestAWaitNotReachedInTheTimeItStates_ShouldEndTheScenarioNamingThatTimeAlon
 	causeNames(t, ended, theWaitReachedTooLate)
 }
 
-// Each form of writing a Wait states a time of its own: all four carry the
-// seconds written on their line into the domain, which refuses a time the lab
-// cannot hold a Wait to and names the time that Wait stated. The refusal stands
-// before the Wait applies anything, so these Scenarios reach no cluster.
+// The refusal stands before the Wait applies anything, so these Scenarios reach
+// no cluster.
 func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeItStates(t *testing.T) {
 	waits := map[string]struct {
 		write func(*Scenario)
@@ -836,16 +667,12 @@ func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeIt
 	}
 }
 
-// secondsRead is how a refusal states a time of that many seconds, which is the
-// duration those seconds are resolved to rather than the count written.
 func secondsRead(seconds int) string {
 	return (time.Duration(seconds) * time.Second).String()
 }
 
-// A Given declares the value its line names and reaches no cluster: what it
-// declared is applied by the Wait a Scenario writes after it, so these two lines
-// run against a Scenario holding no Simulated Cluster at all
-// (docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md).
+// What a Given declared is applied by the Wait after it, so these lines run
+// against a Scenario holding no Simulated Cluster at all.
 func TestAGivenThatIsNotAskedToWait_ShouldDeclareWithoutReachingTheCluster(t *testing.T) {
 	declaring := aScenario()
 
@@ -861,9 +688,8 @@ func TestAGivenThatIsNotAskedToWait_ShouldDeclareWithoutReachingTheCluster(t *te
 	}))
 }
 
-// A Workload line customized with full access leaves the Scenario holding those
-// full accesses, which is how they reach the Simulated Cluster: the Workload the
-// domain constructs holds the specification's settings alone.
+// The domain's Workload holds the specification's settings alone, so the full
+// accesses must be kept beside it.
 func TestAGivenWorkloadCustomizedWithFullAccess_ShouldKeepItBesideTheWorkloadItDeclared(t *testing.T) {
 	declaring := aScenario()
 	customized := resilientPlacement().Customize(aFullAccess())
@@ -874,9 +700,6 @@ func TestAGivenWorkloadCustomizedWithFullAccess_ShouldKeepItBesideTheWorkloadItD
 		To(expect.Equal(placesOfTheFullAccesses(customized.Accesses())))
 }
 
-// A Workload line declaring a Required Capacity carries the minimum into the
-// Workload the domain holds, and renames its own line to it (docs/prd.md
-// REQ-SIM-010).
 func TestAGivenWorkloadDeclaringARequiredCapacity_ShouldDeclareThatMinimumBesideItsPods(t *testing.T) {
 	declaring := aScenario()
 
@@ -889,9 +712,8 @@ func TestAGivenWorkloadDeclaringARequiredCapacity_ShouldDeclareThatMinimumBeside
 		To(expect.Equal([]Step{workloadStepKeepingOf(podsOverEveryNode, theMinimumKept)}))
 }
 
-// A minimum above the Pods the Workload runs is refused where it is declared,
-// which is docs/prd.md REQ-SIM-010 edge case 1. The minima the domain refuses are
-// its own suite's, this one being the path through the Given Step.
+// The minima the domain refuses are its own suite's; this is the path through
+// the Given Step.
 func TestARequiredCapacityNoWorkloadCouldKeep_ShouldEndTheScenarioNamingThatGiven(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	ending := aScenarioOver(onePodPerNodeOf(declared))
@@ -909,10 +731,8 @@ func TestARequiredCapacityNoWorkloadCouldKeep_ShouldEndTheScenarioNamingThatGive
 	causeNames(t, ended, fmt.Sprintf("could never keep %d Pods Running", aMinimumNoWorkloadCouldKeep))
 }
 
-// A Startup time the domain refuses is refused where it is stated, so the
-// Scenario ends at the Given declaring that Workload, which is docs/prd.md
-// REQ-SIM-012 edge case 2. The times the domain refuses are its own suite's, this
-// one being the path through the Given Step.
+// The times the domain refuses are its own suite's; this is the path through
+// the Given Step.
 func TestARefusedStartupTime_ShouldEndTheScenarioAtTheGivenDeclaringItsWorkload(t *testing.T) {
 	const aShortestAboveItsLongestMillis, itsLongestMillis = 900, 400
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
@@ -930,11 +750,9 @@ func TestARefusedStartupTime_ShouldEndTheScenarioAtTheGivenDeclaringItsWorkload(
 	causeNames(t, ended, fmt.Sprintf("shortest Startup time of %s", aShortestAboveItsLongestMillis*time.Millisecond))
 }
 
-// Edge case 1: a definition names its Startup time as its second argument, so one
-// leaving it out does not compile. The one way left to write none is the zero
-// Startup time no form builds, which is refused, and so is that zero time written
-// as a pod.Customization; either ends the Scenario at the Given declaring a Workload
-// of it (docs/prd.md REQ-SIM-015).
+// A definition leaving out its Startup time does not compile, so the one way
+// left to write none is the zero Startup time, refused as a definition argument
+// and as a Customization.
 func TestAPodSpecificationDefinedWithoutAStartupTime_ShouldBeRefusedWhereItIsDefined(t *testing.T) {
 	written := map[string]pod.Specification{
 		"defined with none":    pod.Predefined(resilientPlacementNamed, pod.StartupTime{}),
@@ -956,9 +774,7 @@ func TestAPodSpecificationDefinedWithoutAStartupTime_ShouldBeRefusedWhereItIsDef
 	}
 }
 
-// A definition the domain refuses, under no name or naming a Startup time no Pod
-// can take, ends the Scenario at the Given declaring a Workload of it, as a
-// refused pod.Customization does. The refusals themselves are the domain's suite's.
+// The refusals themselves are the domain's suite's.
 func TestAPodSpecificationTheDomainRefuses_ShouldEndTheScenarioAtTheGivenDeclaringIt(t *testing.T) {
 	const noName, aShortestAboveItsLongestMillis, itsLongestMillis = "", 900, 400
 
@@ -995,13 +811,9 @@ func TestAPodSpecificationTheDomainRefuses_ShouldEndTheScenarioAtTheGivenDeclari
 	}
 }
 
-// Edge case 3: every field of a setting the lab offers is required, and its zero
-// value is the field left out. A Pod setting leaving one out is refused where it
-// is stated, so the Scenario ends at the Given declaring its Workload, naming the
-// setting and the field under its Kubernetes name; a Node capacity leaving out a
-// dimension is refused by the domain at the Topology Given declaring it
-// (docs/prd.md REQ-SIM-016 and
-// docs/adr/2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md).
+// Every field of a setting is required and its zero value is the field left
+// out. A Node capacity leaving out a dimension is refused by the domain at the
+// Topology Given.
 func TestASettingMissingAValueKubernetesRequires_ShouldBeRefusedWhereItIsStated(t *testing.T) {
 	const noneSpelled = "0"
 	theWorkloadLineRefused := workloadStepOf(podsOverEveryNode, string(resilientPlacementNamed))
@@ -1095,9 +907,7 @@ func TestASettingMissingAValueKubernetesRequires_ShouldBeRefusedWhereItIsStated(
 	}
 }
 
-// aToleration, aSpread, aRequest and aNodeCapacity are each setting the lab
-// offers with every field stated, which the refusals above leave one field out
-// of; what each field holds is no matter to them.
+// What each field holds is no matter to the refusals above.
 func aToleration() pod.Toleration {
 	return pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: theLabsWaitInSeconds()}
 }
@@ -1116,18 +926,14 @@ func aNodeCapacity() node.Capacity {
 	return node.Capacity{CPU: someCoresPerNode, Memory: someGibibytesPerNode * node.Gi, Pods: twoPodsPerNode}
 }
 
-// leavingOut is a setting with the one field out names set to its zero value,
-// which is how a keyed literal leaving it out reads.
+// Setting a field to its zero value is how a keyed literal leaving it out
+// reads.
 func leavingOut[S any](stated S, out func(*S)) S {
 	out(&stated)
 
 	return stated
 }
 
-// declaringAWorkloadCustomizedWith declares the Topology every Workload line of
-// this file runs on, then a Workload of Resilient placement customized with the
-// setting, and declaringATopologyOf declares a Topology of Nodes holding the
-// capacity.
 func declaringAWorkloadCustomizedWith(setting pod.Setting) func(*Scenario) {
 	return func(declaring *Scenario) {
 		declaring.Given().Topology(Zones(twoZones), theGeneralNodePool())
@@ -1141,9 +947,6 @@ func declaringATopologyOf(capacity node.Capacity) func(*Scenario) {
 	}
 }
 
-// A Workload's Given line names the Startup time its Pods take after the name of
-// the specification it declares: a range as its shortest and its longest, and one
-// time every Pod takes once (docs/prd.md REQ-SIM-012).
 func TestAWorkloadsGivenLine_ShouldNameTheStartupTimeItsPodsTake(t *testing.T) {
 	const oneStartupMillis = 2000
 
@@ -1173,11 +976,7 @@ func TestAWorkloadsGivenLine_ShouldNameTheStartupTimeItsPodsTake(t *testing.T) {
 	}
 }
 
-// A Workload's Given reports every setting its Pods carry under its Kubernetes
-// name, in the order the domain holds them: a Named setting as the settings it
-// stands for, a pod.Customization as it customized them, and each full access as one
-// line after the settings (docs/prd.md REQ-SIM-016). The name of the Step stays
-// as it was, so a Finding naming it stays short.
+// The name of the Step stays as it was, so a Finding naming it stays short.
 func TestAWorkloadsGivenLine_ShouldReportEverySettingItsPodsCarryUnderItsKubernetesName(t *testing.T) {
 	const aWaitOfItsOwnSeconds = 300
 
@@ -1211,9 +1010,6 @@ func TestAWorkloadsGivenLine_ShouldReportEverySettingItsPodsCarryUnderItsKuberne
 	}
 }
 
-// A Workload with a pod.Customization reports the settings as customized: the zone
-// spread replaced in place, the request appended and each full access as one
-// line after the settings (docs/prd.md REQ-SIM-016).
 func TestACustomizedWorkloadsGivenLine_ShouldReportTheSettingsAsCustomized(t *testing.T) {
 	declaring := aScenario()
 
@@ -1225,9 +1021,6 @@ func TestACustomizedWorkloadsGivenLine_ShouldReportTheSettingsAsCustomized(t *te
 		aRequestLine(oneCorePerPod, twoGibibytesPerPod), aFullAccessLine)))
 }
 
-// A NodePool naming a Named Node capacity holds the cpu, memory and Pod count
-// its definition gives, whatever name the definition gives it (docs/prd.md
-// REQ-SIM-015), and its line names it beside the values it stands for.
 func TestANodePoolNamingACapacityItsScenarioDefines_ShouldProvisionNodesWithThatDefinitionsCapacity(t *testing.T) {
 	declaring := aScenario()
 
@@ -1257,11 +1050,8 @@ func TestAGivenTopologyNamingItsNodeCapacity_ShouldDeclareThatCapacityAndRenameI
 		To(expect.Equal([]Step{topologyStepHoldingOf(twoZones, twoNodesPerZone, twoPodsPerNode)}))
 }
 
-// The NodePools the Topology lines below declare: one named general naming
-// Roomy, and one named gpu of fewer, larger Nodes, in the shape of
-// docs/prd.md REQ-SIM-013's own example. The gpu NodePool's cpu and memory are
-// double what Roomy holds, so its Nodes differ from the other's in both, and
-// its Pod count is a value no test here turns on.
+// The gpu NodePool's cpu and memory are double Roomy's, so its Nodes differ in
+// both; no test here turns on its Pod count.
 const (
 	generalNodePool node.PoolName = "general"
 	gpuNodePool     node.PoolName = "gpu"
@@ -1274,8 +1064,6 @@ const (
 	someGpuPodsPerNode = 10
 )
 
-// theGpuNodePool and theGeneralNodePool are those two NodePools as a Topology
-// line declares them.
 func theGpuNodePool() node.DeclaredPool {
 	return node.Pool(gpuNodePool, node.PerZone(oneGpuNodePerZone),
 		node.Capacity{CPU: gpuCoresPerNode, Memory: gpuGibibytesNode * node.Gi, Pods: someGpuPodsPerNode})
@@ -1285,9 +1073,6 @@ func theGeneralNodePool() node.DeclaredPool {
 	return node.Pool(generalNodePool, node.PerZone(twoNodesPerZone), roomyNodes())
 }
 
-// aTopologyOfNodePools is the Topology of zones Zones each holding the two
-// NodePools above, built by the domain's own constructors, which is what a line
-// declaring them declares.
 func aTopologyOfNodePools(t *testing.T, zones int) scenario.Topology {
 	t.Helper()
 
@@ -1311,10 +1096,6 @@ func aTopologyOfNodePools(t *testing.T, zones int) scenario.Topology {
 	return topology
 }
 
-// topologyStepOfNodePools is the Step a Topology line of those two NodePools
-// records: each NodePool in declaration order, by its name, its Node count per
-// Zone, and the capacity it names or states, a stated one by its cpu, memory and
-// Pod count.
 func topologyStepOfNodePools(zones int) Step {
 	return Step{Kind: GivenStep, Name: fmt.Sprintf(
 		"a Topology of %d Zones of a NodePool %s of %d %s Nodes holding %d cpu, %dGi memory and %d Pods each; "+
@@ -1323,8 +1104,6 @@ func topologyStepOfNodePools(zones int) Step {
 		gpuNodePool, oneGpuNodePerZone, gpuCoresPerNode, gpuGibibytesNode, someGpuPodsPerNode)}
 }
 
-// A run reports each NodePool on the Topology line that declared it, by the
-// capacity it names or states.
 func TestARunOfNodePools_ShouldReportEachNodePoolByNameCountAndCapacity(t *testing.T) {
 	declaring := aScenario()
 
@@ -1334,12 +1113,9 @@ func TestARunOfNodePools_ShouldReportEachNodePoolByNameCountAndCapacity(t *testi
 	expect.Expect(t, declaring.topology.Nodes()).To(expect.Equal(aTopologyOfNodePools(t, twoZones).Nodes()))
 }
 
-// What a Topology line holds is NodePools alone, each stating its own name and
-// capacity, so a line holding none is refused there and the Scenario ends at it. A
-// NodePool the domain refuses is carried to the same line; the NodePools the
-// domain refuses are its own suite's, this one being the path through the Given
-// Step (docs/prd.md REQ-SIM-013 edge cases 1 to 5). A NodePool omitting its
-// capacity does not compile, so the zero capacity is the one written here.
+// The NodePools the domain refuses are its own suite's; this is the path
+// through the Given Step. A NodePool omitting its capacity does not compile, so
+// the zero capacity is the one written here.
 func TestARefusedNodePoolDeclaration_ShouldBeRefusedWhereItIsStated(t *testing.T) {
 	const noNodePerZone, noName, noCapacityName, noPod = 0, "", node.CapacityName(""), 0
 	var noNodeCapacity node.Capacity
@@ -1411,8 +1187,6 @@ func TestARefusedNodePoolDeclaration_ShouldBeRefusedWhereItIsStated(t *testing.T
 	}
 }
 
-// The label the labelled NodePools below state, and the value each of them
-// states under it: on-demand and spot, as a cloud's capacity types are named.
 const (
 	capacityTypeLabel    = "capacity-type"
 	onDemandCapacity     = "on-demand"
@@ -1420,8 +1194,6 @@ const (
 	oneNodePerZoneOfEach = 1
 )
 
-// theOnDemandNodePool and theSpotNodePool are two NodePools of one Roomy Node per
-// Zone, each named after and labelled with its capacity type.
 func theOnDemandNodePool() node.DeclaredPool {
 	return node.Pool(onDemandCapacity, node.PerZone(oneNodePerZoneOfEach), roomyNodes()).
 		Labels(node.Labels{capacityTypeLabel: onDemandCapacity})
@@ -1432,8 +1204,6 @@ func theSpotNodePool() node.DeclaredPool {
 		Labels(node.Labels{capacityTypeLabel: spotCapacity})
 }
 
-// aTopologyOfLabelledNodePools is the Topology of zones Zones each holding those
-// two NodePools, built by the domain's own constructors.
 func aTopologyOfLabelledNodePools(t *testing.T, zones int) scenario.Topology {
 	t.Helper()
 
@@ -1446,8 +1216,6 @@ func aTopologyOfLabelledNodePools(t *testing.T, zones int) scenario.Topology {
 	return topology
 }
 
-// aLabelledNodePool is the domain's NodePool of one Roomy Node per Zone named
-// after the capacity type it states under the capacity-type label.
 func aLabelledNodePool(t *testing.T, capacityType string) scenario.NodePool {
 	t.Helper()
 
@@ -1467,8 +1235,6 @@ func aLabelledNodePool(t *testing.T, capacityType string) scenario.NodePool {
 	return labelled
 }
 
-// topologyStepOfLabelledNodePools is the Step a Topology line of those two
-// NodePools records: each by its name, count and capacity, then its label.
 func topologyStepOfLabelledNodePools(zones int) Step {
 	labelledPool := "a NodePool %s of %d %s Node holding %d cpu, %dGi memory and %d Pods each, labelled %s=%s"
 
@@ -1480,8 +1246,6 @@ func topologyStepOfLabelledNodePools(zones int) Step {
 		capacityTypeLabel, spotCapacity)}
 }
 
-// A Topology line of NodePools stating labels declares Nodes carrying them, and
-// reports each NodePool's labels after its capacity (docs/prd.md REQ-SIM-017).
 func TestAGivenTopologyStatingLabels_ShouldReportEachNodePoolsLabelsAfterItsCapacity(t *testing.T) {
 	declaring := aScenario()
 
@@ -1491,20 +1255,14 @@ func TestAGivenTopologyStatingLabels_ShouldReportEachNodePoolsLabelsAfterItsCapa
 	expect.Expect(t, declaring.topology.Nodes()).To(expect.Equal(aTopologyOfLabelledNodePools(t, twoZones).Nodes()))
 }
 
-// podsPerCapacityTypeWhenEven is the share of a Pod per Node of the labelled
-// Topology above each capacity type holds: one Node of each per Zone.
 const podsPerCapacityTypeWhenEven = twoZones * oneNodePerZoneOfEach
 
-// podsPerValueOfStep is the Step the Then counting Pods per value of the
-// capacity-type label records.
 func podsPerValueOfStep(pods int, key string) Step {
 	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pods per value of %s", pods, key)}
 }
 
-// A Then counting Pods per value of a label judges every value the NodePools
-// state: an even Placement meets the count each value holds, another count is a
-// Finding, and a value whose Nodes hold no Pod counts as none, so a Placement
-// leaving one empty is a Finding too (docs/prd.md REQ-SIM-017 edge case 5).
+// A value whose Nodes hold no Pod counts as none, so a Placement leaving one
+// empty is a Finding.
 func TestAThenCountingPodsPerLabelValue_ShouldJudgeEveryValueTheNodePoolsState(t *testing.T) {
 	atAnotherCount := podsPerCapacityTypeWhenEven + 1
 	tests := map[string]struct {
@@ -1546,9 +1304,6 @@ func TestAThenCountingPodsPerLabelValue_ShouldJudgeEveryValueTheNodePoolsState(t
 	}
 }
 
-// A Then counting Pods per value of a label no NodePool states has no value to
-// judge, so it ends the Scenario at its own line naming that label (docs/prd.md
-// REQ-SIM-017 edge case 4).
 func TestAThenStatingALabelNoNodePoolStates_ShouldEndTheScenarioAtThatThen(t *testing.T) {
 	const aLabelNoNodePoolStates = "rack"
 	ending := aScenarioOver(onePodPerNodeOf(aTopologyOfLabelledNodePools(t, twoZones)))
@@ -1609,9 +1364,6 @@ func TestThenThePlacementDoesNotMeet_ShouldReportAFindingAndRunTheLaterSteps(t *
 	}))
 }
 
-// A Then counting the Pods left Pending judges what no Node had room for: the
-// count the Placement holds is met, and another count is a Finding under the Step
-// naming that count while the later Steps still run (docs/prd.md REQ-SIM-011).
 func TestAThenCountingThePodsLeftPending_ShouldReportAFindingOnAnotherCount(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	judging := aScenarioOver(onePodLeftPendingBesideOnePerNodeOf(declared))
@@ -1633,10 +1385,8 @@ func TestAThenCountingThePodsLeftPending_ShouldReportAFindingOnAnotherCount(t *t
 	}))
 }
 
-// The two tests below judge the Then that reads a Failure where every sibling Then
-// is judged: over a Placement the test built, with no cluster. Stopping a Node
-// responding is the Simulated Cluster's, and this Then's own decision is a count
-// read off the Placement the Scenario settled at.
+// Stopping a Node is the Simulated Cluster's, so these tests judge the Then
+// over a Placement the test built.
 func TestAPlacementHoldingNoPodOnTheNodesThatFailed_ShouldRecordNoFinding(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	stopped := theNodeThatStopped(declared)
@@ -1679,9 +1429,8 @@ func TestAPlacementStillHoldingAPodOnANodeThatFailed_ShouldReportAFindingAndRunT
 	}))
 }
 
-// The Then that reads a Zone Failure is judged the same way over the Zone axis: a
-// Zone whose Nodes have all left the observation holds no Pod, and one still
-// holding a Node of that Zone is where a Pod left behind is still counted.
+// A Zone still holding a Node in the observation is where a Pod left behind is
+// still counted.
 func TestAPlacementHoldingNoPodInTheZonesThatFailed_ShouldRecordNoFinding(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	stopped := theZoneThatStopped(declared)
@@ -1724,11 +1473,9 @@ func TestAPlacementStillHoldingAPodInAZoneThatFailed_ShouldReportAFindingAndRunT
 	}))
 }
 
-// The count at the moment of the Failure is a derivation and not an observation,
-// so it is driven here over the Placement the When discards rather than through
-// the When, which stops Nodes responding against a cluster
-// (docs/adr/2026-10-06-required-capacity-judged-at-two-moments.md). Which Pods a
-// Placement reports Running apart from a Node is internal/scenario's own suite's.
+// The count at the moment of the Failure is a derivation, so it is driven over
+// the Placement the When discards rather than through the When, which needs a
+// cluster.
 func TestAPodOnANodeThatStoppedResponding_ShouldNotCountAsRunningAtTheMomentOfTheFailure(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	stopped := theNodeThatStopped(declared)
@@ -1740,8 +1487,6 @@ func TestAPodOnANodeThatStoppedResponding_ShouldNotCountAsRunningAtTheMomentOfTh
 	expect.Expect(t, kept).To(expect.Equal(podsOverEveryNode - onePodLeftBehind))
 }
 
-// A Required Capacity held through a Failure states what it counted at each
-// moment beside the minimum declared, met or not (docs/prd.md REQ-SIM-010).
 func TestACapacityThatHoldsThroughAFailure_ShouldStateThePodsCountedAtEachMomentAndRecordNoFinding(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	stopped := theNodeThatStopped(declared)
@@ -1763,8 +1508,8 @@ func TestACapacityThatHoldsThroughAFailure_ShouldStateThePodsCountedAtEachMoment
 }
 
 func TestACapacityMissedAtOneMoment_ShouldReportAFindingNamingThatMoment(t *testing.T) {
-	// Each case misses the minimum at one of the two moments and meets it at the
-	// other, so the Finding it reports is the one naming the moment missed.
+	// Each case misses the minimum at one moment and meets it at the other, so
+	// its Finding names the moment missed.
 	cases := []struct {
 		name             string
 		keptAtTheFailure int
@@ -1814,9 +1559,7 @@ func TestACapacityMissedAtOneMoment_ShouldReportAFindingNamingThatMoment(t *test
 }
 
 func TestAFailureToleranceWithNothingToJudge_ShouldEndTheScenarioNamingThatThen(t *testing.T) {
-	// A Required Capacity is judged through a Failure and against a minimum, so a
-	// Scenario missing either has nothing to judge and ends at the Then, which is
-	// recorded before it states any count.
+	// The Then is recorded before it states any count.
 	cases := []struct {
 		name     string
 		declare  func(scenario.Topology, string) *Scenario
@@ -1866,9 +1609,7 @@ func TestAFailureToleranceWithNothingToJudge_ShouldEndTheScenarioNamingThatThen(
 }
 
 func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testing.T) {
-	// Each case declares the same world up to the one Given its constructor
-	// refuses, and names the Steps recorded up to and including that line: a
-	// Scenario that has ended records none of the lines after it.
+	// A Scenario that has ended records none of the lines after it.
 	cases := []struct {
 		name    string
 		declare func(*Scenario)
@@ -1943,10 +1684,6 @@ func TestStepThatCannotBeCarriedOut_ShouldEndTheScenarioAndNameThatStep(t *testi
 	}
 }
 
-// A Then judges the Placement a Wait reached, so a Then with no Wait between it
-// and the Givens, or between it and the Failure that discarded the last
-// Placement, has nothing settled to judge and the Scenario ends there
-// (docs/prd.md REQ-SIM-006).
 func TestAThenWithNoWaitBeforeIt_ShouldEndTheScenarioNamingThatThen(t *testing.T) {
 	cases := map[string]func(scenario.Topology) *Scenario{
 		"no Wait since the Givens": func(_ scenario.Topology) *Scenario {
@@ -1983,9 +1720,8 @@ func TestAThenWithNoWaitBeforeIt_ShouldEndTheScenarioNamingThatThen(t *testing.T
 	}
 }
 
-// A Failure counts what the Workload kept Running at the moment it is injected,
-// off the Placement the last Wait reached, so a Scenario that has not Waited once
-// ends at that When rather than stopping Nodes in a world it has not observed.
+// The Scenario ends at the When rather than stopping Nodes in a world it has
+// not observed.
 func TestAFailureBeforeTheScenarioHasWaited_ShouldEndTheScenarioNamingThatWhen(t *testing.T) {
 	ending := aScenario()
 	ending.Given().Topology(Zones(twoZones), theGeneralNodePool())
@@ -2005,10 +1741,8 @@ func TestAFailureBeforeTheScenarioHasWaited_ShouldEndTheScenarioNamingThatWhen(t
 	causeNames(t, ended, theWaitThatNeverStood)
 }
 
-// A Scenario's lines are carried out in the order they stand in, so a Then before
-// a When judges the Placement the Scenario starts from and the When after it
-// injects the Failure into that same settled world. The When here is the
-// refused-count one, which resolves no Node and so reaches no cluster.
+// The When here is the refused-count one, which resolves no Node and so reaches
+// no cluster.
 func TestAThenStandingBeforeAWhen_ShouldJudgeThePlacementTheScenarioStartsFrom(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	judging := aScenarioOver(onePodPerNodeOf(declared))
@@ -2108,8 +1842,6 @@ func TestAThenReadingAFailureWithNoWhenBeforeIt_ShouldEndTheScenarioNamingThatTh
 	}
 }
 
-// causeOf is why a Scenario ended, as a Scenario that ran to its last Step
-// reports no cause at all.
 func causeOf(reported Outcome) string {
 	if reported.Cause == nil {
 		return ""
@@ -2118,9 +1850,6 @@ func causeOf(reported Outcome) string {
 	return reported.Cause.Error()
 }
 
-// causeNames asserts a Scenario ended for a reason naming what a reader has to
-// act on, the way the suites of the refusing constructors read their own
-// refusals.
 func causeNames(t *testing.T, ended Outcome, named string) {
 	t.Helper()
 
@@ -2152,22 +1881,15 @@ func TestEveryNodeOfATopology_ShouldBeNamedInTopologyOrder(t *testing.T) {
 	expect.Expect(t, named).To(expect.Equal([]string{nodes[0].Name, nodes[1].Name}))
 }
 
-// The label and value a Failure by label is refused for, where the refusal turns
-// on them: a key and a value no NodePool of the labelled Topology states.
 const (
 	aKeyNoNodePoolStates   = "node-class"
 	aValueNoNodePoolStates = "reserved"
 )
 
-// labelledNodesFailStepOf is the Step a When failing the Nodes carrying that
-// label records before it names what it resolved.
 func labelledNodesFailStepOf(label string) Step {
 	return Step{Kind: WhenStep, Name: "Nodes labelled " + label + " fail"}
 }
 
-// A Failure by label ends the Scenario at its When, naming what the When named,
-// when no NodePool states the label or its value and when the Scenario has not
-// Waited (docs/prd.md REQ-SIM-018 edge cases 1 and 2).
 func TestAFailureByLabelNamingWhatNoNodePoolStates_ShouldEndTheScenarioAtThatWhen(t *testing.T) {
 	labelled := aTopologyOfLabelledNodePools(t, twoZones)
 	refusals := map[string]struct {
@@ -2214,8 +1936,6 @@ func TestAFailureByLabelNamingWhatNoNodePoolStates_ShouldEndTheScenarioAtThatWhe
 	}
 }
 
-// nodesOfNodePool are the Nodes of the Topology belonging to the NodePool named,
-// in the order the Topology derives them.
 func nodesOfNodePool(topology scenario.Topology, nodePool string) []scenario.Node {
 	var pooled []scenario.Node
 	for _, candidate := range topology.Nodes() {
@@ -2227,7 +1947,6 @@ func nodesOfNodePool(topology scenario.Topology, nodePool string) []scenario.Nod
 	return pooled
 }
 
-// namesOf are the names of these Nodes, in the order given.
 func namesOf(nodes []scenario.Node) []string {
 	names := make([]string, 0, len(nodes))
 	for _, named := range nodes {
@@ -2237,14 +1956,10 @@ func namesOf(nodes []scenario.Node) []string {
 	return names
 }
 
-// podsOnNodePoolStep is the Step the Then counting Pods on one NodePool records.
 func podsOnNodePoolStep(pods int, pool node.PoolName) Step {
 	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pods on the NodePool %s", pods, pool)}
 }
 
-// A Then counting Pods on one NodePool judges that NodePool's Nodes alone: an
-// even Placement meets the count it holds, another count is a Finding, and a
-// NodePool whose Nodes hold no Pod counts as none.
 func TestAThenStatingANodePoolAndAPodCount_ShouldRecordAFindingUnlessItsNodesHoldThatCount(t *testing.T) {
 	const podsOnOneNodePoolWhenEven, noPod = twoZones * oneNodePerZoneOfEach, 0
 	tests := map[string]struct {
@@ -2285,8 +2000,6 @@ func TestAThenStatingANodePoolAndAPodCount_ShouldRecordAFindingUnlessItsNodesHol
 	}
 }
 
-// A Then counting Pods on a NodePool the Topology lacks has nothing to judge, so
-// it ends the Scenario at its own line naming that NodePool.
 func TestAThenNamingANodePoolTheTopologyLacks_ShouldEndTheScenarioAtThatThen(t *testing.T) {
 	const aNodePoolTheTopologyLacks, noPod = node.PoolName("gpu"), 0
 	ending := aScenarioOver(onePodPerNodeOf(aTopologyOfLabelledNodePools(t, twoZones)))
@@ -2305,15 +2018,10 @@ func TestAThenNamingANodePoolTheTopologyLacks_ShouldEndTheScenarioAtThatThen(t *
 	causeNames(t, ended, fmt.Sprintf("%q", aNodePoolTheTopologyLacks))
 }
 
-// anotherWorkloadName is the name of a Workload a Scenario declares after the
-// first, which the Steps after it judge alone.
 const anotherWorkloadName WorkloadName = "another-workload"
 
-// A later Workload Given gives the Scenario its next Workload, which every Step
-// after it reads: the Placement observed before it is the earlier Workload's, so
-// a Then before the next Wait has no Placement of the newest to judge and ends
-// the Scenario there, per
-// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+// The Placement observed before belongs to the earlier Workload, so a Then
+// before the next Wait has none of the newest to judge.
 func TestALaterWorkloadGiven_ShouldBeTheWorkloadEveryLaterStepReads(t *testing.T) {
 	const fewerPods = podsOverEveryNode - 1
 	declaring := aScenarioOver(onePodPerNodeOf(aTopologyOf(t, twoZones, twoNodesPerZone)))
@@ -2330,9 +2038,8 @@ func TestALaterWorkloadGiven_ShouldBeTheWorkloadEveryLaterStepReads(t *testing.T
 	causeNames(t, declared, theWaitThatNeverStood)
 }
 
-// A Workload name the Scenario already declared would deploy a second Workload
-// whose Pods the first one's selector reads, so it ends the Scenario at the
-// Given declaring it again, naming it.
+// A repeated name would deploy a second Workload whose Pods the first one's
+// selector reads.
 func TestAWorkloadNameAlreadyDeclared_ShouldEndTheScenarioAtThatGiven(t *testing.T) {
 	declaring := aScenario()
 	declaring.Given().Topology(Zones(twoZones), theGeneralNodePool())
@@ -2347,8 +2054,6 @@ func TestAWorkloadNameAlreadyDeclared_ShouldEndTheScenarioAtThatGiven(t *testing
 	causeNames(t, ended, fmt.Sprintf("%q", someWorkloadName))
 }
 
-// A taint the domain refuses ends the Scenario at the Topology Given stating it,
-// naming what was refused, before any cluster is reached.
 func TestATaintTheLabCannotHold_ShouldBeRefusedWhereItIsStated(t *testing.T) {
 	tests := map[string]struct {
 		taint   node.Taint
@@ -2372,8 +2077,6 @@ func TestATaintTheLabCannotHold_ShouldBeRefusedWhereItIsStated(t *testing.T) {
 	}
 }
 
-// A toleration of a NoSchedule taint is reported beneath its Workload's Given
-// line by its key, operator, value and effect, and no waiting time.
 func TestATolerationOfANoScheduleTaint_ShouldBeReportedBeneathItsWorkloadsGivenLineWithNoWaitingTime(t *testing.T) {
 	tolerating := pod.Toleration{Key: gpuTaintKey, Operator: pod.Equal, Value: gpuTaintPresent, Effect: pod.NoSchedule}
 
@@ -2385,8 +2088,6 @@ func TestATolerationOfANoScheduleTaint_ShouldBeReportedBeneathItsWorkloadsGivenL
 	expect.Expect(t, causeOf(declaring.outcome())).To(expect.Equal(""))
 }
 
-// A toleration of a NoSchedule taint stating a waiting time ends the Scenario at
-// the Given declaring that Workload.
 func TestANoScheduleTolerationStatingAWaitingTime_ShouldEndTheScenarioAtThatGiven(t *testing.T) {
 	const someWait = 30
 	tolerating := pod.Toleration{Key: gpuTaintKey, Operator: pod.Equal, Value: gpuTaintPresent, Effect: pod.NoSchedule}

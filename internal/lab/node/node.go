@@ -1,13 +1,9 @@
 // Package node holds what a Node is, as a Scenario writes it: the NodePool a
-// Topology line declares, the capacity every Node of it holds, and the
-// Kubernetes names of the labels a Node carries, the taints a NodePool states,
-// and the taints it is given when it stops responding. A Scenario reaches each
-// through the package name, so the qualifier reads as the subject: node.Pool,
-// node.Capacity, node.Zone, per
-// docs/adr/2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md.
+// Topology line declares, its capacity, and the Kubernetes names of the labels
+// and taints a Node carries. The qualifier reads as the subject: node.Pool,
+// node.Capacity, node.Zone.
 //
-// It imports neither internal/lab nor the pod package: internal/lab reads a
-// declared NodePool through its exported read-only methods.
+// It imports neither internal/lab nor the pod package.
 package node
 
 import (
@@ -22,70 +18,50 @@ import (
 )
 
 const (
-	// Zone is the label a Zone is a failure domain under, and Hostname the one a
-	// Node is a single host under.
 	Zone     = scenario.ZoneLabel
 	Hostname = scenario.HostnameLabel
 
-	// NotReady and Unreachable are the two taints the control plane gives a Node
-	// it has stopped hearing from.
+	// NotReady and Unreachable are the taints the control plane gives a Node it
+	// has stopped hearing from.
 	NotReady    = scenario.TaintNodeNotReady
 	Unreachable = scenario.TaintNodeUnreachable
 
-	// NoSchedule is the one effect a NodePool's taint takes: it keeps every Pod
-	// not tolerating it off the Node.
+	// NoSchedule is the one effect a NodePool's taint may take.
 	NoSchedule = scenario.NoSchedule
 
-	// UnresponsiveWait is the lab's waiting time before a Pod leaves a Node that
-	// stopped responding, in the whole seconds a toleration's tolerationSeconds
-	// holds it in.
+	// UnresponsiveWait is in whole seconds, the unit of a toleration's
+	// tolerationSeconds.
 	UnresponsiveWait = int64(scenario.UnresponsiveNodeWait / time.Second)
 
-	// Gi is one gibibyte, the unit a Node capacity's Memory is written in, as a
-	// manifest writes 64Gi: Memory: 64 * node.Gi.
+	// Gi is the unit a capacity's Memory is written in: Memory: 64 * node.Gi.
 	Gi = scenario.Memory(mebibytesPerGibibyte)
 )
 
-// The lab's own quantities hold a cpu in millicores and a memory in mebibytes.
 const (
 	millicoresPerCore    = 1000
 	mebibytesPerGibibyte = 1024
 )
 
-// PoolName is the name a NodePool's Nodes carry as a label.
+// PoolName is also the label value a NodePool's Nodes carry.
 type PoolName string
 
-// PerZone is how many Nodes a NodePool holds in each Zone of a Topology.
 type PerZone int
 
-// CapacityName is the name a Scenario defines a Named Node capacity under, which
-// a NodePool's line reports its Nodes by.
 type CapacityName string
 
-// Labels are the labels a NodePool states its Nodes carry beside the lab's own,
-// as Kubernetes writes a Node's labels: a map from key to value, per
-// docs/adr/2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md.
 type Labels map[string]string
 
-// Taint is one taint a NodePool states its Nodes carry, as Kubernetes writes a
-// Node's taint: its key, its value and the effect it has on a Pod not
-// tolerating it. Every field is required, and node.NoSchedule is the one effect
-// a NodePool states, per
-// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+// Taint requires every field, and node.NoSchedule is the one effect a NodePool
+// states.
 type Taint struct {
 	Key    string
 	Value  string
 	Effect scenario.TaintEffect
 }
 
-// Capacity is the room every Node of a NodePool holds, under the resource names
-// Kubernetes reports it by: CPU in whole cores, Memory in node.Gi, and the Pods
-// it has room for. Every field is required, so no value deciding a Placement is
-// the lab's own: a capacity leaving out a dimension is refused by the domain at
-// the Topology line taking it, and the zero capacity as stating none, per
-// docs/adr/2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md.
-//
-// The name it was defined under is unexported, so only Named gives one.
+// Capacity requires every field, so no value deciding a Placement is the lab's
+// own; a capacity leaving out a dimension is refused at the Topology line
+// taking it. Only Named gives a Capacity a name.
 type Capacity struct {
 	CPU    int
 	Memory scenario.Memory
@@ -95,10 +71,6 @@ type Capacity struct {
 	name  CapacityName
 }
 
-// Named defines a Named Node capacity: the capacity a NodePool's Nodes hold under
-// a name a Scenario gives it. The lab defines no name of its own: a Scenario's
-// place defines each one once, per
-// docs/adr/2026-10-09-every-nodepool-states-or-names-its-node-capacity.md.
 func Named(name CapacityName, capacity Capacity) Capacity {
 	named := capacity
 	named.named, named.name = true, name
@@ -106,13 +78,11 @@ func Named(name CapacityName, capacity Capacity) Capacity {
 	return named
 }
 
-// cpu is the capacity's cpu as the lab's own quantity holds it.
 func (c Capacity) cpu() scenario.CPU {
 	return scenario.CPU(c.CPU * millicoresPerCore)
 }
 
-// declared is the domain's capacity of this one, or the first refusal the domain
-// gave it. The zero capacity states none, which the NodePool taking it refuses.
+// The zero capacity states none, which the NodePool taking it refuses.
 func (c Capacity) declared() (scenario.NodeCapacity, error) {
 	if c == (Capacity{}) {
 		return scenario.NodeCapacity{}, nil
@@ -129,12 +99,8 @@ func (c Capacity) declared() (scenario.NodeCapacity, error) {
 	return named.Capacity(), nil
 }
 
-// Pool declares one NodePool every Zone of a Topology holds: perZone identical
-// Nodes under name, which they carry as a label, each holding the capacity the
-// NodePool states or names, per
-// docs/adr/2026-10-09-every-nodepool-states-or-names-its-node-capacity.md. It is
-// written as an argument of the Topology line, which ends the Scenario with any
-// refusal the NodePool carries.
+// Pool declares perZone identical Nodes in every Zone of a Topology. A refusal
+// it carries ends the Scenario at the Topology line.
 func Pool(name PoolName, perZone PerZone, capacity Capacity) DeclaredPool {
 	declared := DeclaredPool{name: name, perZone: perZone, capacity: capacity}
 	stated, err := capacity.declared()
@@ -148,13 +114,9 @@ func Pool(name PoolName, perZone PerZone, capacity Capacity) DeclaredPool {
 	return declared
 }
 
-// DeclaredPool is one NodePool as a Topology line states it, complete as it
-// stands (docs/architecture-principles.md § Construction and update).
-//
-// It carries the immutable domain value, or the first refusal the domain gave
-// it: the Topology line is where the refusal ends the Scenario, as a refused Pod
-// specification is carried to its Workload line. The stated name and capacity
-// are kept beside the value so the line names what was written, refused or not.
+// DeclaredPool carries the domain value or its first refusal, which ends the
+// Scenario at the Topology line. The stated name and capacity are kept beside
+// the value so the line names what was written, refused or not.
 type DeclaredPool struct {
 	perZone  PerZone
 	name     PoolName
@@ -166,11 +128,8 @@ type DeclaredPool struct {
 	refused  error
 }
 
-// Labels states labels this NodePool's Nodes carry beside the lab's own, and may
-// be written more than once. A label the domain refuses, or a key stated in an
-// earlier call, is carried to the Topology line as this NodePool's refusal, the
-// first refusal standing as a refused capacity does. The labels stated are kept
-// beside the value, so the line names what was written, refused or not.
+// Labels may be written more than once. A refused label or a key stated in an
+// earlier call becomes this NodePool's refusal, the first refusal standing.
 func (p DeclaredPool) Labels(stated Labels) DeclaredPool {
 	labelled := p
 	labelled.labels = Labels{}
@@ -191,11 +150,8 @@ func (p DeclaredPool) Labels(stated Labels) DeclaredPool {
 	return labelled
 }
 
-// Taints states taints this NodePool's Nodes carry apart from their labels, and
-// may be written more than once. A taint the domain refuses, or a key stated in
-// an earlier call, is carried to the Topology line as this NodePool's refusal,
-// the first refusal standing as a refused label does. The taints stated are kept
-// beside the value, so the line names what was written, refused or not.
+// Taints may be written more than once. A refused taint or a key stated in an
+// earlier call becomes this NodePool's refusal, the first refusal standing.
 func (p DeclaredPool) Taints(stated ...Taint) DeclaredPool {
 	tainted := p
 	tainted.taints = slices.Concat(p.taints, stated)
@@ -218,18 +174,12 @@ func (p DeclaredPool) Taints(stated ...Taint) DeclaredPool {
 	return tainted
 }
 
-// Declared is the domain's NodePool this one declares, or the first refusal the
-// domain gave it, which the Topology line taking it ends the Scenario with.
 func (p DeclaredPool) Declared() (scenario.NodePool, error) {
 	return p.declared, p.refused
 }
 
-// Reads names the NodePool by its name, its Node count per Zone, the name of the
-// Named Node capacity its Nodes hold where it names one, and the three
-// dimensions every one of them holds, cpu, memory and Pod count, the order every
-// reported capacity names (docs/system-design.md). The labels it states follow
-// as key=value in key order, then the taints as key=value:Effect in key order; a
-// NodePool stating none names none.
+// Reads names cpu, memory and Pod count in that order, the order every reported
+// capacity uses, then the labels and taints in key order.
 func (p DeclaredPool) Reads() string {
 	one, many := "Node", "Nodes"
 	if p.capacity.name != "" {
@@ -241,7 +191,6 @@ func (p DeclaredPool) Reads() string {
 		counted(p.capacity.Pods, "Pod", "Pods"), p.labelsRead(), p.taintsRead())
 }
 
-// labelsRead is how the labels this NodePool states read after its capacity.
 func (p DeclaredPool) labelsRead() string {
 	if len(p.labels) == 0 {
 		return ""
@@ -255,7 +204,6 @@ func (p DeclaredPool) labelsRead() string {
 	return ", labelled " + strings.Join(read, ", ")
 }
 
-// taintsRead is how the taints this NodePool states read after its labels.
 func (p DeclaredPool) taintsRead() string {
 	if len(p.taints) == 0 {
 		return ""
@@ -269,12 +217,10 @@ func (p DeclaredPool) taintsRead() string {
 	return ", tainted " + strings.Join(read, ", ")
 }
 
-// byKey orders two taints by their keys.
 func byKey(a, b Taint) int {
 	return strings.Compare(a.Key, b.Key)
 }
 
-// counted is a count beside the noun it counts, singular for one.
 func counted(count int, singular, plural string) string {
 	if count == 1 {
 		return "1 " + singular

@@ -1,11 +1,6 @@
-// The tests in this file cross to a real Simulated Cluster, which every other
-// test of the Step surface does not: a Wait is where the declarations of a
-// Scenario reach the control plane, and what the control plane makes of them is
-// its own judgement, so a Scenario holds the concrete *cluster.SimulatedCluster
-// it was provisioned with and no stand-in could report either
-// (docs/testing-principles.md § Mocking Policy). They sit in the package because
-// the Step a Wait reports, and the Step a refused value ends a Scenario at, are
-// the Step surface's own rules.
+// These tests cross to a real Simulated Cluster: a Wait is where a Scenario's
+// declarations reach the control plane, and what the control plane makes of
+// them is its own judgement, which no stand-in could report.
 package lab
 
 import (
@@ -25,8 +20,7 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// The Scenarios the Simulated Clusters of this file are provisioned for, so each
-// container on the engine says which Scenario it serves.
+// Each container on the engine says which Scenario it serves.
 const (
 	theRefusedSettingScenario  = "a-refused-setting"
 	theWaitingScenario         = "a-wait-for-the-cluster"
@@ -39,38 +33,27 @@ const (
 	theNextWorkloadScenario    = "a-next-workload"
 )
 
-// atOnce is the time a Wait with nothing to wait for is reached inside. The
-// control plane is polled rather than watched, so such a Wait is reached at the
-// poll that finds nothing pending rather than instantly: a tenth of the lab's own
-// waiting time is well above one poll and well short of waiting for a state to
-// arrive.
+// The control plane is polled rather than watched, so a Wait with nothing to
+// wait for is reached at the first poll rather than instantly. A tenth of the
+// lab's waiting time is well above one poll and well short of waiting for a
+// state to arrive.
 const atOnce = scenario.WaitingTime / 10
 
 const (
-	// theRefusedRestartPolicy is a value the control plane refuses on a Deployment's
-	// Pod template: a Deployment restarts its Pods always, so the API server admits
-	// no other policy there and refuses the Deployment itself. The lab's own
-	// vocabulary names no restart policy, which makes full access the one way a
-	// Scenario reaches that field.
+	// A Deployment restarts its Pods always, so the API server refuses any
+	// other restart policy there. The lab's vocabulary names no restart policy,
+	// which makes full access the one way to reach that field.
 	theRefusedRestartPolicy = corev1.RestartPolicyNever
 
-	// theDeployingCauseNames is what the cause of such an ending opens with, which
-	// is what tells a reader the Wait named by the ending is where the Workload was
-	// deployed.
 	theDeployingCauseNames = "deploy a Workload"
 )
 
-// aFullAccessTheControlPlaneRefuses is full access naming that policy, written the
-// way a Scenario writes one.
 func aFullAccessTheControlPlaneRefuses() pod.Customization {
 	return pod.FullAccess(func(spec *corev1.PodSpec) { spec.RestartPolicy = theRefusedRestartPolicy })
 }
 
-// aScenarioOnAClusterFor is a Scenario over a Simulated Cluster of its own, the
-// way the Runner builds one: provisioned under that Scenario's name for this test
-// alone and removed when it ends, however it ends. On a machine where no engine
-// answers the calling test fails here naming why, and every test that needs none
-// still runs (docs/testing-principles.md § Mocking Policy).
+// aScenarioOnAClusterFor fails only the calling test where no engine answers,
+// so every test that needs none still runs.
 func aScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario {
 	t.Helper()
 
@@ -93,12 +76,8 @@ func aScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario {
 	return newScenario(t.Context(), provisioned)
 }
 
-// reportedStep is one Step as the tests here compare it: which kind it is and the
-// name it reports, whether it carries a time it took, the time it was held to,
-// whether the Scenario stated that time, and whether the Wait was reached. How
-// long a Wait held varies from run to run, so what a comparison pins is that the
-// line carries a time at all; the other three are the Scenario's own and are
-// compared outright.
+// How long a Wait held varies from run to run, so a comparison pins only that
+// the line carries a time at all.
 type reportedStep struct {
 	Kind       StepKind
 	Name       string
@@ -108,7 +87,6 @@ type reportedStep struct {
 	Reached    bool
 }
 
-// asReported is every Step a Scenario recorded, read that way.
 func asReported(steps []Step) []reportedStep {
 	reported := make([]reportedStep, 0, len(steps))
 	for _, step := range steps {
@@ -125,9 +103,6 @@ func asReported(steps []Step) []reportedStep {
 	return reported
 }
 
-// reportedAsWaiting and reportedAtOnce are one expected Step read that way: a
-// Wait that was reached, stating no time of its own and so held to the lab's own
-// waiting time and marked as stating none, and a Step that waited for nothing.
 func reportedAsWaiting(step Step) reportedStep {
 	return reportedStep{Kind: step.Kind, Name: step.Name, Waited: true, HeldTo: scenario.WaitingTime, Reached: true}
 }
@@ -136,12 +111,8 @@ func reportedAtOnce(step Step) reportedStep {
 	return reportedStep{Kind: step.Kind, Name: step.Name}
 }
 
-// Both ways of writing a Wait are one Wait: it applies whatever the Givens above
-// it declared, holds until the control plane reports every Node and then every Pod
-// Ready, and reports a Wait line of its own with the time it held for. Written
-// with the Given that declared it or as a Step of its own, the lines reported and
-// the Placement reached are the same, and the Thens after it judge a Placement
-// that has stopped changing (docs/prd.md REQ-SIM-006).
+// Written with its Given or as a Step of its own, a Wait reports the same lines
+// and reaches the same Placement.
 func TestAWaitWrittenWithItsGivenAndOneWrittenOnItsOwn_ShouldReportTheSameWaitLineAndPlacement(t *testing.T) {
 	t.Parallel()
 	forms := map[string]func(*Scenario){
@@ -185,10 +156,6 @@ func TestAWaitWrittenWithItsGivenAndOneWrittenOnItsOwn_ShouldReportTheSameWaitLi
 	}
 }
 
-// A Wait applies what is declared and not yet applied, so a Wait with nothing to
-// wait for reports at once rather than being refused: the second of two Waits in a
-// row finds nothing pending, and a Wait for every Pod before any Workload is
-// declared waits for no Pod (docs/prd.md REQ-SIM-006 edge cases 1 and 2).
 func TestAWaitWithNothingToWaitFor_ShouldReportAtOnceRatherThanBeRefused(t *testing.T) {
 	t.Parallel()
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
@@ -210,13 +177,9 @@ func TestAWaitWithNothingToWaitFor_ShouldReportAtOnceRatherThanBeRefused(t *test
 	expect.Expect(t, waited.Placement.PodsPerNode()).To(expect.Equal(evenlyOver(nodesOf(declared), noPod)))
 }
 
-// A Wait for the Settled Placement holds for the Placement alone: it is reached
-// once the control plane has accounted for every Pod the Workload declares,
-// placed or not, so a Workload of one Pod more than its Nodes have room for
-// reaches it with that Pod left Pending. A Wait for every Pod Ready would be
-// outlasted by the lab's own waiting time in the same world, which is why this
-// Wait is the one a Scenario of a Workload with no room writes (docs/prd.md
-// REQ-SIM-011).
+// A Wait for every Pod Ready would be outlasted by the lab's waiting time in
+// the same world, which is why this Wait is the one a Scenario of a Workload
+// with no room writes.
 func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testing.T) {
 	t.Parallel()
 	waiting := aScenarioOnAClusterFor(t, theSettlingScenario)
@@ -242,10 +205,6 @@ func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testin
 		To(expect.HaveLen[scenario.Pod](podsOverEveryNode))
 }
 
-// That Wait standing before any Workload is declared has nothing to wait for, so
-// it is reached at once, as the Wait for every Pod in the same place is: the
-// Placement it reaches holds no Pod, and no Node either where no Topology has
-// been declared above it (docs/prd.md REQ-SIM-011).
 func TestAWaitForASettledPlacementWithNothingDeclared_ShouldBeReachedAtOnce(t *testing.T) {
 	t.Parallel()
 	waiting := aScenarioOnAClusterFor(t, theNothingDeclaredScenario)
@@ -262,10 +221,8 @@ func TestAWaitForASettledPlacementWithNothingDeclared_ShouldBeReachedAtOnce(t *t
 	expect.Expect(t, reached.Placement.Nodes()).To(expect.HaveLen[scenario.Node](noNodeDeclared))
 }
 
-// expectReachedAtOnce asserts every Wait among these Steps was reached at once,
-// which is what tells a Wait with nothing to wait for apart from one that held
-// until the cluster changed. How long a Wait held varies from run to run, so what
-// it is asserted against is a bound and not a time.
+// How long a Wait held varies from run to run, so it is asserted against a
+// bound and not a time.
 func expectReachedAtOnce(t *testing.T, recorded []Step) {
 	t.Helper()
 
@@ -276,12 +233,9 @@ func expectReachedAtOnce(t *testing.T, recorded []Step) {
 	}
 }
 
-// Edge case 5: a value the control plane refuses ends the Scenario at the Wait
-// that deployed its Workload, naming that Step and what was refused. A Given
-// declares and reaches no cluster, so the Wait below it is the Step that applied
-// the declaration and the Step the ending names, with the declaration in its
-// cause; no Step after it is carried out or judged. Full access is how a Scenario
-// can write such a value; the rule is every pod.Customization's.
+// A Given reaches no cluster, so the Wait below it is the Step that applied the
+// declaration and the Step the ending names. Full access is how a Scenario can
+// write such a value; the rule is every Customization's.
 func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTheWaitThatDeployedTheWorkload(
 	t *testing.T,
 ) {
@@ -306,11 +260,6 @@ func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTh
 	causeNames(t, ended, string(theRefusedRestartPolicy))
 }
 
-// A Topology of NodePools reaches the cluster as every Zone holding each
-// NodePool's Nodes Ready at that NodePool's capacity, numbered from one through
-// the NodePools in declaration order, and a Node of the gpu NodePool carrying its
-// label: the Nodes read back from the control plane equal those the Topology
-// declared (docs/prd.md REQ-SIM-013).
 func TestATopologyOfNodePools_ShouldProvisionEveryZoneWithEachNodePoolsNodesAndCapacity(t *testing.T) {
 	t.Parallel()
 	const threeZones = 3
@@ -324,10 +273,8 @@ func TestATopologyOfNodePools_ShouldProvisionEveryZoneWithEachNodePoolsNodesAndC
 	expect.Expect(t, ready.Placement.Nodes()).To(expect.Equal(aTopologyOfNodePools(t, threeZones).Nodes()))
 }
 
-// The scheduler places a Pod by the room each Node has, so a Request only the gpu
-// NodePool's Nodes have room for runs its Pods on those Nodes alone. The Workload
-// declares no spread and one Pod per gpu Node, so room alone decides where they
-// land (docs/prd.md REQ-SIM-013).
+// The Workload declares no spread and one Pod per gpu Node, so room alone
+// decides where its Pods land.
 func TestARequestOnlyOneNodePoolHasRoomFor_ShouldPlacePodsOnThatNodePoolAlone(t *testing.T) {
 	t.Parallel()
 	const onePodPerGpuNode = 1
@@ -347,8 +294,6 @@ func TestARequestOnlyOneNodePoolHasRoomFor_ShouldPlacePodsOnThatNodePoolAlone(t 
 		To(expect.Equal(onEveryNodeOf(aTopologyOfNodePools(t, twoZones), string(gpuNodePool), onePodPerGpuNode)))
 }
 
-// onEveryNodeOf is the Pods per Node a Placement holds where every Node of the
-// NodePool named holds pods Pods and every other Node none.
 func onEveryNodeOf(topology scenario.Topology, nodePool string, pods int) map[string]int {
 	counts := make(map[string]int)
 	for _, node := range topology.Nodes() {
@@ -361,10 +306,6 @@ func onEveryNodeOf(topology scenario.Topology, nodePool string, pods int) map[st
 	return counts
 }
 
-// A Failure by label stops every Node the control plane reports carrying the
-// value, in every Zone, in one Step: the Step reports the Nodes it resolved, the
-// Pods are moved to the Nodes still responding, and none stays on a Node that
-// stopped (docs/prd.md REQ-SIM-018).
 func TestAFailureByLabel_ShouldStopEveryNodeCarryingThatValueInOneStep(t *testing.T) {
 	t.Parallel()
 	const (
@@ -395,12 +336,10 @@ func TestAFailureByLabel_ShouldStopEveryNodeCarryingThatValueInOneStep(t *testin
 	expect.Expect(t, podsOn(stopped.Placement, spotNodes)).To(expect.HaveLen[scenario.Pod](0))
 }
 
-// podsOn are the Pods of the Placement sitting on one of these Nodes.
 func podsOn(placed scenario.Placement, nodes []string) []scenario.Pod {
 	return slices.DeleteFunc(placed.Pods(), func(sitting scenario.Pod) bool { return !slices.Contains(nodes, sitting.Node) })
 }
 
-// namesOfWhensIn are the names of the When Steps among these, as they read.
 func namesOfWhensIn(steps []Step) []string {
 	var names []string
 	for _, step := range steps {
@@ -412,35 +351,25 @@ func namesOfWhensIn(steps []Step) []string {
 	return names
 }
 
-// The taint the gpu NodePool of the tests below states, as a dedicated NodePool
-// of gpu Nodes is tainted.
 const (
 	gpuTaintKey     = "nvidia.com/gpu"
 	gpuTaintPresent = "present"
 )
 
-// theTaintedGpuNodePool is the gpu NodePool tainted NoSchedule, which keeps off
-// it every Pod not tolerating the taint.
 func theTaintedGpuNodePool() node.DeclaredPool {
 	return theGpuNodePool().Taints(node.Taint{Key: gpuTaintKey, Value: gpuTaintPresent, Effect: node.NoSchedule})
 }
 
-// toleratingTheGpuTaint is the toleration of that taint, naming its value and no
-// waiting time.
 func toleratingTheGpuTaint() pod.Toleration {
 	return pod.Toleration{Key: gpuTaintKey, Operator: pod.Equal, Value: gpuTaintPresent, Effect: pod.NoSchedule}
 }
 
-// aboveRoomyRequest is a Request only a gpu Node has room for, one Pod of it per
-// gpu Node, so room alone decides where such Pods land.
+// One Pod of aboveRoomyRequest fits per gpu Node, so room alone decides where
+// such Pods land.
 func aboveRoomyRequest() pod.Request {
 	return pod.Request{CPU: roomyCoresPerNode + 1, Memory: (roomyGibibytesPerNode + 1) * pod.Gi}
 }
 
-// A later Workload is deployed by the next Wait beside the earlier, which stays
-// Running where it was placed, and every Step after it judges the later one
-// alone: the Pods tolerating the taint and asking for more than a general Node
-// holds are Running on the gpu Nodes, and none on a general Node.
 func TestALaterWorkload_ShouldBeDeployedBesideTheEarlierAndJudgedAlone(t *testing.T) {
 	t.Parallel()
 	gpuNodes := twoZones * oneGpuNodePerZone

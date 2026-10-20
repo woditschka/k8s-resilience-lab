@@ -8,10 +8,7 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// One amount per spelling the two quantity types decide between: whole cores or
-// millicores for a cpu amount, and the largest binary unit a memory amount is a
-// whole number of. Each is written in the unit its type holds, the millicores
-// and the mebibytes Kubernetes' own quantity carries.
+// One amount per spelling the two quantity types decide between.
 const (
 	fourCores            = scenario.CPU(4000)
 	oneAndAHalfCores     = scenario.CPU(1500)
@@ -21,12 +18,10 @@ const (
 	noMemoryHeld         = scenario.Memory(0)
 )
 
-// A quantity the lab holds is spelled the way Kubernetes spells that amount: a
-// Scenario reads a cpu or memory amount off a Step line the lab spells, and
-// reads it again off a Timeline the client library spells, so one amount stated
-// two ways would read as two (docs/architecture-principles.md § Domain Core).
+// A capacity is read off a Step line the lab spells and off a Timeline the
+// client library spells, so one amount stated two ways would read as two.
 // internal/cluster's mapping test pins these spellings to the client library's
-// own output; the spellings themselves are decided here, where they are written.
+// output.
 func TestAQuantityTheLabHolds_ShouldBeSpelledAsKubernetesSpellsThatAmount(t *testing.T) {
 	held := map[string]struct {
 		quantity fmt.Stringer

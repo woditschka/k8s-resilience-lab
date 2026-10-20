@@ -18,57 +18,38 @@ import (
 )
 
 const (
-	// resilientPlacementScenario names the Scenario whose Topology and Workload the
-	// tests below drive, so each container on the engine says which Scenario it
-	// serves.
+	// Each container on the engine says which Scenario it serves.
 	resilientPlacementScenario = "resilient-placement"
 
 	threeZones        = 3
 	threeNodesPerZone = 3
 	ninePods          = 9
 
-	// secondWorkloadName is what the second Workload of a Scenario deploying two
-	// is labelled with, so each is spread over the Nodes on its own, and threePods
-	// is what that second Workload declares where its own count does not matter.
+	// The second Workload has a label of its own, so each is spread over the
+	// Nodes on its own.
 	secondWorkloadName = "basket"
 	threePods          = 3
 
-	// onePodPerNode is the share an even spread over the Nodes gives each of them,
-	// and onePodTooMany the one Pod a Topology has no room left for.
 	onePodPerNode = 1
 	onePodTooMany = 1
 
-	// twoNodesInIt is the one Zone's Node count where a Workload has to fit into
-	// the Nodes still responding, and noPodAtAll what a Node that stopped
-	// responding holds once the control plane has moved its Pods away.
 	twoNodesInIt = 2
 	noPodAtAll   = 0
 
-	// nodesStillResponding are the Ready Nodes left once one Node of that Topology
-	// has stopped responding, and onePodLeftBehind the Pod still on the Node that
-	// stopped, which is what an expired settle wait reports it could not account
-	// for.
 	nodesStillResponding   = threeZones*threeNodesPerZone - 1
 	onePodLeftBehind       = 1
 	podLeftOnTheFailedNode = "checkout-left-behind"
 
-	// onePodNotYetCreated is the Pod a Deployment's last replica is short by in the
-	// moment after the Deployment, which is the other observation no await stops at.
 	onePodNotYetCreated = 1
 
-	// onePodNotReadyYet is the Pod the control plane has placed and not yet
-	// reported Ready, which is what an expired Wait for every Pod Ready names.
 	onePodNotReadyYet = 1
 
-	// noPodStillStarting is how many placed Pods inside their Startup time an
-	// observation taken long after its Pods were placed holds.
 	noPodStillStarting = 0
 )
 
-// What the two Workloads asking for a share of their Node ask for, against a
-// Node of four cores: half of one Node each, so two such Pods fill it and the cpu
-// is a tighter bound than the Pod count, and more cpu than one whole Node has, so
-// no Node has room for a single such Pod.
+// Against a Node of four cores, half a Node each makes the cpu a tighter bound
+// than the Pod count, and more than a whole Node leaves no Node room for a
+// single such Pod.
 const (
 	someNodesCores                 = 4
 	halfTheNodesCPU                = scenario.CPU(2 * millicoresPerCore)
@@ -79,8 +60,7 @@ const (
 	twoPodsRequestingMoreThanANode = 2
 )
 
-// anEvenSpreadTopology is the Topology the main Scenario provisions: three Zones
-// of three Nodes, each Node able to hold more Pods than the Workload declares.
+// Each Node can hold more Pods than the Workload declares.
 func anEvenSpreadTopology(t *testing.T) scenario.Topology {
 	t.Helper()
 
@@ -92,12 +72,9 @@ func anEvenSpreadTopology(t *testing.T) scenario.Topology {
 	return topology
 }
 
-// resilientPlacement and defaultPlacement are the two specifications the
-// Scenarios define, as this suite declares them: an even spread over the Zones and over
-// the Nodes above the lab's own tolerations, and those tolerations alone. They
-// are built with internal/scenario's constructors rather than named from the
-// Scenarios' place, which imports internal/lab, which imports this package, so what is deployed here are the
-// settings those definitions hold.
+// The predefined specifications live in the Scenarios' place, which imports
+// internal/lab, which imports this package, so this suite builds the same
+// settings with internal/scenario's constructors.
 func resilientPlacement(t *testing.T) scenario.PodSpecification {
 	t.Helper()
 
@@ -116,15 +93,8 @@ func defaultPlacement(t *testing.T) scenario.PodSpecification {
 	)
 }
 
-// noWorkloadDeclaredYet is the Workload a Scenario holds before its Workload
-// Given has run, which is what a Wait for every Node Ready reads its Placement
-// against.
 var noWorkloadDeclaredYet scenario.Workload
 
-// aWorkloadDeclaring is the Workload the Scenarios below deploy: pods replicas
-// under the one Workload name this suite deploys, declaring the specification
-// named. aSecondWorkloadDeclaring is one deployed beside it under a name of its
-// own, which is what a Scenario deploying two Workloads declares.
 func aWorkloadDeclaring(t *testing.T, pods int, declaring scenario.PodSpecification) scenario.Workload {
 	t.Helper()
 
@@ -148,10 +118,8 @@ func aWorkloadNamed(t *testing.T, name string, pods int, declaring scenario.PodS
 	return workload
 }
 
-// aTopologyOfOneZone is the Topology REQ-SIM-009 edge case 1 is read on: one Zone of the same
-// Nodes, so a spread over the Zones is satisfied by every Placement and the
-// spread over the Nodes is the only one left to honour. aTopologyOfOneNode is the
-// smallest there is, which a Workload larger than its room cannot fit into.
+// On one Zone a spread over Zones is satisfied by every Placement, so the
+// spread over Nodes is the only one left to honour.
 func aTopologyOfOneZone(t *testing.T) scenario.Topology {
 	t.Helper()
 
@@ -174,8 +142,6 @@ func aTopologyOfOneNode(t *testing.T) scenario.Topology {
 	return topology
 }
 
-// evenlyOverTheNodesOf is the Placement an even spread over the Nodes settles at:
-// one Pod on each Node the Topology derives.
 func evenlyOverTheNodesOf(topology scenario.Topology) map[string]int {
 	counts := make(map[string]int, len(topology.Nodes()))
 	for _, node := range topology.Nodes() {
@@ -185,8 +151,6 @@ func evenlyOverTheNodesOf(topology scenario.Topology) map[string]int {
 	return counts
 }
 
-// podsCounted is how many Pods a count per domain holds altogether, which is what
-// a Placement promising no count per Zone can still be read for.
 func podsCounted(counts map[string]int) int {
 	counted := 0
 	for _, count := range counts {
@@ -196,10 +160,8 @@ func podsCounted(counts map[string]int) int {
 	return counted
 }
 
-// aDeployedPodOf is the spec of one Pod of this Workload as the cluster holds it.
-// Reading a Pod's own spec is this suite's call: the lab reads a Placement, which
-// names a Pod and the Node it landed on and not the settings it was deployed
-// with.
+// Reading a Pod's own spec is this suite's call: the lab reads a Placement,
+// which names a Pod and its Node and not the settings it was deployed with.
 func aDeployedPodOf(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) corev1.PodSpec {
 	t.Helper()
 
@@ -216,9 +178,8 @@ func aDeployedPodOf(t *testing.T, provisioned *SimulatedCluster, workload scenar
 	return held.Items[0].Spec
 }
 
-// theSettingsOf are the settings one deployed Pod carries, read back in the lab's
-// own vocabulary: the fields its specification names and no other, so what the
-// API server defaults beside them is passed over rather than asserted.
+// Only the fields the specification names are read, so what the API server
+// defaults beside them is passed over.
 func theSettingsOf(deployed corev1.PodSpec) []scenario.Setting {
 	read := make([]scenario.Setting, 0, len(deployed.Tolerations)+len(deployed.TopologySpreadConstraints))
 	for _, tolerated := range deployed.Tolerations {
@@ -234,10 +195,8 @@ func theSettingsOf(deployed corev1.PodSpec) []scenario.Setting {
 	return read
 }
 
-// secondsTolerated and taintsPolicyOf read the two fields the client library
-// carries as pointers. A field the deployed Pod left unset reads as the zero
-// value, so it shows up as a mismatch against the specification rather than as a
-// panic.
+// A field the deployed Pod left unset reads as the zero value, so it shows up
+// as a mismatch rather than as a panic.
 func secondsTolerated(tolerated corev1.Toleration) int64 {
 	if tolerated.TolerationSeconds == nil {
 		return 0
@@ -254,8 +213,8 @@ func taintsPolicyOf(constraint corev1.TopologySpreadConstraint) scenario.NodeInc
 	return scenario.NodeInclusionPolicy(*constraint.NodeTaintsPolicy)
 }
 
-// aVersionWithNoClusterImage is a well-formed Kubernetes version for which no
-// cluster image is published, so it passes validation and fails at the pull.
+// A well-formed version with no published image passes validation and fails at
+// the pull.
 const aVersionWithNoClusterImage = "v1.0.0"
 
 func TestAVersionWithNoClusterImage_ShouldNotBeObtainedAndShouldBeNamed(t *testing.T) {
@@ -285,8 +244,6 @@ func TestThePinnedVersion_ShouldBeObtainedFromTheEngine(t *testing.T) {
 	}
 }
 
-// aProvisionedCluster provisions one Simulated Cluster for the test that asks,
-// and removes it when that test ends however it ends.
 func aProvisionedCluster(t *testing.T) (*SimulatedCluster, Endpoint) {
 	t.Helper()
 
@@ -304,10 +261,8 @@ func aProvisionedCluster(t *testing.T) (*SimulatedCluster, Endpoint) {
 	return provisioned, engine
 }
 
-// stillOnTheEngine reports whether the engine still holds the container named.
-// The request is a read of one named container, which is why it lives in a test
-// and not in the lab: an exported by-identifier call would widen the engine
-// surface the lab holds (docs/system-design.md § Threat Model).
+// A read of one named container lives in a test, because an exported
+// by-identifier call would widen the engine surface the lab holds.
 func stillOnTheEngine(t *testing.T, endpoint Endpoint, name string) bool {
 	t.Helper()
 
@@ -335,10 +290,8 @@ func TestAProvisionedTopology_ShouldHoldThreeZonesOfThreeReadyNodes(t *testing.T
 	expect.Expect(t, ready).To(expect.Equal(topology.Nodes()))
 }
 
-// A NodePool stating labels is provisioned with Nodes the control plane reports
-// carrying them beside the lab's own: each observed Node equals its declared one,
-// stated labels, Zone and NodePool alike, so a label the control plane added or
-// dropped surfaces here rather than as a miscount (docs/prd.md REQ-SIM-017).
+// Comparing whole Nodes means a label the control plane added or dropped
+// surfaces here rather than as a miscount.
 func TestANodePoolStatingLabels_ShouldProvisionNodesCarryingThemBesideTheLabsOwn(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -359,8 +312,6 @@ func TestANodePoolStatingLabels_ShouldProvisionNodesCarryingThemBesideTheLabsOwn
 	expect.Expect(t, ready).To(expect.Equal(topology.Nodes()))
 }
 
-// aNodePoolLabelled is a NodePool of one Node per Zone named after the capacity
-// type it states, which it states under the capacity-type label.
 func aNodePoolLabelled(t *testing.T, capacityType string) scenario.NodePool {
 	t.Helper()
 
@@ -410,10 +361,6 @@ func TestProvisioning_ShouldLeaveNoProbePodOnTheClusterItHandsBack(t *testing.T)
 	expect.Expect(t, left).To(expect.HaveLen[corev1.Pod](0))
 }
 
-// A Workload declaring Resilient placement settles at one Pod on every Node of
-// every Zone, and the Pods it was deployed with carry the settings that
-// specification names — read back off a Pod the cluster holds
-// (docs/prd.md REQ-SIM-009).
 func TestAWorkloadDeclaringResilientPlacement_ShouldPlaceOnePodOnEveryNodeOfEveryZone(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -435,11 +382,6 @@ func TestAWorkloadDeclaringResilientPlacement_ShouldPlaceOnePodOnEveryNodeOfEver
 		To(expect.Equal(workload.PodSpecification().Settings()))
 }
 
-// A Workload declaring a specification it customized is deployed with the
-// Customization's settings and with the specification's others standing: the Zone
-// spread at the Skew the Scenario wrote, and the spread over the Nodes and the
-// lab's own tolerations as Resilient placement defines them. Read back off a Pod
-// the cluster holds (docs/prd.md REQ-SIM-009).
 func TestAWorkloadDeployedFromACustomizedSpecification_ShouldCarryTheCustomizedSettings(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -461,9 +403,8 @@ func TestAWorkloadDeployedFromACustomizedSpecification_ShouldCarryTheCustomizedS
 	}))
 }
 
-// Where a Workload declaring Default placement has its Pods put is the scheduler's
-// own choice, so what holds of every such Placement is all this asserts: every
-// Pod Running, and every one of them on a Node the Topology holds.
+// Where Default placement puts its Pods is the scheduler's own choice, so only
+// what holds of every Placement is asserted.
 func TestAWorkloadDeclaringDefaultPlacement_ShouldPlaceEveryPodWithNoCountPromisedPerZone(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -480,9 +421,6 @@ func TestAWorkloadDeclaringDefaultPlacement_ShouldPlaceEveryPodWithNoCountPromis
 	expect.Expect(t, settled.PodsItCannotAccountFor()).To(expect.HaveLen[scenario.Pod](noPodAtAll))
 }
 
-// Two Workloads of one Scenario are each placed by the specification they
-// declare: the one declaring Resilient placement is spread one Pod per Node,
-// and the one declaring Default placement is placed wherever the scheduler puts it.
 func TestTwoWorkloadsDeclaringDifferentSpecifications_ShouldEachBePlacedByTheOneItDeclares(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -497,10 +435,8 @@ func TestTwoWorkloadsDeclaringDifferentSpecifications_ShouldEachBePlacedByTheOne
 	expect.Expect(t, nowhere.PodsItCannotAccountFor()).To(expect.HaveLen[scenario.Pod](noPodAtAll))
 }
 
-// Edge case 2: two Workloads declaring the same specification are each spread on
-// their own. A spread constraint selects its Workload's Pods by their Workload
-// label, so the other's Pods are not counted towards the Skew and both reach one
-// Pod per Node.
+// A spread constraint selects its Workload's Pods by their Workload label, so
+// the other's Pods are not counted towards the Skew.
 func TestTwoWorkloadsDeclaringTheSameSpecification_ShouldEachBeSpreadWithoutCountingTheOthersPods(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -515,9 +451,8 @@ func TestTwoWorkloadsDeclaringTheSameSpecification_ShouldEachBeSpreadWithoutCoun
 	expect.Expect(t, theOthers.PodsPerNode()).To(expect.Equal(onePodPerNode))
 }
 
-// Edge case 1: Resilient placement on a Topology of one Zone still lands its
-// Pods one per Node, and that one Zone holds them all, because a spread over the
-// Zones of a Topology that has one is satisfied by every Placement.
+// A spread over the Zones of a Topology that has one is satisfied by every
+// Placement.
 func TestResilientPlacementOnATopologyOfOneZone_ShouldStillPlaceOnePodPerNode(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -550,10 +485,8 @@ func TestARunAfterAnEarlierRun_ShouldReportOnlyItsOwnNodesAndPods(t *testing.T) 
 	expect.Expect(t, settled.Pods()).To(expect.HaveLen[scenario.Pod](ninePods))
 }
 
-// REQ-SIM-001 edge case 1: a Workload declaring Default placement on a Topology too small for
-// its Pods has no spread to blame. The Nodes run out of room, so the Pods the
-// scheduler cannot place stay Pending and the control plane's own reason for each
-// is on the Timeline.
+// Without spread rules the Pods the scheduler cannot place stay Pending, and
+// the control plane's own reason for each is on the Timeline.
 func TestAWorkloadWithoutSpreadRulesOnATooSmallTopology_ShouldLeaveTheUnplaceablePodsPending(t *testing.T) {
 	t.Parallel()
 
@@ -568,13 +501,8 @@ func TestAWorkloadWithoutSpreadRulesOnATooSmallTopology_ShouldLeaveTheUnplaceabl
 	expectReported(t, recorded, pending[0].Name, podSchedulingFailed)
 }
 
-// Edge cases 2 and 3 of a Request, and the Pods that do fit: the scheduler places
-// a Pod by what it asks for, so the Workload asking for half its Node's cpu fills
-// that Node with two Pods and leaves its third Pending, while every Pod of the
-// Workload asking for more cpu than the Node has stays Pending whatever room the
-// Pod count leaves. Both are deployed onto one provisioned Topology, the way two
-// Workloads of one Scenario are, because a provisioning is what this suite's time
-// goes on.
+// Both Workloads are deployed onto one provisioned Topology, because
+// provisioning is what this suite's time goes on.
 func TestAWorkloadRequestingMoreThanItsNodesHaveRoomFor_ShouldLeaveThePodsThatDoNotFitPending(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -591,14 +519,10 @@ func TestAWorkloadRequestingMoreThanItsNodesHaveRoomFor_ShouldLeaveThePodsThatDo
 		To(expect.HaveLen[scenario.Pod](twoPodsRequestingMoreThanANode))
 }
 
-// The Failure tests below are what says whether the control plane does the moving:
-// the lab withholds a Node's status and reports its Ready condition Unknown, and
-// everything after that — the unreachable taint, the eviction and the replacement
-// — is the control plane's own doing, per
-// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md. They assert no
-// wall-clock bound: the lab sets the waiting time a Pod tolerates the taint for
-// and not the period the control plane takes to notice, so the budget they run in
-// is the settle wait.
+// These tests say whether the control plane does the moving: the lab only
+// withholds a Node's status, and the taint, the eviction and the replacement
+// are the control plane's own doing. They assert no wall-clock bound, since the
+// lab does not set the period the control plane takes to notice.
 func TestANodeThatStopsResponding_ShouldLeaveNinePodsRunningThreePerZoneAndNoneOnIt(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -623,16 +547,10 @@ func TestANodeThatStopsResponding_ShouldLeaveNinePodsRunningThreePerZoneAndNoneO
 	expect.Expect(t, settled.PodsPerNode()[stopped]).To(expect.Equal(noPodAtAll))
 }
 
-// A whole Zone that stops responding is the Failure the capacity has to survive:
-// the Workload's nine Pods are Running again on the Zones still responding, none
-// of them in the Zone that stopped, and none left on a Node the Placement can no
-// longer account for.
-//
-// How the nine are distributed over the two Zones left is not asserted, and
-// deliberately so. Both spread constraints honour the taints the stopped Nodes
-// carry, so the Zone that failed leaves the spread calculation and two Zones take
-// nine Pods: the Placement is skewed by one Pod per Zone, which is the impact on
-// reliability a Zone Failure is accepted to have (docs/prd.md REQ-SIM-008).
+// How the nine Pods are distributed over the two Zones left is deliberately not
+// asserted. Both spread constraints honour the taints the stopped Nodes carry,
+// so the failed Zone leaves the spread calculation and two Zones take nine
+// Pods, skewed by one, which is the impact a Zone Failure is accepted to have.
 func TestAZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -679,9 +597,6 @@ func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheCont
 	expectReported(t, recorded, pending[0].Name, podSchedulingFailed)
 }
 
-// A Wait for every Pod Ready holds until the control plane reports the Ready
-// condition on every Pod the Workload declares, which is the condition kubectl
-// rollout status waits on (docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md).
 func TestAWaitForEveryPodOfADeployedWorkload_ShouldReachThePlacementWithEveryPodReady(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -697,9 +612,7 @@ func TestAWaitForEveryPodOfADeployedWorkload_ShouldReachThePlacementWithEveryPod
 	expect.Expect(t, ready.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](ninePods))
 }
 
-// The Startup times the two tests below state, in whole seconds: one time every
-// Pod takes, and a shortest and a longest each Pod takes its own time between.
-// Each is longer than the poll interval, so a Pod Ready at placement would be
+// Each time is longer than the poll interval, so a Pod Ready at placement is
 // told from one that waited.
 const (
 	oneStartupTime  = 4
@@ -707,11 +620,8 @@ const (
 	longestStartup  = 5
 )
 
-// A Pod's Startup time is read off the control plane's own record: the moment it
-// reports the Pod placed and the moment it reports it Ready, both in whole
-// seconds. A Pod Ready no sooner than its shortest after placement is Ready no
-// sooner in whole seconds either, and the longest is allowed one poll interval
-// for the simulator's own round trip (docs/prd.md REQ-SIM-012).
+// The control plane records conditions in whole seconds; the longest is allowed
+// one poll interval for the simulator's own round trip.
 func TestAPodSpecificationCustomizedWithOneStartupTime_ShouldHaveNoPodReadySoonerThanThatTime(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -742,13 +652,10 @@ func TestAPodSpecificationCustomizedWithAStartupTimeRange_ShouldHaveEachPodReady
 	expect.Expect(t, takenLaterThan(taken, longestStartup*time.Second+pollInterval)).To(expect.HaveLen[time.Duration](0))
 }
 
-// A Startup time under a second, as the Scenarios' own definitions name, is
-// finer than the whole seconds the control plane records a condition's change in,
-// so each Pod's time is read on this test's own clock: a watch opened before the
-// Workload is deployed records the moment each Pod is first seen placed on a Node
-// and first seen Ready. The watch only records, and the test waits through
-// AwaitPodsReady alone. The longest is allowed one poll interval for the
-// simulator's own round trip (docs/prd.md REQ-SIM-012).
+// A Startup time under a second is finer than the whole seconds the control
+// plane records, so each Pod's time is read on this test's own clock off a
+// watch opened before the deployment. The longest is allowed one poll interval
+// for the simulator's own round trip.
 func TestAWorkloadWhosePodsStartInUnderASecond_ShouldHaveEachPodReadyWithinThatRange(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -765,9 +672,6 @@ func TestAWorkloadWhosePodsStartInUnderASecond_ShouldHaveEachPodReadyWithinThatR
 	expect.Expect(t, takenLaterThan(taken, someLongestStartup+pollInterval)).To(expect.HaveLen[time.Duration](0))
 }
 
-// startupsWatched are the moments this test first saw each Pod of one Workload
-// placed on a Node and first saw it Ready, keyed by the Pod's name, as recorded
-// off a watch on the Workload's Pods.
 type startupsWatched struct {
 	stop    func()
 	stopped <-chan struct{}
@@ -777,9 +681,7 @@ type startupsWatched struct {
 	ready  map[string]time.Time
 }
 
-// watchingTheStartupsOf opens a watch on this Workload's Pods and records, as
-// each change arrives, the first moment a Pod is bound to a Node and the first
-// moment it reports Ready. It never waits for either.
+// The watch only records; the test waits through AwaitPodsReady alone.
 func watchingTheStartupsOf(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) *startupsWatched {
 	t.Helper()
 
@@ -807,8 +709,6 @@ func watchingTheStartupsOf(t *testing.T, provisioned *SimulatedCluster, workload
 	return watched
 }
 
-// record notes the moment seen against this Pod for whichever of placed and
-// Ready it shows for the first time.
 func (w *startupsWatched) record(pod corev1.Pod, seen time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -821,9 +721,8 @@ func (w *startupsWatched) record(pod corev1.Pod, seen time.Time) {
 	}
 }
 
-// timesTaken stops the watch and is the time each Pod of the Workload took from
-// first being seen placed to first being seen Ready. A Pod the watch did not see
-// both of fails the test by name, since its time cannot be judged.
+// A Pod the watch did not see both ways fails the test by name, since its time
+// cannot be judged.
 func (w *startupsWatched) timesTaken(t *testing.T, workload scenario.Workload) []time.Duration {
 	t.Helper()
 
@@ -847,8 +746,6 @@ func (w *startupsWatched) timesTaken(t *testing.T, workload scenario.Workload) [
 	return taken
 }
 
-// theTimesTakenToBeReady are the times each Pod of this Workload took from the
-// moment the control plane reports it placed to the moment it reports it Ready.
 func theTimesTakenToBeReady(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) []time.Duration {
 	t.Helper()
 
@@ -870,8 +767,6 @@ func theTimesTakenToBeReady(t *testing.T, provisioned *SimulatedCluster, workloa
 	return taken
 }
 
-// conditionSince is the moment the control plane last reported this condition
-// of the Pod changed.
 func conditionSince(t *testing.T, pod corev1.Pod, kind corev1.PodConditionType) time.Time {
 	t.Helper()
 
@@ -885,7 +780,6 @@ func conditionSince(t *testing.T, pod corev1.Pod, kind corev1.PodConditionType) 
 	return time.Time{}
 }
 
-// takenSoonerThan and takenLaterThan are the times taken outside one bound.
 func takenSoonerThan(taken []time.Duration, bound time.Duration) []time.Duration {
 	return slices.DeleteFunc(slices.Clone(taken), func(took time.Duration) bool { return took >= bound })
 }
@@ -894,9 +788,6 @@ func takenLaterThan(taken []time.Duration, bound time.Duration) []time.Duration 
 	return slices.DeleteFunc(slices.Clone(taken), func(took time.Duration) bool { return took <= bound })
 }
 
-// A Wait for every Node Ready is written with the Topology Given, before any
-// Workload is declared, so the Placement it reaches holds the Nodes the Topology
-// declared and no Pod at all.
 func TestAWaitForEveryNodeBeforeAWorkloadIsDeployed_ShouldReachThePlacementOfThoseNodesAndNoPod(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -914,11 +805,9 @@ func TestAWaitForEveryNodeBeforeAWorkloadIsDeployed_ShouldReachThePlacementOfTho
 	expect.Expect(t, ready.Pods()).To(expect.HaveLen[scenario.Pod](0))
 }
 
-// What each expired Wait reports is read from the last observation alone, so it
+// What an expired Wait reports is read from the last observation alone, so it
 // is asserted here rather than by provoking a Wait that runs its whole budget
-// out, the way the expired settle wait below is (docs/prd.md REQ-SIM-006: a Wait
-// stating no time that the lab's waiting time outlasts ends the Scenario naming
-// the Pods that were not Ready).
+// out.
 func TestAWaitForEveryPodTheWaitingTimeOutlasts_ShouldNameThePodsThatWereNotReady(t *testing.T) {
 	observed := aPlacementWithOnePodNotReadyYet(t)
 
@@ -940,12 +829,9 @@ func TestAWaitForEveryNodeTheWaitingTimeOutlasts_ShouldNameTheNodesThatWereNotRe
 		scenario.WaitingTime, theFirstNodeOf(topology))))
 }
 
-// An expired settle wait is the one place the lab hands back a Placement it is
-// not satisfied with, and what it reports is read from the observation alone. So
-// the report is asserted here rather than by provoking a wait that runs its whole
-// budget out: the budget is what the two tests above run in, and no Placement the
-// lab can bring about keeps a wait open for it (docs/prd.md REQ-SIM-006: a Wait
-// the lab's waiting time outlasts ends the Scenario naming what was not Ready).
+// What an expired settle wait reports is read from the observation alone, and
+// no Placement the lab can bring about keeps a wait open, so the report is
+// asserted here rather than by running the budget out.
 func TestAPlacementThatDoesNotSettleAfterTheFailure_ShouldReportTheObservedPlacement(t *testing.T) {
 	observed := aPlacementStillHoldingAPodOnTheFailedNode(t)
 
@@ -956,11 +842,8 @@ func TestAPlacementThatDoesNotSettleAfterTheFailure_ShouldReportTheObservedPlace
 		deployedWorkloadName, scenario.WaitingTime, ninePods, ninePods, nodesStillResponding, onePodLeftBehind, noPodStillStarting)))
 }
 
-// The rule an await stops at, asserted a clause at a time: an observation can be
-// the settled Placement when every Pod the Workload declares has been created,
-// every Pod it found is on a Node it was read against, no placed Pod is still
-// inside its Startup time, and it agrees with the observation before it. Each row below meets every clause but the one it names,
-// so the row says which clause decided it.
+// Each row meets every clause but the one it names, so the row says which
+// clause decided it.
 func TestAnObservedPlacement_ShouldCountAsSettledOnlyWhenItAccountsForEveryDeclaredPodAndAgreesWithTheOneBeforeIt(t *testing.T) {
 	accountedFor := aPlacementOfEveryDeclaredPod(t)
 	stillHoldingAPodOnTheFailedNode := aPlacementStillHoldingAPodOnTheFailedNode(t)
@@ -997,8 +880,6 @@ func TestAnObservedPlacement_ShouldCountAsSettledOnlyWhenItAccountsForEveryDecla
 	}
 }
 
-// aPlacementOfEveryDeclaredPod is the observation an await can stop at: every Pod
-// the Workload declares, each on a Node the observation was read against.
 func aPlacementOfEveryDeclaredPod(t *testing.T) scenario.Placement {
 	t.Helper()
 
@@ -1007,8 +888,6 @@ func aPlacementOfEveryDeclaredPod(t *testing.T) scenario.Placement {
 	return scenario.NewPlacement(nodes, onePodOnEachOf(nodes))
 }
 
-// aPlacementShortOfOnePod is the observation taken in the moment after a
-// Deployment, before the control plane has created the last Pod it declares.
 func aPlacementShortOfOnePod(t *testing.T) scenario.Placement {
 	t.Helper()
 
@@ -1018,9 +897,6 @@ func aPlacementShortOfOnePod(t *testing.T) scenario.Placement {
 	return scenario.NewPlacement(nodes, created[:len(created)-onePodNotYetCreated])
 }
 
-// aPlacementWithOnePodNotReadyYet is the observation taken while every Pod the
-// Workload declares is placed and the control plane has yet to report one of them
-// Ready, which is the clause a Wait for every Pod Ready holds open.
 func aPlacementWithOnePodNotReadyYet(t *testing.T) scenario.Placement {
 	t.Helper()
 
@@ -1031,9 +907,6 @@ func aPlacementWithOnePodNotReadyYet(t *testing.T) scenario.Placement {
 	return scenario.NewPlacement(nodes, placed)
 }
 
-// aPlacementWithOnePodStillStarting is the observation taken while one placed
-// Pod is still inside its Startup time: on its Node, and Pending rather than
-// Running, so the Placement has not stopped changing (docs/prd.md REQ-SIM-012).
 func aPlacementWithOnePodStillStarting(t *testing.T) scenario.Placement {
 	t.Helper()
 
@@ -1044,10 +917,7 @@ func aPlacementWithOnePodStillStarting(t *testing.T) scenario.Placement {
 	return scenario.NewPlacement(nodes, placed)
 }
 
-// aPlacementShortOfOneReadyNode is the observation taken while one Node the
-// Topology declares has yet to report Ready, which is the clause a Wait for every
-// Node Ready holds open: a Node that is not Ready is in no Placement the lab
-// observes.
+// A Node that is not Ready is in no observed Placement.
 func aPlacementShortOfOneReadyNode(t *testing.T) scenario.Placement {
 	t.Helper()
 
@@ -1057,11 +927,7 @@ func aPlacementShortOfOneReadyNode(t *testing.T) scenario.Placement {
 	return scenario.NewPlacement(stillResponding, onePodOnEachOf(stillResponding))
 }
 
-// aPlacementStillHoldingAPodOnTheFailedNode is the observation taken inside the
-// window a Failure opens: every Pod the Workload declares exists, the Node that
-// stopped responding has left the Ready Nodes, and the Pod it held is still on it
-// because the control plane has not deleted it yet. That last Pod is the clause
-// that holds the settle wait open.
+// The Pod on the failed Node is the clause that holds the settle wait open.
 func aPlacementStillHoldingAPodOnTheFailedNode(t *testing.T) scenario.Placement {
 	t.Helper()
 
@@ -1072,9 +938,7 @@ func aPlacementStillHoldingAPodOnTheFailedNode(t *testing.T) scenario.Placement 
 	return scenario.NewPlacement(stillResponding, append([]scenario.Pod{leftBehind}, onePodOnEachOf(stillResponding)...))
 }
 
-// onePodOnEachOf is one Running Pod of the Workload on each of these Nodes, named
-// by its place among them as the control plane's own Pod names are not this
-// suite's to pin.
+// The control plane's own Pod names are not this suite's to pin.
 func onePodOnEachOf(nodes []scenario.Node) []scenario.Pod {
 	placed := make([]scenario.Pod, 0, len(nodes))
 	for at, node := range nodes {
@@ -1144,9 +1008,6 @@ func TestConcurrentRuns_ShouldEachRemoveOnlyTheClusterTheyCreated(t *testing.T) 
 	expect.Expect(t, stillOnTheEngine(t, engine, secondRun.Name())).To(expect.Equal(true))
 }
 
-// aClusterOfItsOwnInvocation stands in for one invocation of the lab: a Simulated
-// Cluster provisioned beside another, removed when the test ends if its own test
-// did not remove it.
 func aClusterOfItsOwnInvocation(t *testing.T, engine Endpoint) *SimulatedCluster {
 	t.Helper()
 
@@ -1159,9 +1020,8 @@ func aClusterOfItsOwnInvocation(t *testing.T, engine Endpoint) *SimulatedCluster
 	return provisioned
 }
 
-// settleInto applies a Topology, deploys a Workload and waits for its Placement
-// to settle, which is the world a Failure is injected into: a Scenario stops a
-// Node responding only once everything it declared has settled.
+// A Scenario stops a Node responding only once everything it declared has
+// settled.
 func settleInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, workload scenario.Workload) {
 	t.Helper()
 
@@ -1171,21 +1031,16 @@ func settleInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.T
 	}
 }
 
-// theFirstNodeOf is the Node a Failure of one Node stops: the first the Topology
-// derives, named here the same way rather than written out, so the expectation
-// follows the Topology that is asked.
+// The Node is derived rather than written out, so the expectation follows the
+// Topology asked.
 func theFirstNodeOf(topology scenario.Topology) string {
 	return topology.Nodes()[0].Name
 }
 
-// theFirstZoneOf is the Zone a Failure of one Zone stops, named from the Topology
-// the same way theFirstNodeOf names its Node.
 func theFirstZoneOf(topology scenario.Topology) string {
 	return topology.Zones()[0]
 }
 
-// stopEveryNodeIn stops every Node of one Zone responding, which is what a
-// Failure of a whole Zone leaves the control plane to notice.
 func stopEveryNodeIn(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, zone string) {
 	t.Helper()
 
@@ -1199,10 +1054,8 @@ func stopEveryNodeIn(t *testing.T, provisioned *SimulatedCluster, topology scena
 	}
 }
 
-// theNodeNamed is the Node the cluster holds under this name, whatever it reports
-// about it. Reading one Node by name is this suite's own read: the lab reads the
-// Nodes a Placement is observed against, which a Node that stopped responding is
-// not one of, so a test is what says it is still in the cluster.
+// A Node that stopped responding is not among the Nodes the lab observes, so a
+// test reads it by name to say it is still in the cluster.
 func theNodeNamed(t *testing.T, provisioned *SimulatedCluster, name string) corev1.Node {
 	t.Helper()
 
@@ -1214,8 +1067,6 @@ func theNodeNamed(t *testing.T, provisioned *SimulatedCluster, name string) core
 	return *held
 }
 
-// aTopologyOfTwoNodesHoldingOnePod is the Topology a Workload of two Pods fills
-// exactly, so a Pod of a Node that stops responding has nowhere left to go.
 func aTopologyOfTwoNodesHoldingOnePod(t *testing.T) scenario.Topology {
 	t.Helper()
 
@@ -1228,9 +1079,8 @@ func aTopologyOfTwoNodesHoldingOnePod(t *testing.T) scenario.Topology {
 	return topology
 }
 
-// aTopologyOfOneNodeOfFourCores is the Topology the Requests above are read on:
-// one Node with room for more Pods than the two Workloads declare between them,
-// so what decides their Placement is the cpu their Pods ask for.
+// The Node has room for more Pods than both Workloads declare, so the cpu their
+// Pods ask for decides the Placement.
 func aTopologyOfOneNodeOfFourCores(t *testing.T) scenario.Topology {
 	t.Helper()
 
@@ -1243,19 +1093,15 @@ func aTopologyOfOneNodeOfFourCores(t *testing.T) scenario.Topology {
 	return topology
 }
 
-// requestingCPUOf is the specification a Workload asking for a share of its Node
-// declares: the cpu named and the memory every Request of this suite states,
-// above the lab's own tolerations and with no spread at all, so what decides the
-// Placement is the request alone.
+// With no spread, the request alone decides the Placement.
 func requestingCPUOf(t *testing.T, cpu scenario.CPU) scenario.PodSpecification {
 	t.Helper()
 
 	return defaultPlacement(t).With(scenario.NewRequest(cpu, someRequestedMemory))
 }
 
-// deployBoth applies a Topology once and deploys two Workloads into it, which is
-// the sequence a Scenario deploying two follows: a Topology is applied once per
-// cluster, and each Workload is deployed on its own.
+// A Topology is applied once per cluster, and each Workload is deployed on its
+// own.
 func deployBoth(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, workloads ...scenario.Workload) {
 	t.Helper()
 
@@ -1269,8 +1115,6 @@ func deployBoth(t *testing.T, provisioned *SimulatedCluster, topology scenario.T
 	}
 }
 
-// bothSettled is the Settled Placement of each of two Workloads, each awaited
-// through AwaitSettled and read against its own Pods alone.
 func bothSettled(t *testing.T, provisioned *SimulatedCluster, first, second scenario.Workload) (scenario.Placement, scenario.Placement) {
 	t.Helper()
 
@@ -1288,8 +1132,6 @@ func settledPlacementOf(t *testing.T, provisioned *SimulatedCluster, workload sc
 	return settled
 }
 
-// deployInto applies a Topology and deploys a Workload into a provisioned
-// cluster, which is the sequence every Placement observation follows.
 func deployInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, workload scenario.Workload) {
 	t.Helper()
 
@@ -1301,9 +1143,8 @@ func deployInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.T
 	}
 }
 
-// aTopologyOfAGeneralAndATaintedNode is one Zone holding a general Node of four
-// cores and a gpu Node of the same capacity tainted NoSchedule, so what keeps a
-// Pod off the gpu Node is its taint alone.
+// Both Nodes have the same capacity, so what keeps a Pod off the gpu Node is
+// its taint alone.
 func aTopologyOfAGeneralAndATaintedNode(t *testing.T) scenario.Topology {
 	t.Helper()
 
@@ -1332,15 +1173,11 @@ func aTopologyOfAGeneralAndATaintedNode(t *testing.T) scenario.Topology {
 	return topology
 }
 
-// The two NodePools of that Topology.
 const (
 	generalNodePool = "general"
 	gpuNodePool     = "gpu"
 )
 
-// A NodePool stating a NoSchedule taint is provisioned with Nodes the control
-// plane reports carrying it, provisioning ending on the tainted Node as on any
-// other because its probe Pod tolerates the taint.
 func TestANodePoolStatingANoScheduleTaint_ShouldProvisionNodesCarryingIt(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
@@ -1357,9 +1194,6 @@ func TestANodePoolStatingANoScheduleTaint_ShouldProvisionNodesCarryingIt(t *test
 	expect.Expect(t, ready).To(expect.Equal(topology.Nodes()))
 }
 
-// A Workload not tolerating a taint finds no room left on the untainted Node:
-// the Pod it has no room for stays Pending rather than being placed on the
-// tainted Node with room to spare.
 func TestAWorkloadNotToleratingATaint_ShouldKeepItsPodsOffTheTaintedNodes(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)

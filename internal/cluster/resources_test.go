@@ -26,29 +26,21 @@ const (
 	evenSkew             = 1
 	widerSkew            = 2
 
-	// The cpu and memory the Nodes of this suite hold, and the cpu and memory one
-	// Pod of it asks for, in the millicores and mebibytes the lab's own quantities
-	// hold: four cores and sixteen gibibytes a Node, one core and two gibibytes a
-	// Pod.
 	someCPUPerNode      = scenario.CPU(4 * millicoresPerCore)
 	someMemoryPerNode   = scenario.Memory(16 * mebibytesPerGibibyte)
 	someRequestedCPU    = scenario.CPU(1 * millicoresPerCore)
 	someRequestedMemory = scenario.Memory(2 * mebibytesPerGibibyte)
 
-	// The whole units a capacity and a request are stated in on the Step surface,
-	// as the lab's own quantities hold them. internal/lab states them in whole
-	// units and converts there, and this suite converts the same way rather than
-	// importing the Step surface, which imports this package.
+	// internal/lab converts whole units to the lab's quantities, and this suite
+	// converts the same way rather than importing internal/lab, which imports
+	// this package.
 	millicoresPerCore    = 1000
 	mebibytesPerGibibyte = 1024
 
-	// someSpecificationName is the name the specifications below carry into the
-	// Step that declares one, which no test of this suite turns on.
+	// No test of this suite turns on the specification name.
 	someSpecificationName = "a Pod specification"
 )
 
-// aWorkload is the named default for a Workload whose name and Pod count the test
-// does not turn on; the specification it declares is what each test varies.
 func aWorkload(t *testing.T, declaring scenario.PodSpecification) scenario.Workload {
 	t.Helper()
 
@@ -60,11 +52,8 @@ func aWorkload(t *testing.T, declaring scenario.PodSpecification) scenario.Workl
 	return workload
 }
 
-// aSpecificationOf is a specification holding the settings named, its Pods
-// taking some Startup time. This suite builds its own with internal/scenario's
-// constructors: the predefined ones are defined by the Scenarios' place, which
-// imports internal/lab, which imports this package, so what is mapped here are
-// settings and not a catalogue.
+// The predefined specifications live in the Scenarios' place, which imports
+// internal/lab, which imports this package, so this suite builds its own.
 func aSpecificationOf(t *testing.T, settings ...scenario.Setting) scenario.PodSpecification {
 	t.Helper()
 
@@ -77,41 +66,29 @@ func aSpecificationOf(t *testing.T, settings ...scenario.Setting) scenario.PodSp
 	return declared
 }
 
-// someShortestStartup and someLongestStartup are the Startup time the
-// specifications of this suite name where a test does not turn on it: a range
-// under a second, as the Scenarios' own definitions name.
 const (
 	someShortestStartup = 500 * time.Millisecond
 	someLongestStartup  = time.Second
 )
 
-// anEvenSpreadOver is a spread setting counted over one label, enforced and
-// reading the Nodes' taints, which is the shape every spread the lab defines has.
 func anEvenSpreadOver(topologyKey string, maxSkew int) scenario.TopologySpread {
 	return scenario.NewTopologySpread(topologyKey, maxSkew, scenario.DoNotSchedule, scenario.Honor)
 }
 
-// aNodeConditionToleration is a toleration of one taint a Node that stopped
-// responding carries, for the waiting time the lab sets.
 func aNodeConditionToleration(taint string) scenario.Toleration {
 	return scenario.NewToleration(taint, scenario.Exists, "", scenario.NoExecute, theLabsWaitInSeconds())
 }
 
-// theLabsWaitInSeconds is the lab's own waiting time as the field Kubernetes
-// holds it in, read from the constant that sets it rather than written out.
 func theLabsWaitInSeconds() int64 {
 	return int64(scenario.UnresponsiveNodeWait.Seconds())
 }
 
-// workloadSelector is the selector every spread constraint carries, so a
-// constraint counts this Workload's Pods and no others.
 func workloadSelector() *metav1.LabelSelector {
 	return &metav1.LabelSelector{MatchLabels: map[string]string{workloadLabel: deployedWorkloadName}}
 }
 
-// theConstraintOver and theTolerationOf are the one constraint and the one
-// toleration a setting becomes, written in the client library's own vocabulary so
-// each field is stated independently of the mapper that fills it.
+// These are written in the client library's own vocabulary so each field is
+// stated independently of the mapper that fills it.
 func theConstraintOver(topologyKey string, maxSkew int) corev1.TopologySpreadConstraint {
 	honourTaints := corev1.NodeInclusionPolicyHonor
 
@@ -135,12 +112,8 @@ func theTolerationOf(taint string) corev1.Toleration {
 	}
 }
 
-// A Pod template is the specification the Workload declared, transcribed field by
-// field: one enforced constraint per spread setting at the Skew that setting
-// names, and one toleration per toleration setting for the time it names, per
-// docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md. A
-// specification setting no spread carries no constraint and still the lab's two
-// tolerations, which every specification holds.
+// A specification setting no spread still carries the lab's two tolerations,
+// which every specification holds.
 func TestAWorkloadDeclaringAPredefinedSpecification_ShouldBeDeployedWithTheSettingsItsDefinitionNames(t *testing.T) {
 	declared := map[string]struct {
 		specification scenario.PodSpecification
@@ -182,18 +155,13 @@ func TestAWorkloadDeclaringAPredefinedSpecification_ShouldBeDeployedWithTheSetti
 	}
 }
 
-// theCriticalPriorityClass is a Pod setting the lab's own vocabulary does not
-// name, which is what a Scenario reaches through full access, and
-// beforeEverySetting is the place a full access written first on a Workload line
-// holds: no setting of the specification is transcribed before it runs.
+// beforeEverySetting is the place of a full access written first: no setting is
+// transcribed before it runs.
 const (
 	theCriticalPriorityClass = "critical"
 	beforeEverySetting       = 0
 )
 
-// The changes a full access makes, each one as a Scenario writes it: a setting
-// the lab's own vocabulary does not name, one it does, the lab's own waiting
-// time dropped, and the whole specification left empty.
 func namingThePriorityClass(priorityClass string) PodSpecAccess {
 	return func(pod *corev1.PodSpec) { pod.PriorityClassName = priorityClass }
 }
@@ -210,15 +178,10 @@ func leavingNothingOfThePodSpecification() PodSpecAccess {
 	return func(pod *corev1.PodSpec) { *pod = corev1.PodSpec{} }
 }
 
-// afterEverySettingOf is the place a full access written last on a Workload line
-// holds: every setting the specification holds is transcribed before it runs.
 func afterEverySettingOf(declared scenario.PodSpecification) int {
 	return len(declared.Settings())
 }
 
-// Full access reaches every Kubernetes Pod setting, the ones the lab's own
-// vocabulary does not name included, so what a Scenario wrote stands on the Pod
-// template its Workload is deployed with.
 func TestASpecificationCustomizedWithFullAccess_ShouldHoldTheSettingsTheScenarioNamed(t *testing.T) {
 	declared := aSpecificationOf(t, aNodeConditionToleration(scenario.TaintNodeNotReady))
 
@@ -234,9 +197,6 @@ func TestASpecificationCustomizedWithFullAccess_ShouldHoldTheSettingsTheScenario
 		}))
 }
 
-// A full access runs in the place it was written, so where it and a setting of
-// the lab's own name one Kubernetes field, the one written later is what the Pod
-// template carries.
 func TestFullAccessWrittenBesideTheLabsOwnCustomizations_ShouldWinWhereItIsWrittenLater(t *testing.T) {
 	declared := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 
@@ -264,8 +224,8 @@ func TestFullAccessWrittenBesideTheLabsOwnCustomizations_ShouldWinWhereItIsWritt
 	}
 }
 
-// Edge case 4: the specification's own tolerations are transcribed after the last
-// full access, so the unresponsive-Node wait holds whatever full access left out.
+// The specification's tolerations are transcribed after the last full access,
+// so the unresponsive-Node wait holds whatever full access left out.
 func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHolding(t *testing.T) {
 	declared := aSpecificationOf(t,
 		aNodeConditionToleration(scenario.TaintNodeNotReady),
@@ -282,9 +242,6 @@ func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHoldi
 	}))
 }
 
-// Full access reaches the Pod specification alone, so the label a Workload's Pods
-// are counted by, the selector reading them and the Deployment's own name and
-// labels stand even where a full access leaves nothing of that specification.
 func TestAWorkloadCustomizedWithFullAccess_ShouldStillHaveItsPodsCountedAsItsOwn(t *testing.T) {
 	declared := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 
@@ -298,10 +255,8 @@ func TestAWorkloadCustomizedWithFullAccess_ShouldStillHaveItsPodsCountedAsItsOwn
 	expect.Expect(t, deployed.Spec.Template.Labels).To(expect.Equal(map[string]string{workloadLabel: deployedWorkloadName}))
 }
 
-// Every Kubernetes name internal/scenario spells itself is pinned to the client
-// library's own constant: a mistyped label, taint or value would drop a spread or
-// a toleration silently and produce a Placement nobody asked for
-// (docs/architecture-principles.md § Domain Core).
+// A mistyped label, taint or value would drop a spread or a toleration silently
+// and produce a Placement nobody asked for.
 func TestEveryKubernetesNameTheLabSpells_ShouldEqualTheClientLibrarysOwnConstant(t *testing.T) {
 	expect.Expect(t, scenario.ZoneLabel).To(expect.Equal(corev1.LabelTopologyZone))
 	expect.Expect(t, scenario.HostnameLabel).To(expect.Equal(corev1.LabelHostname))
@@ -315,20 +270,16 @@ func TestEveryKubernetesNameTheLabSpells_ShouldEqualTheClientLibrarysOwnConstant
 	expect.Expect(t, string(scenario.NoSchedule)).To(expect.Equal(string(corev1.TaintEffectNoSchedule)))
 }
 
-// No Pod affinity rule is set: a required anti-affinity caps one Pod per Node
-// absolutely, which would leave a Pod Pending after a Node is lost, while a
-// maximum Skew of one keeps every Pod Running
-// (docs/adr/2026-10-04-scenario-declared-pod-spread.md).
+// A required anti-affinity caps one Pod per Node absolutely, which would leave
+// a Pod Pending after a Node is lost, while a maximum Skew of one keeps every
+// Pod Running.
 func TestADeployedPodTemplate_ShouldCarryNoPodAffinityRule(t *testing.T) {
 	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
 	expect.Expect(t, deployed.Spec.Template.Spec.Affinity).To(expect.Equal[*corev1.Affinity](nil))
 }
 
-// The container a Workload's Pods run is the mapper's own, as the Workload label
-// and the selector are: a specification is a package-level value and can name
-// neither, per
-// docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
+// A specification is a package-level value and cannot name the container.
 func TestADeployedPodTemplate_ShouldCarryTheContainerNoSpecificationCanName(t *testing.T) {
 	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
@@ -337,15 +288,10 @@ func TestADeployedPodTemplate_ShouldCarryTheContainerNoSpecificationCanName(t *t
 	}))
 }
 
-// aReportedStatus is the status a Node reports: the capacity this suite
-// provisions with, and the conditions named.
 func aReportedStatus(conditions ...corev1.NodeCondition) corev1.NodeStatus {
 	return corev1.NodeStatus{Capacity: aReportedCapacity(), Conditions: conditions}
 }
 
-// aReportedCapacity is the capacity a Node of this suite reports room for, in all
-// three dimensions: a Node the lab created reports every one of them, which is
-// what an observation reads back.
 func aReportedCapacity() corev1.ResourceList {
 	return corev1.ResourceList{
 		corev1.ResourcePods:   *resource.NewQuantity(somePodsPerNode, resource.DecimalSI),
@@ -354,9 +300,6 @@ func aReportedCapacity() corev1.ResourceList {
 	}
 }
 
-// theReadyCondition is what a Node answering reports about itself, and
-// someOtherCondition one further condition the control plane sets on it, which the
-// lab reads and does not decide.
 func theReadyCondition() corev1.NodeCondition {
 	return corev1.NodeCondition{Type: corev1.NodeReady, Status: corev1.ConditionTrue, Reason: nodeReadyReason}
 }
@@ -365,8 +308,6 @@ func someOtherCondition() corev1.NodeCondition {
 	return corev1.NodeCondition{Type: corev1.NodeMemoryPressure, Status: corev1.ConditionFalse}
 }
 
-// theLostHeartbeatCondition is the Ready condition the lab writes for a Node that
-// stopped responding, which is a lost heartbeat as the control plane reads it.
 func theLostHeartbeatCondition() corev1.NodeCondition {
 	return corev1.NodeCondition{
 		Type:    corev1.NodeReady,
@@ -376,12 +317,8 @@ func theLostHeartbeatCondition() corev1.NodeCondition {
 	}
 }
 
-// The status of a Node that stopped responding reports its Ready condition
-// Unknown and leaves every other condition as the Node reported it: the lab stops
-// the Node answering and does not decide what else is true of it, per
-// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md. Each case also
-// asserts the status the lab read is left as it was, since the lab writes a
-// changed copy back and reads the same Node again on the next Failure.
+// The lab writes a changed copy back and reads the same Node again on the next
+// Failure, so each case also asserts the status it read is left as it was.
 func TestTheStatusOfANodeThatStoppedResponding_ShouldReportReadyUnknownAndLeaveEveryOtherConditionAsReported(t *testing.T) {
 	nodes := map[string]struct {
 		reported, withheld []corev1.NodeCondition
@@ -412,10 +349,7 @@ func TestTheStatusOfANodeThatStoppedResponding_ShouldReportReadyUnknownAndLeaveE
 	}
 }
 
-// A Node the KWOK controller no longer maintains keeps its place in every Topology
-// read and every spread domain, so the marking the controller selects by is the
-// one label the lab takes off. The labels it read keep it, because it writes a
-// changed copy back.
+// The lab writes a changed copy back, so the labels it read keep the marking.
 func TestANodeTheKWOKControllerNoLongerMaintains_ShouldKeepEveryLabelButTheMarkingItSelectsBy(t *testing.T) {
 	provisioned := aNode(t)
 	labelled := toNode(provisioned).Labels
@@ -451,9 +385,7 @@ func TestAProvisionedNode_ShouldBeFakeAndCarryItsZoneAndHostnameLabels(t *testin
 	expect.Expect(t, mapped.Annotations).To(expect.Equal(map[string]string{fakeNodeAnnotation: fakeNodeAnnotationValue}))
 }
 
-// A provisioned Node reports the capacity its Topology stated in all three
-// dimensions, and reports it as allocatable too: the scheduler fits the requests
-// of the Pods it places against what a Node reports allocatable.
+// The scheduler fits requests against what a Node reports allocatable.
 func TestATopologyStatingItsNodesCpuMemoryAndPodCount_ShouldProvisionNodesWithThatCapacity(t *testing.T) {
 	provisioned := aNode(t)
 
@@ -466,9 +398,6 @@ func TestATopologyStatingItsNodesCpuMemoryAndPodCount_ShouldProvisionNodesWithTh
 	}))
 }
 
-// theCapacityReportedIn is the Node capacity one resource list of a mapped Node
-// reports, read back through the dimensions the lab wrote, so what a test
-// compares is one whole capacity rather than three quantities picked apart.
 func theCapacityReportedIn(t *testing.T, reported corev1.ResourceList) scenario.NodeCapacity {
 	t.Helper()
 
@@ -478,11 +407,8 @@ func theCapacityReportedIn(t *testing.T, reported corev1.ResourceList) scenario.
 		scenario.Memory(reported.Memory().Value()/bytesPerMebibyte))
 }
 
-// A cpu or memory amount the lab spells itself is spelled the way the client
-// library spells the same amount: a Scenario reads its Node capacity off a Step
-// line the lab spells, and reads it again off a Timeline the client library
-// spells, so one amount stated two ways would read as two
-// (docs/architecture-principles.md § Domain Core).
+// A capacity is read off a Step line the lab spells and off a Timeline the
+// client library spells, so one amount stated two ways would read as two.
 func TestEveryQuantityTheLabSpells_ShouldEqualTheClientLibrarysOwnSpelling(t *testing.T) {
 	stated := map[string]struct {
 		cores, gibibytes int
@@ -505,10 +431,7 @@ func TestEveryQuantityTheLabSpells_ShouldEqualTheClientLibrarysOwnSpelling(t *te
 	}
 }
 
-// The Request a specification states reaches the container the mapper owns, under
-// the names Kubernetes gives it, because the scheduler places a Pod by what it
-// asks for. A specification stating none leaves its Pods asking for nothing, so
-// the spread alone decides where they land.
+// The scheduler places a Pod by what it asks for.
 func TestAPodSpecificationStatingARequest_ShouldDeployItsPodsWithThatRequest(t *testing.T) {
 	declared := aSpecificationOf(t, scenario.NewRequest(someRequestedCPU, someRequestedMemory))
 
@@ -528,9 +451,6 @@ func TestAPodSpecificationStatingNoRequest_ShouldDeployItsPodsAskingForNothing(t
 	expect.Expect(t, theQuantitiesRequestedIn(deployed)).To(expect.Equal([]map[corev1.ResourceName]string{{}}))
 }
 
-// theQuantitiesRequestedIn are the resource requests the containers of a deployed
-// Pod template carry, each amount as Kubernetes spells it, which is how a request
-// is read back without a quantity being picked apart.
 func theQuantitiesRequestedIn(deployed *appsv1.Deployment) []map[corev1.ResourceName]string {
 	containers := deployed.Spec.Template.Spec.Containers
 	requested := make([]map[corev1.ResourceName]string, 0, len(containers))
@@ -597,10 +517,8 @@ func TestAnObservedPod_ShouldBeReadWithTheNodeItLandedOn(t *testing.T) {
 	}))
 }
 
-// A Pod's Ready condition is what a Wait for every Pod Ready holds until, so the
-// mapper reads it off the Pod the way a Node's own Ready condition is read. A Pod
-// the control plane reports no such condition for is not Ready: a Wait holds for
-// it rather than passing it over.
+// A Pod reporting no Ready condition is not Ready, so a Wait holds for it
+// rather than passing it over.
 func TestAnObservedPodsReadyCondition_ShouldBeReadAsThatPodBeingReady(t *testing.T) {
 	const somePodName = "web-abc"
 	reported := map[string]struct {
@@ -669,8 +587,6 @@ func TestAnObservedNode_ShouldTakeItsZoneFromItsLabelRatherThanItsName(t *testin
 	}))
 }
 
-// A Node carries its NodePool's name as a label, so the cluster tells a Node's
-// NodePool from the Node alone (docs/prd.md REQ-SIM-013).
 func TestEveryNodeOfANodePool_ShouldCarryALabelNamingItsNodePool(t *testing.T) {
 	const gpu = "gpu"
 	provisioned := aNodeOfTheNodePool(t, gpu)
@@ -680,8 +596,6 @@ func TestEveryNodeOfANodePool_ShouldCarryALabelNamingItsNodePool(t *testing.T) {
 	expect.Expect(t, mapped.Labels[nodePoolLabel]).To(expect.Equal(gpu))
 }
 
-// An observed Node is read with the NodePool its label names, so a Node read back
-// from the cluster equals the one its Topology declared.
 func TestAnObservedNode_ShouldBeReadWithThatNodePool(t *testing.T) {
 	const gpu = "gpu"
 	declared := aNodeOfTheNodePool(t, gpu)
@@ -694,12 +608,8 @@ func TestAnObservedNode_ShouldBeReadWithThatNodePool(t *testing.T) {
 	expect.Expect(t, observed).To(expect.Equal([]scenario.Node{declared}))
 }
 
-// The domain holds Kubernetes' label syntax itself, since it names no Kubernetes
-// package, so it is held to the client library's own validation over names it
-// admits and names it refuses: a NodePool name and a stated value against the
-// label-value rule, and a stated key against the qualified-name rule a label key
-// meets (docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md,
-// docs/adr/2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md).
+// The domain names no Kubernetes package and holds the label syntax itself, so
+// it is held to the client library's own validation.
 func TestTheNodePoolNameRule_ShouldAgreeWithTheClientLibrarysLabelValueValidation(t *testing.T) {
 	const someNodesPerZone = 1
 
@@ -741,8 +651,6 @@ func TestTheNodeLabelKeyRule_ShouldAgreeWithTheClientLibrarysQualifiedNameValida
 	}
 }
 
-// someLabelValues are names Kubernetes holds as a label value and names it does
-// not, the empty one among them.
 func someLabelValues() []string {
 	return []string{
 		"gpu", "g", "GPU-a100", "a.b_c-d", "0pool9", strings.Repeat("a", validation.LabelValueMaxLength), "",
@@ -751,17 +659,14 @@ func someLabelValues() []string {
 	}
 }
 
-// The keys the domain refuses as the lab's own are exactly the ones the mapper
-// writes on a Node stating no label, so a stated label can neither overwrite one
-// of the lab's nor be overwritten by one the domain let through.
+// A stated label can then neither overwrite one of the lab's nor be overwritten
+// by one the domain let through.
 func TestTheLabsOwnNodeLabelKeys_ShouldBeExactlyTheOnesTheMapperWritesOnANodeStatingNone(t *testing.T) {
 	mapped := toNode(aNode(t))
 
 	expect.Expect(t, slices.Sorted(maps.Keys(mapped.Labels))).To(expect.Equal(slices.Sorted(slices.Values(scenario.LabsOwnNodeLabelKeys()))))
 }
 
-// A Node whose NodePool states labels carries them beside the lab's own, which
-// stay as the lab writes them (docs/prd.md REQ-SIM-017).
 func TestANodeStatingLabels_ShouldBeMappedCarryingThemBesideTheLabsOwn(t *testing.T) {
 	labelled := aNodeLabelled(t, map[string]string{capacityTypeLabel: spotCapacity})
 
@@ -776,9 +681,6 @@ func TestANodeStatingLabels_ShouldBeMappedCarryingThemBesideTheLabsOwn(t *testin
 	}))
 }
 
-// An observed Node is read with the labels its NodePool stated and none of the
-// lab's own, so a labelled Node read back from the cluster equals the one its
-// Topology declared.
 func TestAnObservedLabelledNode_ShouldBeReadWithTheLabelsItsNodePoolStated(t *testing.T) {
 	declared := aNodeLabelled(t, map[string]string{capacityTypeLabel: spotCapacity})
 
@@ -790,14 +692,11 @@ func TestAnObservedLabelledNode_ShouldBeReadWithTheLabelsItsNodePoolStated(t *te
 	expect.Expect(t, observed).To(expect.Equal([]scenario.Node{declared}))
 }
 
-// The label a test of a labelled Node states, and the value it states it under.
 const (
 	capacityTypeLabel = "capacity-type"
 	spotCapacity      = "spot"
 )
 
-// aNodeLabelled is the one Node of a Topology whose one NodePool states the
-// labels named.
 func aNodeLabelled(t *testing.T, stated map[string]string) scenario.Node {
 	t.Helper()
 
@@ -834,10 +733,6 @@ func TestAnObservedNodeWithNoUsableCapacity_ShouldBeRefused(t *testing.T) {
 	}
 }
 
-// The values the watched objects below carry: how long after the record started
-// the lab received the change, the objects a Timeline reads a change to, how much
-// of the Workload the control plane reports ready, and what it reported about a
-// Pod it placed.
 const (
 	observedAfter     = 2500 * time.Millisecond
 	watchedNodeName   = "zone-2-node-2"
@@ -848,25 +743,17 @@ const (
 	scheduledMessage  = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-2-node-2"
 )
 
-// The kind a Kubernetes Event below is about: one a Timeline records, and one
-// this lab watches no stream for, along with the name such an unwatched object
-// carries.
 const (
 	reportedPodKind   = "Pod"
 	someUnwatchedKind = "Service"
 	someUnwatchedName = "web-service"
 )
 
-// theCapacityReported is how a Node entry of a Timeline states the capacity this
-// suite provisions with: the cpu and memory the scheduler fits a request
-// against, then the Pods it has room for, each as Kubernetes spells it.
 func theCapacityReported() string {
 	return someCPUPerNode.String() + " cpu, " + someMemoryPerNode.String() + " memory and " +
 		strconv.Itoa(somePodsPerNode) + " Pods"
 }
 
-// aWatchedNode is the Node a Timeline reads a change to, reporting the Ready
-// condition given and room for the capacity this suite provisions with.
 func aWatchedNode(ready corev1.ConditionStatus) *corev1.Node {
 	return &corev1.Node{
 		Name: watchedNodeName,
@@ -996,15 +883,12 @@ func TestAnObservedChangeNoTimelineRecords_ShouldBecomeNoEntry(t *testing.T) {
 	}
 }
 
-// aNode is the named default for the one Node a mapping test maps.
 func aNode(t *testing.T) scenario.Node {
 	t.Helper()
 
 	return aNodeHolding(t, aCapacity(t))
 }
 
-// aNodeHolding is the one Node of a Topology whose Nodes hold the capacity named,
-// which is how a test that turns on a capacity states it.
 func aNodeHolding(t *testing.T, capacity scenario.NodeCapacity) scenario.Node {
 	t.Helper()
 
@@ -1017,9 +901,6 @@ func aNodeHolding(t *testing.T, capacity scenario.NodeCapacity) scenario.Node {
 	return topology.Nodes()[0]
 }
 
-// topologyOfTheGeneralNodePool is a Topology of zones Zones each holding the one
-// NodePool general of nodesPerZone Nodes at capacity, or the refusal either
-// constructor gave.
 func topologyOfTheGeneralNodePool(zones, nodesPerZone int, capacity scenario.NodeCapacity) (scenario.Topology, error) {
 	pool, err := scenario.NewNodePool("general", nodesPerZone, capacity)
 	if err != nil {
@@ -1029,9 +910,6 @@ func topologyOfTheGeneralNodePool(zones, nodesPerZone int, capacity scenario.Nod
 	return scenario.NewTopology(zones, pool)
 }
 
-// aNodeOfTheNodePool is the first Node of a Topology of one Zone holding one
-// NodePool of the name stated, which is how a test that turns on a NodePool's
-// name states it.
 func aNodeOfTheNodePool(t *testing.T, name string) scenario.Node {
 	t.Helper()
 
@@ -1048,15 +926,12 @@ func aNodeOfTheNodePool(t *testing.T, name string) scenario.Node {
 	return topology.Nodes()[0]
 }
 
-// aCapacity is the named default for the Node capacity this suite provisions with.
 func aCapacity(t *testing.T) scenario.NodeCapacity {
 	t.Helper()
 
 	return aCapacityOf(t, somePodsPerNode, someCPUPerNode, someMemoryPerNode)
 }
 
-// aCapacityOf is the Node capacity of the dimensions named, which is what a test
-// turning on one of them states.
 func aCapacityOf(t *testing.T, pods int, cpu scenario.CPU, memory scenario.Memory) scenario.NodeCapacity {
 	t.Helper()
 
@@ -1068,16 +943,13 @@ func aCapacityOf(t *testing.T, pods int, cpu scenario.CPU, memory scenario.Memor
 	return capacity
 }
 
-// The Startup times a specification below states, in the whole milliseconds a
-// Startup time is built from: a shortest under a second and a longest that is no
-// whole second, apart from each other and from the one this suite's
-// specifications name, so what a template carries is read back as the one stated.
+// The times differ from each other and from this suite's default, so what a
+// template carries is read back as the one stated.
 const (
 	aShortStartupMillis  = 300
 	aLongerStartupMillis = 1700
 )
 
-// aStartupTimeBetween is the Startup time of that shortest and that longest.
 func aStartupTimeBetween(t *testing.T, shortest, longest time.Duration) scenario.StartupTime {
 	t.Helper()
 
@@ -1089,10 +961,6 @@ func aStartupTimeBetween(t *testing.T, shortest, longest time.Duration) scenario
 	return stated
 }
 
-// theStartupAnnotations are the two annotations the simulator's pod-ready Stage
-// reads a Pod's Startup time from: the shortest as its delay and the longest as
-// the bound of the time drawn above it, per
-// docs/adr/2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md.
 func theStartupAnnotations(shortest, longest time.Duration) map[string]string {
 	return map[string]string{
 		podReadyDelayAnnotation:       shortest.String(),
@@ -1100,10 +968,8 @@ func theStartupAnnotations(shortest, longest time.Duration) map[string]string {
 	}
 }
 
-// Every Workload's Pod template carries the Startup time its specification
-// names. The annotations sit on the template's metadata, which full access does
-// not reach, so a full access leaving nothing of the Pod specification leaves
-// them standing (docs/prd.md REQ-SIM-012).
+// The annotations sit on the template's metadata, which full access does not
+// reach.
 func TestAWorkloadsPodTemplate_ShouldCarryItsStartupTimeWhateverFullAccessNames(t *testing.T) {
 	namingSome := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 	statingARange := namingSome.WithStartupTime(aStartupTimeBetween(t, aShortStartupMillis*time.Millisecond, aLongerStartupMillis*time.Millisecond))
@@ -1135,20 +1001,15 @@ func TestAWorkloadsPodTemplate_ShouldCarryItsStartupTimeWhateverFullAccessNames(
 	}
 }
 
-// The taint a test of a tainted Node states: a key and value a dedicated
-// NodePool of gpu Nodes carries.
 const (
 	gpuTaintKey   = "nvidia.com/gpu"
 	gpuTaintValue = "present"
 )
 
-// aGPUTaint is the one NoSchedule taint a tainted test states.
 func aGPUTaint() scenario.Taint {
 	return scenario.Taint{Key: gpuTaintKey, Value: gpuTaintValue, Effect: scenario.NoSchedule}
 }
 
-// aNodeTainted is the one Node of a Topology whose one NodePool states the taints
-// named.
 func aNodeTainted(t *testing.T, stated ...scenario.Taint) scenario.Node {
 	t.Helper()
 
@@ -1173,8 +1034,6 @@ func aNodeTainted(t *testing.T, stated ...scenario.Taint) scenario.Node {
 	return topology.Nodes()[0]
 }
 
-// A Node whose NodePool states taints carries each as a Node taint, and a Node
-// stating none carries none.
 func TestANodeStatingTaints_ShouldBeMappedCarryingThemAsItsTaints(t *testing.T) {
 	expect.Expect(t, toNode(aNodeTainted(t, aGPUTaint())).Spec.Taints).To(expect.Equal([]corev1.Taint{
 		{Key: gpuTaintKey, Value: gpuTaintValue, Effect: corev1.TaintEffectNoSchedule},
@@ -1182,9 +1041,6 @@ func TestANodeStatingTaints_ShouldBeMappedCarryingThemAsItsTaints(t *testing.T) 
 	expect.Expect(t, toNode(aNode(t)).Spec.Taints).To(expect.HaveLen[corev1.Taint](0))
 }
 
-// An observed Node is read with the taints its NodePool stated and none the
-// control plane sets from its conditions, so a tainted Node read back from the
-// cluster equals the one its Topology declared.
 func TestAnObservedTaintedNode_ShouldBeReadWithTheTaintsItsNodePoolStated(t *testing.T) {
 	declared := aNodeTainted(t, aGPUTaint())
 	reported := toNode(declared)
@@ -1199,9 +1055,6 @@ func TestAnObservedTaintedNode_ShouldBeReadWithTheTaintsItsNodePoolStated(t *tes
 	expect.Expect(t, observed).To(expect.Equal([]scenario.Node{declared}))
 }
 
-// A probe Pod tolerates its own Node's taints, so the scheduler places it on a
-// tainted Node and provisioning ends there as on any other, per
-// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
 func TestAProbePodOfATaintedNode_ShouldTolerateThatNodesTaints(t *testing.T) {
 	expect.Expect(t, toProbePod(aNodeTainted(t, aGPUTaint())).Spec.Tolerations).To(expect.Equal([]corev1.Toleration{
 		{Key: gpuTaintKey, Operator: corev1.TolerationOpEqual, Value: gpuTaintValue, Effect: corev1.TaintEffectNoSchedule},
@@ -1209,8 +1062,7 @@ func TestAProbePodOfATaintedNode_ShouldTolerateThatNodesTaints(t *testing.T) {
 	expect.Expect(t, toProbePod(aNode(t)).Spec.Tolerations).To(expect.HaveLen[corev1.Toleration](0))
 }
 
-// A toleration of a NoSchedule taint is transcribed with its value and no
-// waiting time, which Kubernetes takes for NoExecute alone.
+// Kubernetes takes a waiting time for NoExecute alone.
 func TestAPodSpecificationToleratingANoScheduleTaint_ShouldDeployItsPodsToleratingItWithNoWaitingTime(t *testing.T) {
 	const noWaitingTime = 0
 	tolerating := scenario.NewToleration(gpuTaintKey, scenario.Equal, gpuTaintValue, scenario.NoSchedule, noWaitingTime)
@@ -1224,9 +1076,7 @@ func TestAPodSpecificationToleratingANoScheduleTaint_ShouldDeployItsPodsTolerati
 	}))
 }
 
-// The domain's taint key and value rules agree with the client library's
-// validation of a Node taint, apart from the keys under the control plane's
-// prefix, which the lab refuses on top.
+// The lab additionally refuses keys under the control plane's prefix.
 func TestTheTaintKeyAndValueRules_ShouldAgreeWithTheClientLibrarysValidation(t *testing.T) {
 	prefixes := []string{"", "example.com/", strings.Repeat("p", 254) + "/", "Example.com/", "a/b/"}
 

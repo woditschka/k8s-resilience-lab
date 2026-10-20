@@ -1,8 +1,6 @@
-// The test in this file crosses to a real Simulated Cluster, because what it
-// judges is the order in which a Scenario that panics lets go of the cluster, its
-// recording and the file that recording is written into: no stand-in for the
-// cluster has a recording to outlive its file (docs/testing-principles.md
-// § Mocking Policy).
+// This test crosses to a real Simulated Cluster, because it judges the order in
+// which a panicking Scenario lets go of the cluster, its recording and the
+// recording's file: no stand-in has a recording to outlive its file.
 package lab
 
 import (
@@ -30,9 +28,9 @@ func TestAScenarioThatPanicsOnARealCluster_ShouldLeaveNoClusterAndNoSecondPanic(
 	running := NewRunner(engine, cluster.DefaultKubernetesVersion(), timeline.NewFolder(t.TempDir()))
 	var provisioned *cluster.SimulatedCluster
 
-	// A Node is stopped and the Scenario panics at once, so the change is still on
-	// its way to the recording when the panic unwinds, which is what a file closed
-	// before the recording stopped would meet.
+	// The Scenario panics at once, so the change is still on its way to the
+	// recording when the panic unwinds, which is what a file closed too early
+	// would meet.
 	carried := carryOutAtOnce([]string{thePanickingScenarioOnACluster}, func(int) (Outcome, error) {
 		return running.runNamed(t.Context(), thePanickingScenarioOnACluster, func(steps *Scenario) {
 			provisioned = steps.provisioned

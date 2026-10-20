@@ -1,9 +1,6 @@
-// The tests in this file read a setting the way a Scenario writes it, as a keyed
-// literal, and pin the two ways the package answers one: a setting with a field
-// left out is refused at the specification holding it, naming the setting and the
-// field, and a setting complete as written is reported as a manifest writes it,
-// per
-// docs/adr/2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md.
+// These tests read a setting as a Scenario writes it, a keyed literal: a field
+// left out is refused at the specification holding it, and a complete setting
+// is reported as a manifest writes it.
 package pod
 
 import (
@@ -156,16 +153,10 @@ func withRequest(base Request, change func(*Request)) Request {
 	return base
 }
 
-// aTolerationOfADedicatedNodePool is the named default for a toleration of a
-// NoSchedule taint, which names a value and no waiting time.
 func aTolerationOfADedicatedNodePool() Toleration {
 	return Toleration{Key: "nvidia.com/gpu", Operator: Equal, Value: "present", Effect: NoSchedule}
 }
 
-// The fields a toleration requires follow its operator and effect: Equal takes a
-// value and Exists none, NoExecute takes a waiting time and NoSchedule none. A
-// field stated against them is refused as one left out is, naming the setting
-// and the field.
 func TestATolerationsFields_ShouldFollowItsOperatorAndEffect(t *testing.T) {
 	dedicated, unresponsive := aTolerationOfADedicatedNodePool(), aCompleteToleration()
 	tests := map[string]struct {
@@ -213,8 +204,6 @@ func TestATolerationsFields_ShouldFollowItsOperatorAndEffect(t *testing.T) {
 	}
 }
 
-// A toleration of a NoSchedule taint is reported with its value and no waiting
-// time.
 func TestATolerationOfANoScheduleTaint_ShouldBeReadWithItsValueAndNoWaitingTime(t *testing.T) {
 	defined := Predefined(defaultPlacementNamed, someStartupTime(), aTolerationOfADedicatedNodePool())
 

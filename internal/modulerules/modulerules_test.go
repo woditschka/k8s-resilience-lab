@@ -12,35 +12,24 @@ import (
 )
 
 const (
-	// everyPackageInTheModule is the pattern a module-wide rule is asserted over.
 	everyPackageInTheModule = "./..."
 
-	// probedModulePath is the module path of the module each test below builds.
 	probedModulePath = "probed"
 
-	// importedPath is the path the built module imports, and unimportedPath a path
-	// no file in it names.
 	importedPath   = "encoding/json"
 	unimportedPath = "k8s.io/client-go/rest"
 
-	// scannedCall is the function the call-rule scan looks for, and callAlias the
-	// name the calling file imports its package under, so the scan has to resolve
-	// the alias rather than match the text of the call.
+	// The calling file imports the package under callAlias, so the scan has to
+	// resolve the alias rather than match the text of the call.
 	scannedCall = "InClusterConfig"
 	callAlias   = "rename"
 
-	// callAtLine and callAtColumn are where the call sits in callingSource.
 	callAtLine   = 5
 	callAtColumn = 18
 
-	// declaredType is the named type the scanned sources write — on the one constant
-	// of scannedSource that names a type, which is what a rule over a declaration of
-	// a named type reads, and on the parameter chainedSource chains its call off.
 	declaredType = "Name"
 )
 
-// importingSource imports a denied path; callingSource calls a denied function
-// through a renamed import, and cleanSource names neither.
 const (
 	importingSource = `package probed
 
@@ -68,9 +57,6 @@ import "encoding/json"
 var TestDecoder = json.NewDecoder
 `
 
-	// scannedSource holds one of each top-level declaration, so a scan of it
-	// reports every kind, the type a declaration names where it names one, the
-	// parameters a function takes and the lines of its body.
 	scannedSource = `package probed
 
 import "encoding/json"
@@ -91,9 +77,8 @@ func Scan(into *Decoded, from string) {
 }
 `
 
-	// chainedSource holds a method chained onto a call, the shape a Scenario writes
-	// its steps in, so a scan of it reports the expression each name is selected
-	// from where that expression is a call rather than a plain name.
+	// chainedSource chains a method onto a call, the shape a Scenario writes
+	// its Steps in.
 	chainedSource = `package probed
 
 func Chain(step Name) {
@@ -102,8 +87,7 @@ func Chain(step Name) {
 `
 
 	// literalSource passes a function literal to a call, the shape a Scenario
-	// writes full access in, so a scan of it reports the names that literal uses
-	// and not the parameter it declares for itself.
+	// writes full access in.
 	literalSource = `package probed
 
 func Reach(step Name) {
@@ -113,12 +97,9 @@ func Reach(step Name) {
 }
 `
 
-	// literalResultSource passes a function literal that names its own result as
-	// well, which is the other list a function type declares names in. No Scenario
-	// writes one today; the rules this package serves read every function literal of
-	// the surface they scan, so both lists are read the same way. The body writes
-	// that result nowhere, so the list the literal declares it in is the one place
-	// the scan can read it from.
+	// No Scenario writes a literal naming its result today, but the rules read
+	// every function literal alike. The body writes that result nowhere, so the
+	// declared list is the one place the scan can read it from.
 	literalResultSource = `package probed
 
 func Report(step Name) {
@@ -131,8 +112,6 @@ func Report(step Name) {
 `
 )
 
-// theLiteralParameter is the name those function literals declare for their
-// parameter, which the declarations holding them write nowhere themselves.
 const theLiteralParameter = "settings"
 
 func TestAPackageImportingADeniedPath_ShouldBeNamedWithThePathItImports(t *testing.T) {
@@ -321,9 +300,6 @@ func TestAScannedMethodChain_ShouldReportEveryExpressionItsNamesAreSelectedFrom(
 	}}))
 }
 
-// Neither list a function literal declares names in is a name the declaration
-// holding it writes: the expected names below hold the parameter's own type and
-// the result's, and neither "settings" nor "reported" on its own.
 func TestADeclarationHoldingAFunctionLiteral_ShouldReportTheNamesItUsesAndNotTheOnesThatLiteralDeclares(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -371,8 +347,6 @@ func TestADeclarationHoldingAFunctionLiteral_ShouldReportTheNamesItUsesAndNotThe
 	}
 }
 
-// theOneDeclarationOf is the single declaration of a single scanned file, which a
-// rule read on one declaration alone is asserted over.
 func theOneDeclarationOf(t *testing.T, scanned []modulerules.GoFile) modulerules.Declaration {
 	t.Helper()
 
@@ -420,10 +394,7 @@ func TestTheRootOfAModule_ShouldBeTheDirectoryHoldingItsModuleFile(t *testing.T)
 	expect.Expect(t, root).To(expect.Equal(probed))
 }
 
-// aModuleWhoseFilesAre is the named default for a module the rules are asserted
-// over: a directory of its own holding a module file and the named sources, each
-// declaring the one package. The module requires nothing, so the graph walk needs
-// no download.
+// The module requires nothing, so the graph walk needs no download.
 func aModuleWhoseFilesAre(t *testing.T, sources map[string]string) string {
 	t.Helper()
 
@@ -440,9 +411,6 @@ func aModuleWhoseFilesAre(t *testing.T, sources map[string]string) string {
 	return root
 }
 
-// The sources a keyed literal is read on: a struct literal whose keys name the
-// fields it sets, a map literal whose keys are values it reads, and a slice of
-// structs whose elements leave their type out.
 const (
 	aKeyedStructLiteralSource = `package probe
 
@@ -464,9 +432,8 @@ func Tolerate() []pod.Toleration {
 `
 )
 
-// The key of a struct literal names a field of the type written, which is no name
-// the declaration reads: the fields a value of a package's type sets are that
-// type's to declare. The key of a map literal is a value, so it stays a name used.
+// The fields a struct literal sets are its type's to declare. The key of a map
+// literal is a value, so it stays a name used.
 func TestAKeyedLiteral_ShouldReportTheNamesItsValuesUseAndNotTheFieldsItSets(t *testing.T) {
 	cases := []struct {
 		name   string

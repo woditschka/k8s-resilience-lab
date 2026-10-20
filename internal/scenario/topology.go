@@ -1,10 +1,7 @@
 // Package scenario holds a run's description and its observed outcome as
-// immutable values: the Topology a Scenario provisions, the Workload it deploys,
-// and the Placement it observes.
-//
-// The package names no Kubernetes type. The mapping between this vocabulary and
-// the control plane's lives in internal/cluster, per
-// docs/system-design.md § Package Structure.
+// immutable values: the Topology a Scenario provisions, the Workload it
+// deploys, and the Placement it observes. It names no Kubernetes type; the
+// mapping to the control plane's vocabulary lives in internal/cluster.
 package scenario
 
 import (
@@ -14,22 +11,20 @@ import (
 	"slices"
 )
 
-// maxZones is the highest Zone count a Topology admits. It is a limit of the
-// lab's own: what should bound a Zone count is an open question in
-// docs/prd.md, so the count admitted stands until that question is settled.
+// maxZones is a limit of the lab's own, standing until what should bound a Zone
+// count is decided.
 const maxZones = 26
 
-// NodeCapacity is what one Node can hold: the Pods it has room for, and the cpu
-// and memory the scheduler fits their requests against. A Workload can therefore
-// declare more Pods, or ask for more of either, than its Topology has room for.
+// NodeCapacity is the room a Node has, which a Workload can exceed by declaring
+// more Pods, or asking for more cpu or memory, than its Topology has room for.
 type NodeCapacity struct {
 	pods   int
 	cpu    CPU
 	memory Memory
 }
 
-// NewNodeCapacity builds the capacity of one Node, refusing each dimension at
-// none: a Node always has room for a Pod that asks for something.
+// NewNodeCapacity refuses each dimension at none: a Node always has room for a
+// Pod that asks for something.
 func NewNodeCapacity(pods int, cpu CPU, memory Memory) (NodeCapacity, error) {
 	if pods < 1 {
 		return NodeCapacity{}, fmt.Errorf("a Node holds at least one Pod, so a capacity of %d Pods is refused", pods)
@@ -44,17 +39,15 @@ func NewNodeCapacity(pods int, cpu CPU, memory Memory) (NodeCapacity, error) {
 	return NodeCapacity{pods: pods, cpu: cpu, memory: memory}, nil
 }
 
-// NamedNodeCapacity is a Node capacity a Scenario defines once under a name of
-// its own, so a NodePool names it instead of stating its cpu, memory and Pod
-// count. The package defines no name and holds no capacity of its own, per
-// docs/adr/2026-10-09-every-nodepool-states-or-names-its-node-capacity.md.
+// NamedNodeCapacity lets a NodePool name a capacity instead of stating it. The
+// package defines no name of its own.
 type NamedNodeCapacity struct {
 	name     string
 	capacity NodeCapacity
 }
 
-// NewNamedNodeCapacity defines capacity under name, refusing an empty name and
-// the zero capacity no constructor builds, which is a definition stating none.
+// NewNamedNodeCapacity refuses the zero capacity no constructor builds, since
+// it is a definition stating none.
 func NewNamedNodeCapacity(name string, capacity NodeCapacity) (NamedNodeCapacity, error) {
 	if name == "" {
 		return NamedNodeCapacity{}, errors.New("a Named Node capacity states its name, so one without a name is refused")
@@ -67,42 +60,34 @@ func NewNamedNodeCapacity(name string, capacity NodeCapacity) (NamedNodeCapacity
 	return NamedNodeCapacity{name: name, capacity: capacity}, nil
 }
 
-// Name is the name a NodePool names this capacity by.
 func (n NamedNodeCapacity) Name() string {
 	return n.name
 }
 
-// Capacity is the cpu, memory and Pod count this name stands for.
 func (n NamedNodeCapacity) Capacity() NodeCapacity {
 	return n.capacity
 }
 
-// Pods is how many Pods one Node with this capacity holds.
 func (c NodeCapacity) Pods() int {
 	return c.pods
 }
 
-// CPU is how much processor time one Node with this capacity has.
 func (c NodeCapacity) CPU() CPU {
 	return c.cpu
 }
 
-// Memory is how much memory one Node with this capacity has.
 func (c NodeCapacity) Memory() Memory {
 	return c.memory
 }
 
-// Equal reports whether two capacities hold the same of every dimension. It is
-// the equality go-cmp compares through, since the type's fields are unexported.
+// Equal is the equality go-cmp compares through, since the type's fields are
+// unexported.
 func (c NodeCapacity) Equal(other NodeCapacity) bool {
 	return c == other
 }
 
-// Node is one simulated machine a Pod can be placed on, named after the Zone it
-// belongs to and its position within that Zone, and holding the name of the
-// NodePool it belongs to and the labels and taints that NodePool states. A
-// Topology derives every Node it holds, so the type carries no invariant of its
-// own.
+// Node carries no invariant of its own, since a Topology derives every Node it
+// holds.
 type Node struct {
 	Name     string
 	Zone     string
@@ -112,28 +97,22 @@ type Node struct {
 	Taints   NodeTaints
 }
 
-// Equal reports whether two Nodes agree in every field. It is the equality go-cmp
-// compares through, since the labels and taints a Node carries are compared by
-// value.
+// Equal compares the labels and taints a Node carries by value.
 func (n Node) Equal(other Node) bool {
 	return n.Name == other.Name && n.Zone == other.Zone && n.NodePool == other.NodePool &&
 		n.Capacity == other.Capacity && n.Labels.Equal(other.Labels) && n.Taints.Equal(other.Taints)
 }
 
-// labelValueSyntax is Kubernetes' label-value syntax, which a NodePool name and a
-// stated label value must meet because a Node carries each as a label value. The
-// domain names no Kubernetes package, so the rule is held here and pinned to the
-// client library's own validation by a test in internal/cluster, per
-// docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md.
+// A NodePool name and a stated label value must meet this syntax because a Node
+// carries each as a label value. The domain names no Kubernetes package, so the
+// rule is held here and pinned to the client library's validation by a test in
+// internal/cluster.
 var labelValueSyntax = regexp.MustCompile(`^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$`)
 
-// maxLabelValueLength is the longest label value Kubernetes holds.
 const maxLabelValueLength = 63
 
-// NodePool is a group of identical Nodes every Zone of a Topology holds: how many
-// each Zone holds, the capacity each of them has, the name its Nodes carry, and
-// the labels it states they carry beside it, and the taints it states apart from
-// them.
+// NodePool is a group of identical Nodes in every Zone, sharing one name and
+// one Node capacity, as the cloud providers' node pools do.
 type NodePool struct {
 	name         string
 	nodesPerZone int
@@ -142,9 +121,8 @@ type NodePool struct {
 	taints       NodeTaints
 }
 
-// NewNodePool builds one NodePool, refusing a count of no Node, an empty name, a
-// name no Kubernetes label value can hold, and the zero capacity no constructor
-// builds, which is a NodePool stating none.
+// NewNodePool refuses the zero capacity no constructor builds, since it is a
+// NodePool stating none.
 func NewNodePool(name string, nodesPerZone int, capacity NodeCapacity) (NodePool, error) {
 	if nodesPerZone < 1 {
 		return NodePool{}, fmt.Errorf("a Zone holds at least one Node, so a count of %d Nodes per Zone is refused",
@@ -165,8 +143,6 @@ func NewNodePool(name string, nodesPerZone int, capacity NodeCapacity) (NodePool
 	return NodePool{name: name, nodesPerZone: nodesPerZone, capacity: capacity}, nil
 }
 
-// Labelled is this NodePool with the labels added that its Nodes carry, refusing
-// a key it already holds.
 func (p NodePool) Labelled(added NodeLabels) (NodePool, error) {
 	labels, err := p.labels.Adding(added)
 	if err != nil {
@@ -178,13 +154,10 @@ func (p NodePool) Labelled(added NodeLabels) (NodePool, error) {
 	return labelled, nil
 }
 
-// Labels are the labels this NodePool states its Nodes carry.
 func (p NodePool) Labels() NodeLabels {
 	return p.labels
 }
 
-// Tainted is this NodePool with the taints added that its Nodes carry, refusing
-// a key it already holds.
 func (p NodePool) Tainted(added NodeTaints) (NodePool, error) {
 	taints, err := p.taints.Adding(added)
 	if err != nil {
@@ -196,33 +169,27 @@ func (p NodePool) Tainted(added NodeTaints) (NodePool, error) {
 	return tainted, nil
 }
 
-// Taints are the taints this NodePool states its Nodes carry.
 func (p NodePool) Taints() NodeTaints {
 	return p.taints
 }
 
-// Equal reports whether two NodePools agree in name, Node count, capacity,
-// labels and taints. It is the equality go-cmp compares through, since the
-// type's fields are unexported.
+// Equal is the equality go-cmp compares through, since the type's fields are
+// unexported.
 func (p NodePool) Equal(other NodePool) bool {
 	return p.name == other.name && p.nodesPerZone == other.nodesPerZone && p.capacity == other.capacity &&
 		p.labels.Equal(other.labels) && p.taints.Equal(other.taints)
 }
 
-// Topology is the arrangement of Zones and Nodes a Scenario provisions: the
-// Zones, and the NodePools every one of them holds in declaration order. The same
-// Topology always expands to the same Zone and Node names, because every name is
-// derived from positions counted from one rather than generated: a Zone
+// Topology derives every name from positions counted from one rather than
+// generating it, so the same Topology always expands to the same names: a Zone
 // zone-<n>, a Node <zone>-node-<n>, counted through the Zone's NodePools.
 type Topology struct {
 	zones int
 	pools []NodePool
 }
 
-// NewTopology builds the Topology a Scenario provisions, refusing a Zone count
-// it could not provision or past the lab's own limit, a Topology of no
-// NodePool, and two NodePools whose Nodes could not be told apart: two under
-// one name.
+// NewTopology refuses two NodePools under one name, because their Nodes could
+// not be told apart.
 func NewTopology(zones int, pools ...NodePool) (Topology, error) {
 	if zones < 1 {
 		return Topology{}, fmt.Errorf("a Topology holds at least one Zone, so a count of %d Zones is refused", zones)
@@ -245,9 +212,7 @@ func NewTopology(zones int, pools ...NodePool) (Topology, error) {
 	return Topology{zones: zones, pools: slices.Clone(pools)}, nil
 }
 
-// Nodes expands the Topology to every Node it holds, Zone by Zone, and within a
-// Zone through its NodePools in declaration order, the index running on from one
-// NodePool to the next.
+// Nodes runs the Node index on from one NodePool to the next within a Zone.
 func (t Topology) Nodes() []Node {
 	nodes := make([]Node, 0, t.zones*t.nodesPerZone())
 	for zone := range t.zones {
@@ -271,7 +236,6 @@ func (t Topology) Nodes() []Node {
 	return nodes
 }
 
-// nodesPerZone is how many Nodes each Zone holds over all its NodePools.
 func (t Topology) nodesPerZone() int {
 	count := 0
 	for _, pool := range t.pools {
@@ -281,9 +245,6 @@ func (t Topology) nodesPerZone() int {
 	return count
 }
 
-// Zones are the Zones the Topology holds, by name and in the order it derives
-// them. A Zone is named once however many Nodes it holds, so it is the Zone axis
-// a spread and a Failure are read over.
 func (t Topology) Zones() []string {
 	zones := make([]string, 0, t.zones)
 	for zone := range t.zones {
@@ -293,9 +254,7 @@ func (t Topology) Zones() []string {
 	return zones
 }
 
-// LabelValues are the values the Topology's NodePools state under key, each
-// named once and in the order the NodePools are declared. A NodePool stating no
-// value of key adds none, so a key no NodePool states has no value at all.
+// LabelValues holds no value at all for a key no NodePool states.
 func (t Topology) LabelValues(key string) []string {
 	var values []string
 	for _, pool := range t.pools {
@@ -307,17 +266,14 @@ func (t Topology) LabelValues(key string) []string {
 	return values
 }
 
-// HoldsNodePool reports whether one of the Topology's NodePools is named name.
 func (t Topology) HoldsNodePool(name string) bool {
 	return slices.ContainsFunc(t.pools, func(pool NodePool) bool { return pool.name == name })
 }
 
-// zoneNameAt is the name of the Zone at index, numbered from one.
 func zoneNameAt(index int) string {
 	return fmt.Sprintf("zone-%d", index+1)
 }
 
-// nodeNameAt is the name of the Node at index within zoneName, numbered from one.
 func nodeNameAt(zoneName string, index int) string {
 	return fmt.Sprintf("%s-node-%d", zoneName, index+1)
 }

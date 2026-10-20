@@ -12,10 +12,8 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// The Scenario the Timelines below record, the Simulated Clusters they ran on,
-// and the Kubernetes version those clusters mirror. Two Simulated Clusters of
-// the same Scenario are what two invocations of the lab produce, and two
-// Scenarios of one run are what the lab's own list holds.
+// Two clusters of one Scenario are what two invocations of the lab produce, and
+// two Scenarios of one run are what the lab's own list holds.
 const (
 	theScenarioName        = "resilient-placement"
 	itsCluster             = "k8s-resilience-lab-resilient-placement-7f3a9c"
@@ -25,8 +23,6 @@ const (
 	someKubernetesVersion  = "v1.36.1"
 )
 
-// The two changes the Timelines below hold: a Node the Topology added, and the
-// Placement the control plane reported for a Pod.
 const (
 	whenTheNodeWasAdded    = 120 * time.Millisecond
 	theNodeAddedAsFiled    = "120ms"
@@ -40,8 +36,6 @@ const (
 	theScheduledMessage    = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-1-node-1"
 )
 
-// aHeader is the first line of the Timeline of the Scenario above, and
-// anotherScenariosHeader of a second Scenario of the same run.
 func aHeader() Header {
 	return Header{Scenario: theScenarioName, Cluster: itsCluster, Kubernetes: someKubernetesVersion}
 }
@@ -50,7 +44,6 @@ func anotherScenariosHeader() Header {
 	return Header{Scenario: anotherScenarioName, Cluster: itsOwnCluster, Kubernetes: someKubernetesVersion}
 }
 
-// aNodeAdded and aPodReported are the entries the tests below file.
 func aNodeAdded() scenario.Entry {
 	return scenario.Entry{
 		Elapsed: whenTheNodeWasAdded, Change: scenario.ChangeAdded, Kind: scenario.NodeObject,
@@ -170,10 +163,8 @@ func TestAClusterNameThatIsNoPathElement_ShouldBeRefusedRatherThanFiledElsewhere
 	}
 }
 
-// aRootTheLabCannotWrite is a working directory the invoking user may read and
-// not write, which is what a Timeline folder that cannot be created comes down
-// to. It is made writable again when the test ends, so the framework can remove
-// it.
+// The directory is made writable again when the test ends, so the framework can
+// remove it.
 func aRootTheLabCannotWrite(t *testing.T) string {
 	t.Helper()
 
@@ -191,16 +182,12 @@ func aRootTheLabCannotWrite(t *testing.T) string {
 	return root
 }
 
-// exists reports whether the path is there, which is how a folder the lab did
-// not create is read.
 func exists(path string) bool {
 	_, err := os.Stat(path)
 
 	return err == nil
 }
 
-// expectNamedInTheFilingError asserts the Timeline reports what prevented it
-// from being filed, naming what a reader needs to find it.
 func expectNamedInTheFilingError(t *testing.T, filed *File, named string) {
 	t.Helper()
 
@@ -213,8 +200,6 @@ func expectNamedInTheFilingError(t *testing.T, filed *File, named string) {
 	}
 }
 
-// expectFiled reports a Timeline the lab could not write, naming the error it
-// kept, because every test above files one that should have been written.
 func expectFiled(t *testing.T, filed *File) {
 	t.Helper()
 
@@ -223,8 +208,6 @@ func expectFiled(t *testing.T, filed *File) {
 	}
 }
 
-// linesOf are the lines of a filed Timeline, which is what the published format
-// is read by.
 func linesOf(t *testing.T, path string) []string {
 	t.Helper()
 
@@ -236,7 +219,6 @@ func linesOf(t *testing.T, path string) []string {
 	return strings.Split(strings.TrimSuffix(string(filed), "\n"), "\n")
 }
 
-// filesIn are the names of the files the Timeline folder holds, in name order.
 func filesIn(t *testing.T, folder string) []string {
 	t.Helper()
 
@@ -253,9 +235,8 @@ func filesIn(t *testing.T, folder string) []string {
 	return names
 }
 
-// filedEntry is one entry line as a reader of the published format sees it, so
-// these tests read a filed Timeline back the way the later query path will
-// rather than through the writer's own type.
+// filedEntry reads a filed Timeline back the way a later reader would, rather
+// than through the writer's own type.
 type filedEntry struct {
 	Record  string `json:"record"`
 	Elapsed string `json:"elapsed"`
@@ -266,8 +247,7 @@ type filedEntry struct {
 	Detail  string `json:"detail"`
 }
 
-// entriesFiledIn are the entries a filed Timeline holds, read back from its
-// lines with the standard library alone.
+// Only the standard library reads the lines back.
 func entriesFiledIn(t *testing.T, path string) []scenario.Entry {
 	t.Helper()
 

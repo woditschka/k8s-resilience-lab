@@ -1,16 +1,13 @@
-// Package modulerules holds the package-graph walk and the call-rule scan the
+// Package modulerules holds the package-graph walk and the source scans the
 // lab's module-rule tests share.
 //
-// Its callers are test files alone: no production package imports it, and the
-// import-graph test asserts that absence, which is what keeps the package
-// test-only without a linter rule
-// (docs/adr/2026-10-04-module-rule-test-support.md). It imports the standard
-// library alone, so a package reaching it is unaffected by the lab's own
-// layering rules.
+// Its callers are test files alone, which the import-graph test asserts, so the
+// package stays test-only without a linter rule. It imports the standard
+// library alone, so a package reaching it is unaffected by the lab's layering
+// rules.
 //
-// Each helper reports its findings as the lines of a report, indented so they
-// read as a list under the message a test prints them with, and an empty result
-// means the rule holds.
+// Each helper reports its findings as indented report lines, and an empty
+// result means the rule holds.
 package modulerules
 
 import (
@@ -30,118 +27,90 @@ import (
 	"strings"
 )
 
-// Scope selects which of a module's own packages a report covers.
+// Scope chooses whether a rule over the package graph also reads the test
+// variants go list reports.
 type Scope int
 
 const (
-	// EveryPackage covers the module's production packages together with the test
-	// variants go list reports beside them, which is the scope of a rule that
+	// EveryPackage includes the test variants go list reports, for a rule that
 	// governs the lab's tests as much as the lab itself.
 	EveryPackage Scope = iota
 
-	// ProductionPackagesOnly drops those test variants, which is the scope of a
-	// rule that governs what the lab ships and leaves its tests free to reach
-	// further.
+	// ProductionPackagesOnly drops the test variants, for a rule that governs
+	// what the lab ships and leaves its tests free to reach further.
 	ProductionPackagesOnly
 )
 
-// FileSet selects which Go files under a root a scan covers.
+// FileSet chooses whether a scan reads the test files along with the files the
+// lab ships.
 type FileSet int
 
 const (
-	// EveryGoFile covers the test files beside a package's sources too, which is
-	// the scope of a rule that governs the lab's tests as much as the lab itself.
 	EveryGoFile FileSet = iota
 
-	// ProductionGoFilesOnly drops the test files, which is the scope of a rule
-	// that governs what the lab ships and leaves its tests free to reach further.
 	ProductionGoFilesOnly
 )
 
-// DeclarationKind is which of Go's top-level declarations a declaration is.
+// DeclarationKind is the keyword a top-level declaration opens with.
 type DeclarationKind string
 
 const (
-	// FuncDeclaration is a top-level func declaration.
-	FuncDeclaration DeclarationKind = "func"
-	// TypeDeclaration is a top-level type declaration.
-	TypeDeclaration DeclarationKind = "type"
-	// ConstDeclaration is one name of a top-level const declaration.
+	FuncDeclaration  DeclarationKind = "func"
+	TypeDeclaration  DeclarationKind = "type"
 	ConstDeclaration DeclarationKind = "const"
-	// VarDeclaration is one name of a top-level var declaration.
-	VarDeclaration DeclarationKind = "var"
+	VarDeclaration   DeclarationKind = "var"
 )
 
-// Parameter is one parameter of a declared function, its type as the source
-// writes it.
+// Parameter is one parameter of a function declaration, its type printed back
+// from the syntax tree.
 type Parameter struct {
 	Name string
 	Type string
 }
 
-// Statement is one top-level statement of a function body, or one expression
-// inside one, as a rule over it reads it: the source as written, the name it
-// names, the expression a method is called on, and the arguments a call takes.
-//
-// A rule reads the shape the parser saw rather than the text of a line, so the
-// layout gofmt gives a long call cannot defeat it.
+// Statement is a statement or an expression as the parser saw it rather than
+// the text of a line, so the layout gofmt gives a long call cannot defeat a
+// rule.
 type Statement struct {
-	// Written is the statement or the expression as the source writes it.
 	Written string
 
-	// Name is the name this expression names: the identifier it is, or the one a
-	// selector or a call names last. A statement naming none, such as an
-	// assignment, carries the empty name.
+	// A statement naming nothing, such as an assignment, carries the empty
+	// Name.
 	Name string
 
-	// On is the expression the name is selected from, where the source writes one:
-	// the package or value before the dot.
 	On *Statement
 
-	// Arguments are the arguments of a call, in the order written.
 	Arguments []Statement
 
-	// Call reports whether this expression is a call, which is what tells a call
-	// taking no argument from the name it calls.
+	// Call tells a call taking no argument from the name it calls.
 	Call bool
 }
 
-// UsedName is one name a declaration uses: the name itself, and what the source
-// writes before the dot where it writes anything — the package a qualified name
-// reaches through, or the expression a field or method is selected from.
+// UsedName is a name a declaration uses; on a qualified name, Qualifier is the
+// package or the expression the name is selected from.
 type UsedName struct {
 	Qualifier string
 	Name      string
 }
 
-// Declaration is one top-level declaration of a Go file: what kind it is, the
-// name it declares, the type a constant or variable names, the parameters of a
-// function, the top-level statements of that function's body, and every name the
-// declaration uses.
-//
-// The type and the parameters are printed back from the syntax tree, and the
-// statements carry the shape the parser saw, so a rule over them reads the way
-// the source does and a layout change cannot defeat it.
+// Declaration prints its type and parameters back from the syntax tree, so a
+// rule reads them the way the source does and a layout change cannot defeat it.
 type Declaration struct {
 	Kind     DeclarationKind
 	Name     string
 	Exported bool
-	// Type is the type a constant or variable declaration writes, and is empty
-	// where the source writes none, so a rule over a declaration of a named type
-	// reads an untyped one as naming no type rather than as naming the right one.
+	// Type is empty where the source writes none, so an untyped declaration
+	// reads as naming no type rather than the right one.
 	Type       string
 	Parameters []Parameter
 	Statements []Statement
-	// Names is every name this declaration uses, each once and in the order it
-	// first writes them: the types it names, the values it reads and the functions
-	// it calls. Neither the name it declares itself, nor a name a function literal
-	// inside it declares for itself, nor a field a struct literal inside it sets is
-	// one of them.
+	// Names excludes the name declared itself, names a function literal inside
+	// declares for itself, and fields a struct literal inside sets.
 	Names []UsedName
 }
 
-// GoFile is one Go source file as scanned: the package it declares, the paths it
-// imports, and the top-level declarations it holds.
+// GoFile is one Go file as the parser saw it, which a rule reads instead of the
+// file's text.
 type GoFile struct {
 	Path         string
 	Package      string
@@ -149,10 +118,8 @@ type GoFile struct {
 	Declarations []Declaration
 }
 
-// ScanGoFiles scans the Go files under root, in path order, reporting what each
-// imports and what each declares. A root holding no Go file is reported as no
-// file rather than as an error, so a rule over an empty place names what is
-// missing itself.
+// ScanGoFiles reports a root holding no Go file as no file rather than as an
+// error, so a rule over an empty place names what is missing itself.
 func ScanGoFiles(root string, files FileSet) ([]GoFile, error) {
 	var scanned []GoFile
 	positions := token.NewFileSet()
@@ -189,8 +156,6 @@ func ScanGoFiles(root string, files FileSet) ([]GoFile, error) {
 	return scanned, nil
 }
 
-// Root is the directory holding the module file of the module dir belongs to, so
-// a package pattern resolved against it covers that whole module.
 func Root(ctx context.Context, dir string) (string, error) {
 	command := exec.CommandContext(ctx, "go", "env", "GOMOD")
 	command.Dir = dir
@@ -209,19 +174,11 @@ func Root(ctx context.Context, dir string) (string, error) {
 	return filepath.Dir(moduleFile), nil
 }
 
-// OffendingImporters names every package of the module rooted at dir, in the
-// graph of pattern, that imports a denied path, as "<importer> imports <denied
-// path>".
-//
-// The report is built from the package graph rather than from the lint
-// configuration, so a depguard rule that is scoped wrongly or never runs cannot
-// make a rule pass silently.
-//
-// Only the module's own packages are reported, which is the scope the depguard
-// rules these reports assert a second time have: a dependency reaching a denied
-// path inside its own tree would make a rule unsatisfiable rather than
-// meaningful. What the rules govern is the lab's own imports
-// (docs/system-design.md § Threat Model).
+// OffendingImporters builds its report from the package graph rather than the
+// lint configuration, so a depguard rule scoped wrongly or never run cannot
+// make a rule pass silently. Only the module's own packages are reported, as
+// depguard's rules are: a dependency reaching a denied path inside its own tree
+// would make a rule unsatisfiable rather than meaningful.
 func OffendingImporters(ctx context.Context, dir, pattern string, scope Scope, denied []string) ([]string, error) {
 	own, err := modulePath(ctx, dir)
 	if err != nil {
@@ -240,10 +197,9 @@ func OffendingImporters(ctx context.Context, dir, pattern string, scope Scope, d
 		return nil, fmt.Errorf("run go list in %s: %w", dir, err)
 	}
 
-	// go list emits concatenated objects rather than one array, and the graph runs
-	// to a few thousand packages once the Kubernetes client is required, so it is
-	// decoded one package at a time and only the offenders are kept
-	// (docs/system-design.md § Scale and Load).
+	// go list emits concatenated objects rather than one array, and the graph
+	// runs to a few thousand packages, so it is decoded one package at a time
+	// and only the offenders are kept.
 	var offenders []string
 	packages := json.NewDecoder(listing)
 	for packages.More() {
@@ -278,12 +234,8 @@ func OffendingImporters(ctx context.Context, dir, pattern string, scope Scope, d
 	return offenders, nil
 }
 
-// CallsTo names every position in the Go files under root that calls function in
-// the package at importPath, as "<position> calls <alias>.<function>".
-//
-// The call is resolved through each file's own import alias rather than through
-// the text "<package>.<function>", so renaming the import on the way in cannot
-// hide the call.
+// CallsTo resolves the call through each file's own import alias, so renaming
+// the import cannot hide the call.
 func CallsTo(root, importPath, function string) ([]string, error) {
 	var offenders []string
 	files := token.NewFileSet()
@@ -318,7 +270,6 @@ func CallsTo(root, importPath, function string) ([]string, error) {
 	return offenders, nil
 }
 
-// importsOf are the paths parsed imports, in the order the file names them.
 func importsOf(parsed *ast.File) []string {
 	imported := make([]string, 0, len(parsed.Imports))
 	for _, declared := range parsed.Imports {
@@ -332,8 +283,6 @@ func importsOf(parsed *ast.File) []string {
 	return imported
 }
 
-// declarationsOf is every top-level declaration of parsed but its imports, which
-// a scan reports as the file's own imports instead.
 func declarationsOf(positions *token.FileSet, parsed *ast.File) []Declaration {
 	var declared []Declaration
 	for _, declaration := range parsed.Decls {
@@ -358,9 +307,6 @@ func declarationsOf(positions *token.FileSet, parsed *ast.File) []Declaration {
 	return declared
 }
 
-// namesOf is every name one type, constant or variable declaration declares, a
-// grouped declaration reported name by name, each with the type its own line
-// writes.
 func namesOf(positions *token.FileSet, declaration *ast.GenDecl) []Declaration {
 	var declared []Declaration
 	for _, spec := range declaration.Specs {
@@ -393,9 +339,7 @@ func namesOf(positions *token.FileSet, declaration *ast.GenDecl) []Declaration {
 	return declared
 }
 
-// parametersOf are the parameters declared takes, each name with the type the
-// source writes beside it. A parameter the source leaves unnamed carries the
-// empty name.
+// A parameter the source leaves unnamed carries the empty name.
 func parametersOf(positions *token.FileSet, declared *ast.FuncDecl) []Parameter {
 	var parameters []Parameter
 	for _, field := range declared.Type.Params.List {
@@ -413,9 +357,6 @@ func parametersOf(positions *token.FileSet, declared *ast.FuncDecl) []Parameter 
 	return parameters
 }
 
-// statementsOf are the top-level statements of the body declared holds, each the
-// shape the parser saw: the expression a statement makes where it makes one, and
-// the source as written otherwise.
 func statementsOf(positions *token.FileSet, declared *ast.FuncDecl) []Statement {
 	if declared.Body == nil {
 		return nil
@@ -435,11 +376,9 @@ func statementsOf(positions *token.FileSet, declared *ast.FuncDecl) []Statement 
 	return statements
 }
 
-// expressionOf is one expression as a rule reads it: the name it names, the
-// expression that name is selected from, and the arguments of a call, each read
-// the same way. An expression of a shape no rule here reads, such as a literal or
-// a composite, carries the source it was written as and no name, which a rule
-// reads as naming nothing rather than as naming the wrong thing.
+// An expression of a shape no rule reads, such as a literal, carries its source
+// and no name, so a rule reads it as naming nothing rather than the wrong
+// thing.
 func expressionOf(positions *token.FileSet, expression ast.Expr) Statement {
 	read := Statement{Written: printed(positions, expression)}
 	switch shape := expression.(type) {
@@ -457,7 +396,6 @@ func expressionOf(positions *token.FileSet, expression ast.Expr) Statement {
 	return read
 }
 
-// argumentsOf are the arguments of a call, in the order written.
 func argumentsOf(positions *token.FileSet, written []ast.Expr) []Statement {
 	arguments := make([]Statement, 0, len(written))
 	for _, argument := range written {
@@ -467,13 +405,9 @@ func argumentsOf(positions *token.FileSet, written []ast.Expr) []Statement {
 	return arguments
 }
 
-// namesUsedIn is every name the nodes use, each once and in the order they are
-// first written: a qualified name under the qualifier its source writes, and an
-// unqualified one on its own. The name a selector selects is not reported a
-// second time on its own, so a rule over an unqualified name reads the names
-// written unqualified alone. A function literal brings the names it declares for
-// itself with it, its parameters and its results, so those are no names the nodes
-// use either.
+// The name a selector selects is not reported again on its own, so a rule over
+// unqualified names reads only those written unqualified. Names a function
+// literal declares for itself are excluded.
 func namesUsedIn(positions *token.FileSet, nodes ...ast.Node) []UsedName {
 	var used []UsedName
 	broughtAlong := make(map[*ast.Ident]bool)
@@ -514,12 +448,9 @@ func namesUsedIn(positions *token.FileSet, nodes ...ast.Node) []UsedName {
 	return used
 }
 
-// fieldsSetBy are the field names a struct literal's keys write, which name
-// fields of the type written rather than anything the declaration reads. A map
-// literal's keys are values, and an array or slice literal's are indices, so
-// only a literal of another type, or one leaving its type out, sets fields: a
-// literal leaving its type out is read as a struct, the element type a source
-// most often leaves out.
+// A map literal's keys are values and a slice literal's are indices, so only a
+// struct literal sets fields; a literal leaving its type out is read as a
+// struct, the element type a source most often leaves out.
 func fieldsSetBy(literal *ast.CompositeLit) []*ast.Ident {
 	switch literal.Type.(type) {
 	case *ast.MapType, *ast.ArrayType:
@@ -540,15 +471,11 @@ func fieldsSetBy(literal *ast.CompositeLit) []*ast.Ident {
 	return fields
 }
 
-// namesDeclaredBy are the names a function type declares for itself: those of
-// its parameters and those of its results, a result the source leaves unnamed
-// contributing none. It is read off the literal that writes them rather than off
-// every function type, so the parameters a declaration of its own takes stay
-// names it writes.
+// These are read off the literal rather than off every function type, so the
+// parameters a declaration of its own takes stay names it writes.
 func namesDeclaredBy(written *ast.FuncType) []*ast.Ident {
 	declared := namesDeclaredIn(written.Params)
-	// A function type naming no result holds no list for one, which is why the
-	// results are read through the field rather than beside the parameters.
+	// A function type naming no result holds no list for one.
 	if written.Results != nil {
 		declared = append(declared, namesDeclaredIn(written.Results)...)
 	}
@@ -556,8 +483,6 @@ func namesDeclaredBy(written *ast.FuncType) []*ast.Ident {
 	return declared
 }
 
-// namesDeclaredIn are the names one such list declares, a field the source leaves
-// unnamed contributing none.
 func namesDeclaredIn(fields *ast.FieldList) []*ast.Ident {
 	var declared []*ast.Ident
 	for _, field := range fields.List {
@@ -567,12 +492,8 @@ func namesDeclaredIn(fields *ast.FieldList) []*ast.Ident {
 	return declared
 }
 
-// theBlankIdentifier is the name an assignment discards a value under, which is
-// no name a rule reads.
 const theBlankIdentifier = "_"
 
-// appendOnce is used with name appended, where it does not already hold it, so a
-// name written twice is reported once.
 func appendOnce(used []UsedName, name UsedName) []UsedName {
 	if slices.Contains(used, name) {
 		return used
@@ -581,8 +502,6 @@ func appendOnce(used []UsedName, name UsedName) []UsedName {
 	return append(used, name)
 }
 
-// typeAndValuesOf are the parts of a constant or variable declaration that use
-// names: the type it writes, where it writes one, and the values it is set to.
 func typeAndValuesOf(spec *ast.ValueSpec) []ast.Node {
 	written := make([]ast.Node, 0, len(spec.Values)+1)
 	if spec.Type != nil {
@@ -595,9 +514,8 @@ func typeAndValuesOf(spec *ast.ValueSpec) []ast.Node {
 	return written
 }
 
-// printed is node as the source writes it. A node that cannot be printed is
-// reported as that failure rather than as the empty string, so a rule reading it
-// fails instead of passing on nothing.
+// A node that cannot be printed is reported as that failure rather than as the
+// empty string, so a rule reading it fails instead of passing on nothing.
 func printed(positions *token.FileSet, node ast.Node) string {
 	var written strings.Builder
 	if err := printer.Fprint(&written, positions, node); err != nil {
@@ -607,7 +525,6 @@ func printed(positions *token.FileSet, node ast.Node) string {
 	return written.String()
 }
 
-// modulePath is the import path of the module the directory dir belongs to.
 func modulePath(ctx context.Context, dir string) (string, error) {
 	command := exec.CommandContext(ctx, "go", "list", "-m")
 	command.Dir = dir
@@ -621,41 +538,30 @@ func modulePath(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(string(listed)), nil
 }
 
-// isOwnedBy reports whether importPath is the module itself or a package under
-// it.
 func isOwnedBy(importPath, module string) bool {
 	return importPath == module || strings.HasPrefix(importPath, module+"/")
 }
 
-// packagePathOf is the path of the package a listed entry belongs to. go list
-// names the variant it compiles for a test binary "<package> [<binary>]", so the
-// bracketed suffix is dropped before the module's own packages are picked out;
-// without that, a module's own test variants would read as another module's
-// packages and no rule would reach them.
+// go list names a test variant "<package> [<binary>]", so the suffix is
+// dropped; otherwise the module's own test variants would read as another
+// module's packages.
 func packagePathOf(importPath string) string {
 	own, _, _ := strings.Cut(importPath, " [")
 
 	return own
 }
 
-// isTestVariant reports whether a listed package is one go list synthesized for
-// a test binary rather than a package the lab ships: the variant compiled for a
-// test names the package it tests, and the test binary's own main package is
-// named after it.
 func isTestVariant(importPath, forTest string) bool {
 	return forTest != "" || strings.HasSuffix(importPath, ".test")
 }
 
-// isDenied reports whether importPath is one of the denied paths or a package
-// under one, so denying a path denies its subtree.
+// Denying a path denies its subtree.
 func isDenied(importPath string, denied []string) bool {
 	return slices.ContainsFunc(denied, func(deniedPath string) bool {
 		return importPath == deniedPath || strings.HasPrefix(importPath, deniedPath+"/")
 	})
 }
 
-// aliasesOf is every name importPath is reachable under in parsed, which is its
-// explicit alias where it has one and its package name otherwise.
 func aliasesOf(parsed *ast.File, importPath string) []string {
 	var aliases []string
 	for _, imported := range parsed.Imports {
@@ -674,7 +580,6 @@ func aliasesOf(parsed *ast.File, importPath string) []string {
 	return aliases
 }
 
-// callPositions is where parsed calls alias.function.
 func callPositions(files *token.FileSet, parsed *ast.File, alias, function string) []string {
 	var positions []string
 	ast.Inspect(parsed, func(node ast.Node) bool {

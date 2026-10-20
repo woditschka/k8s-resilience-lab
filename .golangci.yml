@@ -1,9 +1,6 @@
-# Lint configuration for the lab, including the two module rules
-# docs/system-design.md § Package Structure states (REQ-SIM-004).
-#
-# The enabled set beyond the standard linters is the one CLAUDE.md § Lint
-# Troubleshooting documents as fixable by `make lint-fix`, plus depguard and
-# forbidigo, which carry the module rules.
+# Lint configuration for the lab. Beyond the standard linters, the enabled set
+# is the one `make lint-fix` can fix, plus depguard and forbidigo, which carry
+# the module rules.
 version: "2"
 
 linters:
@@ -29,7 +26,7 @@ linters:
             - "**/internal/timeline/**"
           deny:
             - pkg: k8s.io
-              desc: internal/scenario and internal/timeline import no Kubernetes package; Kubernetes types stay inside internal/cluster (docs/system-design.md § Package Structure)
+              desc: internal/scenario and internal/timeline import no Kubernetes package; Kubernetes types stay inside internal/cluster
 
         # The Scenario rule: a Scenario source is Steps alone, so it reaches the
         # Step surface and the pod and node packages beneath it, and nothing else
@@ -43,39 +40,39 @@ linters:
           # The one stated exception to the read-by-subject rule: a Scenario
           # reaching a Pod setting the lab's own vocabulary does not name writes
           # full access, which names that setting under the Kubernetes package
-          # declaring it (docs/system-design.md § Package Structure). The lax list
-          # mode is what makes the allowed path an exception to the k8s.io denial
-          # below rather than the only import this place may hold: under the
-          # default mode a non-empty allow list denies every path it leaves out.
+          # declaring it. The lax list mode makes the allowed path an exception
+          # to the k8s.io denial below rather than the only import this place may
+          # hold: under the default mode a non-empty allow list denies every path
+          # it leaves out.
           allow:
             - k8s.io/api/core/v1
           deny:
             - pkg: github.com/woditschka/k8s-resilience-lab/internal/cluster
-              desc: a Scenario reaches the Simulated Cluster through its Steps; internal/lab is the one package naming both (docs/system-design.md § Package Structure)
+              desc: a Scenario reaches the Simulated Cluster through its Steps; internal/lab is the one package naming both
             - pkg: github.com/woditschka/k8s-resilience-lab/internal/scenario
-              desc: a Scenario declares through its Given Steps; the immutable values they construct stay behind internal/lab (docs/system-design.md § Package Structure)
+              desc: a Scenario declares through its Given Steps; the immutable values they construct stay behind internal/lab
             - pkg: github.com/woditschka/k8s-resilience-lab/internal/expect
-              desc: a Scenario judges through its Then Steps; the assertion helper stays behind internal/lab (docs/system-design.md § Package Structure)
+              desc: a Scenario judges through its Then Steps; the assertion helper stays behind internal/lab
             - pkg: github.com/woditschka/k8s-resilience-lab/internal/modulerules
-              desc: the module-rule helpers are for test files, and the rules governing the Scenarios live with the machinery (docs/adr/2026-10-04-module-rule-test-support.md)
+              desc: the module-rule helpers are for test files, and the rules governing the Scenarios live with the machinery
             - pkg: k8s.io
-              desc: a Scenario names a Kubernetes type only through the full access it writes, which is the Pod settings package allowed above; every other Kubernetes type stays inside internal/cluster (docs/system-design.md § Package Structure)
+              desc: a Scenario names a Kubernetes type only through the full access it writes, which is the Pod settings package allowed above; every other Kubernetes type stays inside internal/cluster
 
         # The credential rule, module-wide: the lab drives only the Simulated
         # Cluster it provisioned itself, so no package may reach a kubeconfig, a
-        # home directory holding one, or a credential plugin. NG-1 made mechanical.
+        # home directory holding one, or a credential plugin.
         no-cluster-credential-discovery:
           deny:
             - pkg: k8s.io/client-go/tools/clientcmd
-              desc: the lab reads no kubeconfig; the client is built from the address the lab provisioned, with no credential (docs/system-design.md § Threat Model)
+              desc: the lab reads no kubeconfig; the client is built from the address the lab provisioned, with no credential
             - pkg: k8s.io/client-go/util/homedir
-              desc: locating a home directory is the first step of kubeconfig discovery, which the lab never performs (docs/system-design.md § Threat Model)
+              desc: locating a home directory is the first step of kubeconfig discovery, which the lab never performs
             - pkg: k8s.io/client-go/plugin/pkg/client/auth
-              desc: credential plugins authenticate against a cluster the lab did not provision (docs/system-design.md § Threat Model)
+              desc: credential plugins authenticate against a cluster the lab did not provision
 
-    # § Package Structure denies in-cluster configuration as a *call*, not as an
-    # import: it is a function in k8s.io/client-go/rest, the same package a client
-    # built from a provisioned address needs, so depguard cannot carry this half.
+    # In-cluster configuration is denied as a *call*, not as an import: it is a
+    # function in k8s.io/client-go/rest, the same package a client built from a
+    # provisioned address needs, so depguard cannot carry this half.
     forbidigo:
       # analyze-types resolves the call through the type checker instead of
       # matching source text, so an import alias cannot defeat the rule:
@@ -86,9 +83,8 @@ linters:
       forbid:
         - pattern: ^rest\.InClusterConfig$
           pkg: ^k8s\.io/client-go/rest$
-          msg: the lab reads no service-account token; the client is built from the address the lab provisioned (docs/system-design.md § Threat Model)
+          msg: the lab reads no service-account token; the client is built from the address the lab provisioned
 
-    # The three rules CLAUDE.md § Lint Troubleshooting documents for this project.
     revive:
       rules:
         - name: unused-parameter

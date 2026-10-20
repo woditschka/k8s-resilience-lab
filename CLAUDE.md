@@ -5,7 +5,6 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## Project Overview
 
-<!-- Template placeholder: `init` replaces the next line with <project-name>: <project-description>. -->
 k8s-resilience-lab: A Go lab for learning how Kubernetes places and reschedules workloads when pods, nodes or zones fail, using a simulated KWOK cluster driven by Go scenarios and a live visualisation.
 
 **Documentation:**
@@ -145,7 +144,7 @@ Installed for this stack, beyond the harness core catalogued in the Agent Usage 
 | golangci-lint | v2.15.0 | `brew install golangci-lint` (macOS), or the binary install: `curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \| sh`. A Go upgrade needs a linter rebuilt with it, or lint fails on export data |
 | C compiler (Linux only) | gcc or clang | `sudo apt-get install gcc` (Debian, Ubuntu) or `sudo dnf install gcc` (Fedora, RHEL). The race detector needs it, with `CGO_ENABLED=1`. macOS needs none |
 
-The Makefile takes the `golangci-lint` on PATH, falling back to `$(go env GOPATH)/bin/golangci-lint`. Do not use `go run` — upstream discourages it (Go version mismatch, untested builds).
+The Makefile takes the `golangci-lint` on PATH, falling back to `$(go env GOPATH)/bin/golangci-lint`. Do not run golangci-lint with `go run` — upstream discourages it (Go version mismatch, untested builds).
 
 ## Build Commands
 
@@ -167,6 +166,17 @@ make deps-check  # Verify no prohibited dependencies
 make ci          # Full CI pipeline: tidy-check, fmt-check, vet, lint, deps-check, test (race detector), build
 ```
 
+## Cluster Troubleshooting
+
+Every Scenario and every cluster-backed test provisions a Simulated Cluster of its own and removes it when it ends, however it ends. A test process that is killed mid-run never reaches that removal, and each leaked cluster keeps holding CPU and memory. Symptoms are API servers that refuse connections, etcd timeouts and "served no Stage resource" failures across the cluster-backed suites. List and remove the leftovers before re-running the gate, with the CLI of the engine the lab dialed:
+
+```bash
+docker ps -a --filter name=k8s-resilience-lab
+docker rm -f $(docker ps -aq --filter name=k8s-resilience-lab)
+```
+
+The second command errors when the first lists nothing, which is harmless.
+
 ## Lint Troubleshooting
 
 `make lint-fix` auto-fixes: modernize (range int, any, t.Context), perfsprint, errorlint, godot.
@@ -182,6 +192,8 @@ make ci          # Full CI pipeline: tidy-check, fmt-check, vet, lint, deps-chec
 See [`docs/system-design.md`](docs/system-design.md) for package structure, patterns, guardrails, and dependency policy.
 
 Wrap errors with context: `fmt.Errorf("context: %w", err)`.
+
+**Comments:** a comment says only what a name cannot, per [`docs/architecture-principles.md`](docs/architecture-principles.md) § Go Idioms. A comment never cites an ADR or another document.
 
 **Dependencies:** Prefer the standard library. New external dependencies require justification. See [`docs/system-design.md#dependency-policy`](docs/system-design.md#dependency-policy) for the approved sources list and prohibited libraries.
 
@@ -213,6 +225,10 @@ Before code review, run `make ci`. All checks (tidy-check, fmt-check, vet, lint,
 ## Documentation Updates
 
 When changing the codebase, follow the Maintenance Rules in the `doc-sync` skill and the Prohibited Patterns in the `document-writing` skill.
+
+**Decision log.** An ADR is a concise record of one decision: the options weighed, the one taken and why. The log stays at or below 20 ADRs. When a later decision supersedes or amends an earlier one, it is folded into the ADR that holds the final decision rather than filed beside it: the final state stands in Decision, the course change with its date and the owner's words in Context, and the options set aside stay listed. A separate ADR is for a new decision, never for a change to an existing one. ADRs are read by people deciding, not by code: no source file, test or config cites one.
+
+**Project README.** `README.md` is the newcomer's entry: the problem, how the lab answers it, how to run it with one Scenario and its report, and the principles in brief. A change to a Scenario name, a Step's report line, a run flag or a document under `docs/` updates it in the same change.
 
 ## Commit Convention
 
@@ -257,3 +273,7 @@ build: add dependency X
 ### Breaking Changes
 
 Add `!` after type: `feat(data)!: change data file format from flat list to map`. Explain the migration in a `BREAKING CHANGE:` footer in the body.
+
+### Granularity
+
+A change lands as a short series of coherent commits, one per behavior or decision. Each passes `go build ./...`, `go vet ./...` and the tests of the packages it touches on its own. A document that records a decision travels in the commit that makes it: the ADR amendment with the code it governs, the PRD and design-doc rows in commits of their own when they only follow. One commit never mixes a rename with a behavior change, or two decisions.

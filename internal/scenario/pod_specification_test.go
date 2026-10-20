@@ -11,34 +11,26 @@ import (
 )
 
 const (
-	// someSpecificationName is the name a specification carries into the Step that
-	// declares it, which no test in this file turns on.
+	// No test in this file turns on someSpecificationName.
 	someSpecificationName = "a Pod specification"
 
-	// anotherSpecificationName is a second such name, so two specifications of the
-	// same settings can differ by name alone.
 	anotherSpecificationName = "another Pod specification"
 
-	// noName is the name a specification cannot be declared under.
 	noName = ""
 
-	// Two Skews apart, and two waiting times apart in the seconds a toleration
-	// holds. No test here turns on either value: what they are for is that a
-	// setting written twice is read back at the one written last, so the lab's own
-	// Skew and waiting time are deliberately not the values used.
+	// No test turns on these values: a setting written twice is read back at
+	// the one written last, so the lab's own Skew and waiting time are
+	// deliberately not used.
 	someSkew       = 3
 	someWiderSkew  = 4
 	someWait       = 10
 	someLongerWait = 30
 
-	// someTaint is a taint of no Node condition the lab waits on, so a toleration
-	// of it keeps the waiting time written for it.
+	// someTaint is no Node condition the lab waits on, so a toleration of it
+	// keeps the waiting time written for it.
 	someTaint = "example.com/some-taint"
 )
 
-// aZoneSpread and aNodeSpread are the two spread settings, at the maximum Skew
-// named: the Zones of a Topology are counted over its Zone label and its Nodes
-// over its hostname label.
 func aZoneSpread(maxSkew int) scenario.TopologySpread {
 	return scenario.NewTopologySpread(scenario.ZoneLabel, maxSkew, scenario.DoNotSchedule, scenario.Honor)
 }
@@ -47,9 +39,6 @@ func aNodeSpread(maxSkew int) scenario.TopologySpread {
 	return scenario.NewTopologySpread(scenario.HostnameLabel, maxSkew, scenario.DoNotSchedule, scenario.Honor)
 }
 
-// aNotReadyToleration and anUnreachableToleration are the tolerations of the two
-// taints a Node that stopped responding carries, for the seconds named, and
-// aTolerationOfSomeTaint one of a taint that is neither.
 func aNotReadyToleration(leavingAfter int64) scenario.Toleration {
 	return scenario.NewToleration(scenario.TaintNodeNotReady, scenario.Exists, "", scenario.NoExecute, leavingAfter)
 }
@@ -62,20 +51,14 @@ func aTolerationOfSomeTaint(leavingAfter int64) scenario.Toleration {
 	return scenario.NewToleration(someTaint, scenario.Exists, "", scenario.NoExecute, leavingAfter)
 }
 
-// theLabsWaitInSeconds is the lab's own waiting time as the field Kubernetes
-// holds it in, read from the constant that sets it rather than written out.
 func theLabsWaitInSeconds() int64 {
 	return int64(scenario.UnresponsiveNodeWait.Seconds())
 }
 
-// theLabsTolerations are the two tolerations every specification holds at the
-// lab's own waiting time, after the settings written where none names them.
 func theLabsTolerations() []scenario.Setting {
 	return []scenario.Setting{aNotReadyToleration(theLabsWaitInSeconds()), anUnreachableToleration(theLabsWaitInSeconds())}
 }
 
-// aSpecificationOf is a specification of the settings written, under a name and
-// a Startup time no test calling it turns on.
 func aSpecificationOf(t *testing.T, name string, settings ...scenario.Setting) scenario.PodSpecification {
 	t.Helper()
 
@@ -87,8 +70,6 @@ func aSpecificationOf(t *testing.T, name string, settings ...scenario.Setting) s
 	return declared
 }
 
-// aPodSpecification is the named default for a specification whose name and
-// settings no test turns on.
 func aPodSpecification(t *testing.T) scenario.PodSpecification {
 	t.Helper()
 
@@ -110,8 +91,6 @@ func TestAPodSpecification_ShouldHoldEverySettingItWasDefinedWithInDefinitionOrd
 	expect.Expect(t, declared.TopologySpreads()).To(expect.Equal([]scenario.TopologySpread{zoneSpread}))
 }
 
-// A Pod specification is declared by its name, so one under no name is refused
-// where it is defined (docs/prd.md REQ-SIM-015).
 func TestAPodSpecificationUnderNoName_ShouldBeRefused(t *testing.T) {
 	_, err := scenario.NewPodSpecification(noName, aStartupTimeBetween(t, aShortStartupMillis, aLongerStartupMillis), aZoneSpread(someSkew))
 
@@ -120,10 +99,9 @@ func TestAPodSpecificationUnderNoName_ShouldBeRefused(t *testing.T) {
 	}
 }
 
-// A Scenario states no waiting time of its own (docs/prd.md REQ-SIM-008), so
-// every specification tolerates both taints of a Node that stopped responding for
-// the lab's waiting time: a time written for either is replaced by it, and one
-// not written is added after the settings written.
+// A Scenario states no waiting time of its own, so a time written for either
+// lab taint is replaced, and a toleration not written is added after the
+// settings written.
 func TestAPodSpecification_ShouldHoldTheLabsTwoTolerationsAtTheLabsWaitWhateverIsWritten(t *testing.T) {
 	zoneSpread := aZoneSpread(someSkew)
 
@@ -236,10 +214,7 @@ func TestTwoPodSpecifications_ShouldBeEqualWhenTheyNameTheSameSettingsUnderTheSa
 	}
 }
 
-// The Startup times the tests below state, in the whole milliseconds a Startup
-// time is built from: a shortest under a second and a longest that is no whole
-// second, apart from each other, so a time read back is the one written; and the
-// times a Pod cannot take to start.
+// The times differ from each other, so a time read back is the one written.
 const (
 	aShortStartupMillis    = 300
 	aLongerStartupMillis   = 1700
@@ -247,7 +222,6 @@ const (
 	aNegativeStartupMillis = -1
 )
 
-// aStartupTimeBetween is the Startup time of that shortest and that longest.
 func aStartupTimeBetween(t *testing.T, shortestMillis, longestMillis int) scenario.StartupTime {
 	t.Helper()
 
@@ -288,8 +262,8 @@ func TestAStartupTime_ShouldTakeEachPodBetweenItsShortestAndItsLongest(t *testin
 	}
 }
 
-// A refusal names the bounds as durations rather than in a unit word, because a
-// Scenario reaches it from whole seconds and from whole milliseconds alike.
+// A refusal names the bounds as durations, because a Scenario reaches it from
+// whole seconds and whole milliseconds alike.
 func TestAStartupTimeThatCannotHold_ShouldBeRefusedWhereItIsStated(t *testing.T) {
 	refusals := map[string]struct {
 		shortestMillis, longestMillis int

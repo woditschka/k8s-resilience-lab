@@ -9,23 +9,16 @@ import (
 )
 
 const (
-	// someWorkloadName and somePodCount are required to build a Workload but no
-	// test below turns on either value.
+	// No test below turns on someWorkloadName or somePodCount.
 	someWorkloadName = "web"
 	somePodCount     = 9
 
-	// theRequiredCapacity is a minimum such a Workload could keep Running: fewer
-	// Pods than it declares, so it is one the constructor admits.
 	theRequiredCapacity = somePodCount - 3
 
-	// noMinimumDeclared is what a Workload that declared none reports, and
-	// noMinimumAtAll the Pod count that goes with it.
 	noMinimumDeclared = false
 	noMinimumAtAll    = 0
 )
 
-// aWorkload is the Workload every test below starts from: nothing about its name,
-// its Pods or its specification matters, and it declares no Required Capacity.
 func aWorkload(t *testing.T) scenario.Workload {
 	t.Helper()
 
@@ -68,8 +61,6 @@ func TestAWorkloadDeclaringNoRequiredCapacity_ShouldReportThatItDeclaredNone(t *
 	expect.Expect(t, declared).To(expect.Equal(noMinimumDeclared))
 }
 
-// A minimum the Workload could never keep is refused where it is declared, which
-// is docs/prd.md REQ-SIM-010 edge cases 1 and 2.
 func TestARequiredCapacityNoWorkloadCouldKeep_ShouldBeRefused(t *testing.T) {
 	refusals := map[string]struct {
 		minimum int
@@ -94,8 +85,7 @@ func TestARequiredCapacityNoWorkloadCouldKeep_ShouldBeRefused(t *testing.T) {
 	}
 }
 
-// Two Workloads differing in the minimum alone are not the same Workload, because
-// a Required Capacity is part of what one declares.
+// A Required Capacity is part of what a Workload declares.
 func TestTwoWorkloadsDifferingInTheirRequiredCapacityAlone_ShouldNotBeEqual(t *testing.T) {
 	declaring := aWorkload(t)
 
@@ -117,8 +107,9 @@ func TestAWorkload_ShouldRefuseADeclarationItCannotDeploy(t *testing.T) {
 		"no name":        {name: "", pods: somePodCount, declaring: aPodSpecification(t), named: "name"},
 		"no Pod at all":  {name: someWorkloadName, pods: 0, declaring: aPodSpecification(t), named: "Pod"},
 		"a negative Pod": {name: someWorkloadName, pods: -1, declaring: aPodSpecification(t), named: "Pod"},
-		// A constructed specification always holds the lab's tolerations, so only
-		// the zero value reaches the guard against a specification setting nothing.
+		// A constructed specification always holds the lab's tolerations, so
+		// only the zero value reaches the guard against a specification setting
+		// nothing.
 		"a specification that sets nothing": {
 			name: someWorkloadName, pods: somePodCount,
 			declaring: scenario.PodSpecification{}, named: "setting",

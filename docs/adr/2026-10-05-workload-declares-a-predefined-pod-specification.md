@@ -1,125 +1,148 @@
 # A Workload declares one of the lab's predefined Pod specifications
 
-**Status:** Accepted, amended 2026-10-18: the Scenarios define each predefined specification, per [ADR: Every predefined Pod specification is defined by the Scenarios, with its own Startup time](2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md); amended again 2026-10-18: a run reports every setting a Workload's Pods carry, per [ADR: The Scenarios name leaving an unresponsive Node as one setting, and a run reports every setting a Workload's Pods carry](2026-10-18-the-scenarios-name-leaving-an-unresponsive-node-as-one-setting.md); amended a third time 2026-10-18: `lab.FullAccess`, `lab.PredefinedPodSpecification` and `lab.Settings` are now `pod.FullAccess`, `pod.Predefined` and `pod.Settings`, and `lab.CPU(1)` and `lab.MemoryGi(2)` are now the `CPU` and `Memory` fields of a keyed literal, memory written in `pod.Gi` for a Pod and `node.Gi` for a Node, per [ADR: Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given](2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md)
+**Status:** Accepted 2026-10-05, folding in the spread decision of 2026-10-04, options 13 and 25; amended 2026-10-18: the Scenarios define each predefined specification with its own Startup time, options 15 and 17; amended 2026-10-18: a definition names the Named setting for leaving an unresponsive Node, and a run reports every setting a Workload's Pods carry, options 22 and 24; amended 2026-10-18: the names moved to the subject packages `pod` and `node`, and a setting is a keyed literal, per [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)
 
 ## Context
 
-A Scenario used to declare its Workload's spread itself: `SpreadEvenly(lab.OverZones, lab.OverNodes)`. That line reads as a rule, so a reader infers the intent behind it. The lab's Scenarios exist to show one intent each, configured well or badly.
+On 2026-10-04 the simplest Scenario, Resilient placement, had to show resilience to Node and Zone loss: its nine Pods sit three in every Zone and one on every Node. An even spread is one Scenario's goal rather than the lab's law. A later Scenario declares another specification, or none with a spread, and the lab reports the Placement it produces. A spread also has to survive the loss it is built for: one the surviving Nodes cannot satisfy leaves Pods Pending.
 
-An engineer who opens a predefined specification reads which setting it sets and to which value, in Kubernetes' terms. The definition is therefore a worked example, written in the vocabulary a Scenario changes one with.
+On 2026-10-05 a Scenario declared its spread itself: `SpreadEvenly(lab.OverZones, lab.OverNodes)`. That line reads as a rule, so a reader infers the intent behind it, while each Scenario exists to show one intent, configured well or badly. The owner named the intents rather than their mechanics: a specification conveys "that the Pod placement should target high resilience against Failure", not that it spreads evenly. The owner also asked for predefined specifications to be changed before use: "I feel there should be multiple predefined Pod specifications (as methods) ... that I can get and then still tinker with". The owner chose one `Customize` call taking the changes as values over a chain of named steps.
 
-A Scenario also needs a specification that is nearly what it wants. The owner asked for the predefined ones to be tinkered with before use — "I feel there should be multiple predefined Pod specifications (as methods) ... that I can get and then still tinker with" — and chose one `Customize` call taking the changes as values over a chain of named steps.
+The lab adds settings of its own, the tolerations that make Pods leave an unresponsive Node. Those decide a Placement as much as a spread does. On 2026-10-05 they sat in a base in `internal/lab` that every definition started from.
 
-The owner named the two intents rather than their mechanics: a specification conveys "that the Pod placement should target high resilience against Failure", not that it spreads evenly.
+On 2026-10-18 REQ-SIM-015 held that every value deciding a Placement stands on a Scenario's own lines, stated there or named there. The owner asked: "the size of astandard node and standard pod lives deep in the framework - should it not live in the scenarios?" The definitions moved to `scenarios/pods.go`, each with its own Startup time, and each wrote the lab's two tolerations itself. REQ-SIM-009 holds that a definition shows every setting it holds under its Kubernetes name, and REQ-SIM-008 that a Scenario states no waiting time of its own.
 
-The lab adds settings of its own, the tolerations that make Pods leave an unresponsive Node. Those decide a Placement as much as a spread does, so the definition names them too.
+The same day the owner read Resilient placement in `scenarios/pods.go` and found it hard to read. Two of its four settings repeated in every definition and decided nothing there. Asked whether REQ-SIM-009 changes, the owner answered: "we need to stay as close as possibe to the k8s naming , this does not mean we cannot create a method on a higher level that names the lower level config". A first design placed that name in `internal/lab`. The owner refused it: "ResilientPlacement had the settings directly, LeaveUnresponsiveNodes just aggregates the direct settings on a higher level, so i think it would alos belong to pods.go".
 
-`internal/scenario` imports no Kubernetes package, per [ADR: The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md), and a Scenario source imports `internal/lab` alone, per [ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md).
+Later that day the names moved to the subject packages `pod` and `node`, and each setting became a keyed literal, per [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md).
+
+`internal/scenario` imports no Kubernetes package, per [ADR: The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md).
 
 ## Options Considered
 
-1. **Named helpers over the declared rules** — `SpreadEvenly` stays and a helper expands to the same rules.
-2. **A spread abstraction of the lab's own** — a specification holds rules naming a domain, the Zones or the Nodes, and the mapper picks the label each domain is counted over.
-3. **Settings under Kubernetes' own names, in the lab's own types** — a specification holds the fields Kubernetes names, and each predefined one is defined as the settings it sets.
+What a specification is:
+
+1. **Named helpers over the declared rules**: `SpreadEvenly` stays and a helper expands to the same rules.
+2. **A spread abstraction of the lab's own**: a rule names a domain, the Zones or the Nodes, and the mapper picks its label.
+3. **Settings under Kubernetes' own names, in the lab's own types**: each predefined specification is the settings it sets.
 4. **Predefined Kubernetes Pod templates in `internal/cluster`**, picked by name.
 5. **A `*corev1.PodSpec` builder in `internal/lab`**, the predefined ones being its starting points.
-6. **A chained method per ready-made change** — `ResilientPlacement().ZoneSpread(ScheduleAnyway)`, one method per change the lab offers.
-7. **One `Customize` call taking the changes as values** — a change is a value of the lab's vocabulary, and a Scenario writes zero or more of them.
-8. **The specification as a clause on the Workload line** — `.With(lab.ResilientPlacement())`, which needs a rule that every Workload line carries one.
+
+How a Scenario changes one:
+
+6. **A chained method per ready-made change**: `ResilientPlacement().ZoneSpread(ScheduleAnyway)`.
+7. **One `Customize` call taking the changes as values**.
+
+Where a Workload states its specification:
+
+8. **A clause on the Workload line**, `.With(lab.ResilientPlacement())`, with a rule that every line carries one.
+9. **A mandatory argument of its Given**.
+
+How Resilient placement spreads its Pods:
+
+10. **Even spread in the mapper**: every Workload spread alike, and no Scenario able to declare otherwise.
+11. **Required Pod anti-affinity over the hostname label**: at most one Pod per Node.
+12. **Preferred spread**: the scheduler places the Pod anyway when it misses evenness.
+13. **Topology spread constraints declared per Workload, enforced**: a maximum Skew per domain, unmet as Pending.
+
+Where a predefined specification is defined:
+
+14. **In `internal/lab`**: the values deciding a Placement stay in the framework.
+15. **In the Scenarios' place, through a mechanism the lab offers**, as `scenarios/nodes.go` defines each Named Node capacity.
+
+How a definition states its Startup time:
+
+16. **As one more Customization**: a definition omitting it compiles and is refused at run time.
+17. **As a mandatory argument after the name**: a definition omitting it does not compile.
+
+How a definition shows the lab's two tolerations:
+
+18. **The mechanism adds them**: the definition no longer shows them.
+19. **The definition writes both itself**: every definition repeats two settings it cannot change. Chosen in the morning of 2026-10-18.
+20. **The mechanism refuses a definition lacking them**: a Customization could still write another time for either taint.
+21. **One Named setting the lab defines**, composed in `internal/lab`.
+22. **One Named setting the Scenarios define, through a grouping means the lab offers**.
+
+Where a run reports the settings a Workload's Pods carry:
+
+23. **In the Given Step's name**: one line of several hundred characters, quoted again by every Finding naming that Step.
+24. **On lines of their own under the Given**.
+
+Whether a spread declares a minimum domain count:
+
+25. **None**.
+26. **A declared count**.
 
 ## Decision
 
-Option 3 for the specification, option 7 for changing one. A Workload declares exactly one Pod specification, as a mandatory argument of its Given, with zero or more Customizations of it and nothing else. Option 8 is rejected with it: an optional clause needs a rule to make it mandatory, which the argument is for free.
+Options 3, 7, 9, 13, 15, 17, 22, 24 and 25.
 
-Each specification is named for the intent it serves: `ResilientPlacement` and `DefaultPlacement`, reported as Resilient placement and Default placement. The earlier names, Maximum availability and No spread rules, state a mechanism and a degree rather than an intent.
+- A Workload's Given takes exactly one `pod.Specification` as a mandatory argument, with zero or more Customizations through `Customize` and nothing else. `Customize` returns a changed copy and keeps the last setting written for a field.
+- A specification is an immutable value of the domain core holding its name, its Startup time and its settings: one topology spread per topology key, one toleration per taint, one Request. Each setting is a keyed literal under Kubernetes' Go type and field names: `pod.TopologySpreadConstraint`, `pod.Toleration` and `pod.Request`.
+- `internal/scenario` spells the Kubernetes label, taint and value names itself, and the mapping test pins each one to the client library's constant. The domain holds a quantity as the integer it carries exactly: millicores for cpu, mebibytes for memory. A Node capacity uses the same two types.
+- `scenarios/pods.go` defines each predefined specification once, as an exported function taking nothing and named for its intent, such as `ResilientPlacement()` and `DefaultPlacement()`. Its body is one `pod.Predefined(name, startupTime, settings...)` call, carrying the domain value or its first refusal, as `node.Named` does. The lab defines no specification.
+- The Startup time is the mandatory second argument. The four Startup forms return one `pod.StartupTime`, which is also a Customization. The domain refuses the zero Startup time and an empty name, and the lab holds no Startup time of its own.
+- Every definition names `LeaveUnresponsiveNodes()` and writes neither toleration itself. `scenarios/pods.go` defines that Named setting as one `pod.Settings` call of exactly the not-ready and unreachable tolerations at `node.UnresponsiveWait`. It is a function rather than a variable, because no package of the lab holds mutable state.
+- `pod.Settings` takes `pod.Setting` values alone, a sealed type: a Startup time, a full access or another group does not compile there. It is the shortcut [ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) admits, expanding to existing settings. The lab defines no Named setting.
+- The domain holds the not-ready and unreachable tolerations at the lab's waiting time, replacing any time written for them and adding any not written.
+- Resilient placement spreads over the Zone and the hostname label through the Even spread, `EvenSpreadOver`, which the Scenarios define. Each constraint has a maximum Skew of one, `DoNotSchedule`, and `Honor` for taints. No constraint declares a minimum domain count. Every field is generally available in the pinned Kubernetes version, per [ADR: Kubernetes version pin for the Simulated Cluster](2026-10-03-kubernetes-version-pin.md).
+- Full access is the Customization a Scenario writes when the lab names no setting it needs: `pod.FullAccess(func(pod *corev1.PodSpec) { ... })`. The named wrapper keeps the Customization set closed, since Go passes no bare function literal where a closed interface is expected.
+- The function type is declared with the mapper in `internal/cluster`. The Step surface carries the functions a Workload line wrote beside the domain value, so `internal/scenario` names no Kubernetes type and holds no function value.
+- A Scenario writing full access imports the one Kubernetes package naming the Pod specification. The depguard rule for the Scenarios' place admits that package and no other.
+- The mapper transcribes a specification onto the Deployment's Pod template field by field, in the order held, each full access in its written place. It then re-applies the lab's two tolerations. The container, the Workload label and the selector stay its own, beyond full access.
+- The control plane validates a setting's values. A value it refuses ends the Scenario at the Step that deployed the Workload, naming it. A value it accepts and the cluster cannot satisfy is a Placement the lab reports: Pods Pending with the scheduler's reason.
+- A Given declaring a Workload names its specification, then the shortest and longest Startup time its Pods take. The run prints every setting the domain holds, in order, on a line of its own under that Given, as a manifest writes it:
 
-A specification is an immutable value of the domain core carrying its name and its settings: one topology spread per topology key, one toleration per taint. A setting names the Kubernetes fields it sets — `topologyKey`, `maxSkew`, `whenUnsatisfiable` and `nodeTaintsPolicy` for a spread, `key`, `operator`, `effect` and `tolerationSeconds` for a toleration — in types of the lab's own. `internal/scenario` spells the Kubernetes label, taint and value names itself, and the mapping test pins each one to the client library's constant.
+  ```text
+      tolerations: {key: node.kubernetes.io/not-ready, operator: Exists, effect: NoExecute, tolerationSeconds: 2}
+  ```
 
-A setting stating a Kubernetes quantity holds it as the integer that quantity carries exactly: millicores for cpu, mebibytes for memory. The Step surface spells it in whole units, `lab.CPU(1)` and `lab.MemoryGi(2)`, the way the toleration's whole seconds are spelled from a duration. A Node capacity states its cpu and memory in the same two types, so one spelling serves the room a Node has and the share a Pod asks for.
+- A Named setting reports as the settings it stands for. A full access reports as one line saying it applies, since the lab cannot read its change back. A refused specification reports no setting.
+- A source rule holds `scenarios/pods.go` to definitions and Named settings alone, one per name. Each definition names `LeaveUnresponsiveNodes` and writes neither toleration. No production source under `internal/` or `cmd/` defines a specification or calls `pod.Settings`.
 
-Each predefined specification is defined in `internal/lab`, over the base every one starts from, which names it and carries the lab's own settings:
+Option 1 keeps the reading problem: the line still states rules. Option 2 hides Kubernetes' own names, which a definition exists to show. Option 4 leaves the domain core nothing to hold. Option 5 makes every Scenario a Kubernetes author. Option 6 needs a method before a Scenario can set a field, and a value needs none. Option 8 needs a rule to make a clause mandatory, which an argument is for free.
 
-```go
-func specification(name string) PodSpecification {
-	return newSpecification(name,
-		toleration(key(NodeNotReady), operator(Exists), effect(NoExecute), tolerationSeconds(UnresponsiveNodeWait)),
-		toleration(key(NodeUnreachable), operator(Exists), effect(NoExecute), tolerationSeconds(UnresponsiveNodeWait)),
-	)
-}
+Option 10 lets no Scenario declare otherwise. Option 11 leaves the ninth Pod Pending once a Node is lost, while a maximum Skew of one lets it double up on a survivor. Option 12 hides an unmet rule behind a Running Pod in the wrong place. Option 26 fails for the reason option 11 does, per [ADR: Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md). That ADR guarantees the scheduler has seen every Node before a Workload is deployed. Honouring taints lets a cordoned Node leave the count rather than making every rule unsatisfiable.
 
-func DefaultPlacement() PodSpecification {
-	return specification("Default placement")
-}
-
-func ResilientPlacement() PodSpecification {
-	return specification("Resilient placement").Customize(
-		TopologySpread(TopologyKey(ZoneLabel), MaxSkew(evenSkew), WhenUnsatisfiable(DoNotSchedule), NodeTaintsPolicy(Honor)),
-		TopologySpread(TopologyKey(HostnameLabel), MaxSkew(evenSkew), WhenUnsatisfiable(DoNotSchedule), NodeTaintsPolicy(Honor)),
-	)
-}
-```
-
-`Customize` takes zero or more Customizations, returns a changed copy, and keeps the last setting written for a field. Each definition is therefore a worked example of the surface a Scenario changes a specification through.
-
-A Customization is one setting written under Kubernetes' own field names, so `internal/lab` exports the spread setting and the names it takes. The toleration setting stayed unexported until the amendment of 2026-10-18, below, so that a Scenario states no waiting time of its own, per REQ-SIM-008. Since that amendment the setting is offered, and the domain holds the lab's waiting time whatever a definition writes. Every exported name a Scenario may write stands in one file, which is the vocabulary `internal/lab` offers Scenarios. That single-import rule is kept for the one vocabulary it gives a Scenario — one prefix, one curated list — rather than for hiding the machinery.
-
-A Scenario holds no declaration and no local value, so it writes its Customizations on the Workload line itself. A change worth reusing becomes a predefined specification instead.
-
-Full access is the Customization a Scenario writes when the lab's own vocabulary names no setting it needs: `lab.FullAccess(func(pod *corev1.PodSpec) { ... })`, written among the other Customizations. Go cannot pass a bare function literal where a closed interface is expected, so that named wrapper is what keeps the Customization set closed.
-
-The function type is declared with the mapper, in `internal/cluster`, and the Step surface carries the functions a Workload line wrote beside the domain value it customized. `internal/scenario` therefore names no Kubernetes type and holds no function value, and `internal/lab` names the mapper's type rather than Kubernetes' own.
-
-The mapper transcribes the specification's settings in the order it holds them, running each full access in the place it was written. A later Customization therefore stands where two name one Kubernetes field. The mapper then re-applies the specification's own tolerations, which are the lab's: the waiting time holds whatever full access left out. Full access takes the Pod specification alone, so the Workload label, the selector and the Deployment stay beyond it.
-
-A Scenario writing full access imports the one Kubernetes package naming the Pod specification. That is the stated exception to the single-import rule: the depguard rule for the Scenarios' place admits that package, and the import rule beside it admits no other.
-
-The control plane validates a Customization's values. Kubernetes rejects an empty topology key, a maximum Skew below one, and an unknown action or policy, so the Scenario ends at the Step that deployed the Workload, naming it. A setting the control plane accepts and the cluster cannot satisfy is a Placement the lab reports: Pods Pending with the scheduler's reason.
-
-The mapper transcribes a specification onto the Pod template field by field. The container, the Workload label and the selector stay its own, because a specification is a package-level value and cannot name the Workload the selector reads.
-
-Option 1 keeps the reading problem: the line still states rules. Option 2 hides Kubernetes' own names behind a vocabulary of the lab's, which is what the definition exists to show. Option 4 leaves the domain core with nothing to hold, and option 5 makes every Scenario a Kubernetes author, inverting "the lab's own vocabulary first, full access as an extension". Option 6 needs a method before a Scenario can set a field, and a value needs none.
-
-Since the amendment of 2026-10-18, the definitions above live in `scenarios/pods.go`, written through `lab.PredefinedPodSpecification` with their own Startup time. The base and the definitions in `internal/lab` are retired. That amendment had a definition write the lab's two tolerations itself, through the toleration setting it offered, and the domain holds them at the lab's waiting time whatever is written, per [ADR: Every predefined Pod specification is defined by the Scenarios, with its own Startup time](2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md). Since the second amendment of 2026-10-18, a definition names the Named setting for leaving an unresponsive Node and writes neither toleration itself. The Scenarios define that setting beside the specifications, as exactly the two tolerations under their Kubernetes names grouped through `lab.Settings`, per [ADR: The Scenarios name leaving an unresponsive Node as one setting](2026-10-18-the-scenarios-name-leaving-an-unresponsive-node-as-one-setting.md).
+Option 14 keeps a Placement-deciding value in the framework, which REQ-SIM-015 refuses. Option 16 compiles a definition missing a mandatory value. Option 18 hides a setting deciding a Placement, against REQ-SIM-009. Option 19 is what the owner found hard to read. Option 20 lets a Customization change the waiting time, against REQ-SIM-008. Option 21 puts a Scenario-level name in the machinery, which the owner refused. Option 23 makes a Step's name carry configuration wherever it is quoted.
 
 ## Consequences
 
-A Workload line reads as an intent, and the Step a run reports names that intent. A customized Workload reads the same way, since the Step names the specification and not its settings. Two Workloads under one intent therefore read alike where one was customized, which is what keeps the report free of configuration.
+A Workload line reads as an intent, and its Step names that intent. The setting lines under the Given carry the configuration, so two Workloads under one intent share a Step name and differ there where one was customized.
 
-Since the second amendment of 2026-10-18, that holds of the Step name alone. The run prints every setting the Workload's Pods carry on lines of their own under the Given, so a customized Workload's lines differ there.
+A reader of `scenarios/pods.go` sees every value a specification gives its Pods: the spreads, the Request, the Startup time, and the tolerations through one named line beside it. Every run prints that line expanded.
 
-The definition is the whole of what decides a Placement. Until the amendment of 2026-10-18 the lab's own settings sat one hop away in the base. Since then a definition states every setting its Pods carry. Since the second amendment it writes each one itself except the lab's two tolerations, which it names through the Named setting for leaving an unresponsive Node.
+The Resilient placement Scenario's assertion follows from its own declaration. Default placement carries no spread, so a Scenario declaring it asserts only what holds for every Placement.
 
-`SpreadEvenly`, the Scenario-named spread domains and the spread-rule type are gone, and `scenario.SpreadDomain` stays beside `Placement` as the axis its Skew is read over. A Given's refusals are a Pod count below one and a specification holding no setting.
+Spread is evaluated when a Pod is scheduled and never after. A Node returning from a Failure stays empty until Pods are recreated, so no Scenario asserts a Placement re-balancing itself. A Topology too small for its Workload reports Pending Pods rather than an uneven Placement, the PRD's edge case 1.
 
-The eviction wait and the Kubernetes names the lab spells live in `internal/scenario`, beside the settings carrying them, and the mapper names neither.
+A Customization writing another time for either toleration changes nothing, and the setting line reports the lab's time. A Scenario wanting another Skew writes the constraint itself rather than the Even spread.
 
-A setting the lab spells wrong would be a Placement nobody asked for, which the mapping test's pinning prevents.
+A Scenario handles no error of its own and the lab keeps no copy of Kubernetes' admission rules. A Given's refusals are a Pod count below one, a specification holding no setting, an empty name, the zero Startup time, and a setting with a field left out. The mapping test's pinning keeps the lab from spelling a setting wrong.
 
-Default placement carries no spread, so where its Pods land is the scheduler's choice. A Scenario declaring it asserts only what holds for every Placement.
+The Workload-line rule reads that Step's own expression, admitting a `Customize` call of any length. [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md) admits one further call of the Workload's own.
 
-A setting's constructor returns no error, for either builder. The control plane is the validator, so a Scenario handles no error of its own and the lab keeps no copy of Kubernetes' admission rules.
+A Pod template carries the two Startup annotations from its specification's own Startup time, and the lab's Stage set is unchanged, per [ADR: The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md).
 
-The Workload-line rule reads that Step's own expression rather than the source line, so it admits a `Customize` call of any length and nothing after it. That last part is narrowed by [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md): the rule admits one further call of the Workload's own, and no setting of the Scenario's own.
+Tests of the machinery define the specifications they need beside themselves, writing the two tolerations where a fixture needs them, since `internal/` sources cannot import the Scenarios' place.
 
-The specification set grows one entry per Scenario that needs one. The settings offered are the spread and the Request, and no predefined definition sets a Request. Zone spread only, soft spread and affinity between a Workload's Pods are not offered yet.
+Two definitions under one name, each in its own Scenario source, are not refused within a run. The place rule keeps the lab's own Scenarios to one per name. A further specification or Named setting is one function in `scenarios/pods.go`, arriving with its first Scenario, and the lab's code does not change.
 
-No Scenario of the lab names a Customization: the callers are the predefined definitions and the tests. One arrives with the Scenario whose intent needs it.
-
-Full access leaves every domain value as it was: the function a Scenario wrote is held by the Step surface and read by the mapper alone.
-
-A Scenario using full access reads in two vocabularies, the lab's under one prefix and Kubernetes' under another. A full access the control plane refuses ends the Scenario at the Step that deployed its Workload, as any refused Customization does.
-
-A setting of the lab's own re-written after a full access keeps the place it was first written, so that full access stands where both name one field. Writing each field once leaves the order a Scenario reads.
-
-No Scenario of the lab uses full access, so the single-import exception is unexercised by the sources the lab ships. The rule tests beside the machinery carry it meanwhile, on a Scenario source of their own.
+A Scenario using full access reads in two vocabularies. A lab setting re-written after a full access keeps its first place, so the full access stands where both name one field. No Scenario of the lab uses full access, so rule tests beside the machinery exercise the import exception on a Scenario source of their own.
 
 ## Implementation
 
-**Requirements:** REQ-SIM-009, REQ-SIM-011
+**Requirements:** REQ-SIM-001, REQ-SIM-009, REQ-SIM-011, REQ-SIM-012, REQ-SIM-015, REQ-SIM-016
 
 ## References
 
-- [system-design.md § Contracts](../system-design.md)
-- [ADR: A Scenario's Workload declares the spread of its own Pods](2026-10-04-scenario-declared-pod-spread.md)
+- [system-design.md § Contracts](../system-design.md#contracts)
+- [ADR: The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md)
+- [ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md)
+- [ADR: Kubernetes version pin for the Simulated Cluster](2026-10-03-kubernetes-version-pin.md)
+- [ADR: Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md)
 - [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md)
-- [ADR: Every predefined Pod specification is defined by the Scenarios, with its own Startup time](2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md)
+- [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md)
+- [ADR: The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md)
+- [ADR: A Topology declares the NodePools every Zone holds](2026-10-08-a-topology-declares-the-nodepools-every-zone-holds.md)
+- [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)

@@ -16,32 +16,28 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// labsOwnStages is the lab's Stage set: the Stages the KWOK controller applies
-// once the Stage CRD is enabled. It is the cluster image's own set at the pinned
-// KWOK release, kwokRelease, except pod-ready, which takes KWOK's general form
-// reading a Pod's Startup time from podReadyDelayAnnotation and
-// podReadyJitterDelayAnnotation, and whose own delay is none, so a Pod carrying
+// labsOwnStages is the cluster image's own Stage set at kwokRelease, except
+// pod-ready, which reads a Pod's Startup time from podReadyDelayAnnotation and
+// podReadyJitterDelayAnnotation and has no delay of its own, so a Pod carrying
 // neither, a provisioning probe among them, is Ready at once.
 //
-// With the CRD enabled the controller applies the Stages served through the API
-// alone and none of the image's configuration file, which was measured on the
-// pinned image, so a KWOK upgrade is a review of this set, per
-// docs/adr/2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md.
+// With the Stage CRD enabled the controller applies only the Stages served
+// through the API and none from the image's configuration file, as measured on
+// the pinned image, so a KWOK upgrade is a review of this set.
 //
 //go:embed stages.yaml
 var labsOwnStages []byte
 
-// stageResource is the API resource a Stage is served as.
 var stageResource = schema.GroupVersionResource{Group: "kwok.x-k8s.io", Version: "v1alpha1", Resource: "stages"}
 
-// stageDecodingBuffer is how far ahead the decoder reads to tell YAML from JSON.
+// stageDecodingBuffer is how far ahead the decoder reads to tell YAML from
+// JSON.
 const stageDecodingBuffer = 4096
 
-// ownStages makes the Stages this cluster serves exactly the lab's own set: each
-// of the set created or replaced by name, and any other removed, so the outcome
-// holds whether or not kwokctl seeds Stages of its own. The Stage resource is
-// served a moment after the API server answers, so a list the API refuses is
-// retried at the poll interval within the start timeout.
+// Each Stage is created or replaced by name and any other removed, so the
+// outcome holds whether or not kwokctl seeds Stages of its own. The Stage
+// resource is served a moment after the API server answers, so a refused list
+// is retried within the start timeout.
 func (c *SimulatedCluster) ownStages(ctx context.Context) error {
 	address, err := c.container.APIAddress(ctx)
 	if err != nil {
@@ -65,8 +61,6 @@ func (c *SimulatedCluster) ownStages(ctx context.Context) error {
 	return c.reconcileStages(ctx, stages, served, wanted)
 }
 
-// awaitStagesServed lists the Stages this cluster serves once the API serves the
-// Stage resource at all, within the start timeout.
 func (c *SimulatedCluster) awaitStagesServed(ctx context.Context, stages dynamic.ResourceInterface) (map[string]unstructured.Unstructured, error) {
 	starting, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
@@ -90,8 +84,6 @@ func (c *SimulatedCluster) awaitStagesServed(ctx context.Context, stages dynamic
 	}
 }
 
-// reconcileStages creates each wanted Stage, replaces one already served under its
-// name, and removes every served Stage outside the set.
 func (c *SimulatedCluster) reconcileStages(
 	ctx context.Context,
 	stages dynamic.ResourceInterface,
@@ -124,7 +116,6 @@ func (c *SimulatedCluster) reconcileStages(
 	return nil
 }
 
-// decodeStages reads the Stages one YAML document stream holds, in order.
 func decodeStages(stream []byte) ([]unstructured.Unstructured, error) {
 	decoder := utilyaml.NewYAMLOrJSONDecoder(bytes.NewReader(stream), stageDecodingBuffer)
 

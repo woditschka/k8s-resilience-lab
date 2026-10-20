@@ -57,7 +57,6 @@ Drawing a Workload onto a NodePool by node selection or affinity stays an Open Q
 ## References
 
 - [system-design.md § Contracts](../system-design.md#contracts)
-- [ADR: Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given](2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md)
-- [ADR: A NodePool states its own Node labels beside the lab's, and a Then counts Pods per value](2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md)
+- [ADR: A Topology declares the NodePools every Zone holds](2026-10-08-a-topology-declares-the-nodepools-every-zone-holds.md)
 - [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)
 - [ADR: Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md)

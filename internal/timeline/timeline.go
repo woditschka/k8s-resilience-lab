@@ -1,11 +1,7 @@
-// Package timeline owns where a Scenario's Timeline is kept: the folder a run's
-// Timelines collect in, the file one Timeline is named after, and the JSON Lines
-// format those files carry.
-//
-// It imports internal/scenario and the standard library alone: a Timeline
-// reaches it as immutable values, so the published line format can never become
-// the Kubernetes client's shape, per
-// docs/adr/2026-10-05-timeline-from-the-watch-stream.md.
+// Package timeline owns where a Scenario's Timeline is kept and the JSON Lines
+// format it is filed in. It imports internal/scenario and the standard library
+// alone, so the published format can never become the Kubernetes client's
+// shape.
 package timeline
 
 import (
@@ -20,48 +16,39 @@ import (
 )
 
 const (
-	// folderName is the one folder under the working directory a run's Timelines
-	// collect in, and fileSuffix marks a filed Timeline as the JSON Lines it is.
 	folderName = "timelines"
 	fileSuffix = ".jsonl"
 
-	// folderPermissions and filePermissions make a created folder and a created
-	// file readable and writable by the invoking user alone: a Timeline outlives
-	// its run, in a working directory other users may reach
-	// (docs/system-design.md § Threat Model).
+	// A Timeline outlives its run in a working directory other users may reach,
+	// so only the invoking user may read or write it.
 	folderPermissions = 0o700
 	filePermissions   = 0o600
 )
 
-// The record field every line carries, so a reader of a filed Timeline tells
-// the header from the entries without counting lines.
+// The record field lets a reader tell the header from the entries without
+// counting lines.
 const (
 	headerRecord = "timeline"
 	entryRecord  = "entry"
 )
 
-// Folder is where one run's Timelines collect: the folder under the root the
-// run resolved. It is created when that run opens its first Timeline in it, so a
-// run that files nothing leaves nothing behind.
+// Folder is created when the run opens its first Timeline, so a run that files
+// nothing leaves nothing behind.
 type Folder struct {
 	path string
 }
 
-// NewFolder is the Timeline folder under root.
 func NewFolder(root string) Folder {
 	return Folder{path: filepath.Join(root, folderName)}
 }
 
-// Path is where this folder's Timelines are filed.
 func (f Folder) Path() string {
 	return f.path
 }
 
-// Open is the file the Timeline this header describes is filed in, named for the
-// Simulated Cluster that Timeline is of. A folder or a file it cannot open is
-// the lab's own failure and not the Scenario's: the File returned reports that
-// error and discards every entry, so the Scenario still runs and its outcome
-// still stands, per docs/adr/2026-10-05-timeline-from-the-watch-stream.md.
+// Open treats a folder or file it cannot create as the lab's own failure, not
+// the Scenario's: the File returned reports the error and discards every entry,
+// so the Scenario still runs.
 func (f Folder) Open(header Header) *File {
 	name, err := fileNameOf(header.Cluster)
 	if err != nil {
@@ -91,10 +78,8 @@ func (f Folder) Open(header Header) *File {
 	return filed
 }
 
-// fileNameOf is the file one Simulated Cluster's Timeline is filed as. The name
-// is joined to the folder as one path element, so a name holding a separator or
-// a parent reference is refused rather than filed somewhere else
-// (docs/system-design.md § Threat Model).
+// The name is joined as one path element, so a name holding a separator or a
+// parent reference is refused rather than filed somewhere else.
 func fileNameOf(cluster string) (string, error) {
 	if cluster == "" || cluster == "." || cluster == ".." ||
 		cluster != filepath.Base(cluster) || strings.ContainsAny(cluster, `/\`) {
@@ -104,22 +89,15 @@ func fileNameOf(cluster string) (string, error) {
 	return cluster + fileSuffix, nil
 }
 
-// Header is the first line of a filed Timeline: the Scenario it records, the
-// Simulated Cluster that Scenario ran on, and the Kubernetes version that
-// cluster mirrors.
 type Header struct {
 	Scenario   string
 	Cluster    string
 	Kubernetes string
 }
 
-// File is one Scenario's filed Timeline. It writes its header when it is
-// opened and one JSON object per entry as that entry arrives, which is what
-// leaves a usable file behind when a Scenario fails part-way through its Steps.
-//
-// It keeps its first write error and discards every entry after it, the way a
-// run's report keeps its first write error: a Timeline the lab could not write
-// is reported once, by the run, rather than checked at every entry.
+// File writes each entry as it arrives, which leaves a usable file behind when
+// a Scenario fails part-way. It keeps its first write error and discards every
+// entry after it, so a lost Timeline is reported once, by the run.
 type File struct {
 	path  string
 	to    io.Closer
@@ -127,14 +105,11 @@ type File struct {
 	err   error
 }
 
-// Path is where this Timeline was filed, empty for a Simulated Cluster name no
-// Timeline could be filed under.
+// Path is empty where the Simulated Cluster name could not be filed under.
 func (f *File) Path() string {
 	return f.path
 }
 
-// Write files one entry of the Timeline. It is the sink a recording delivers
-// its entries to.
 func (f *File) Write(entry scenario.Entry) {
 	f.write(entryLine{
 		Record: entryRecord, Elapsed: entry.Elapsed.String(), Change: string(entry.Change),
@@ -142,8 +117,8 @@ func (f *File) Write(entry scenario.Entry) {
 	})
 }
 
-// write files one line unless an earlier line already failed. The encoder
-// terminates every line with a newline, which is what makes the file JSON Lines.
+// The encoder terminates every line with a newline, which is what makes the
+// file JSON Lines.
 func (f *File) write(line any) {
 	if f.err != nil {
 		return
@@ -154,8 +129,7 @@ func (f *File) write(line any) {
 	}
 }
 
-// Close closes this file, keeping a close error the way a write error is kept,
-// so what went wrong is reported once, through Err. Closing a Timeline that was
+// Close keeps a close error like a write error. Closing a Timeline that was
 // never opened closes nothing.
 func (f *File) Close() {
 	if f.to == nil {
@@ -169,15 +143,12 @@ func (f *File) Close() {
 	}
 }
 
-// Err is what prevented this Timeline from being filed, which the run names.
 func (f *File) Err() error {
 	return f.err
 }
 
-// headerLine and entryLine are the published JSON Lines form of a filed
-// Timeline. They are this package's own types rather than the Timeline values
-// themselves, so the format a later reader depends on is declared here and
-// changes only here.
+// These are the package's own types rather than the Timeline values, so the
+// format a later reader depends on changes only here.
 type headerLine struct {
 	Record     string `json:"record"`
 	Scenario   string `json:"scenario"`

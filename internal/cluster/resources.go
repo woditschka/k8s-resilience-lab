@@ -16,69 +16,54 @@ import (
 )
 
 const (
-	// zoneLabel and hostnameLabel are the well-known labels a Node carries its
-	// Zone and its own name under: a Zone is a failure domain, a Node is one host.
-	// They are spelled in internal/scenario, beside the spread setting that counts
-	// its domains over one of them, so the lab holds one spelling of each.
+	// zoneLabel and hostnameLabel are spelled in internal/scenario, beside the
+	// spread setting that counts over them, so the lab holds one spelling of
+	// each.
 	zoneLabel     = scenario.ZoneLabel
 	hostnameLabel = scenario.HostnameLabel
 
-	// workloadLabel carries a Pod's Workload name, so a spread constraint counts
-	// one Workload's Pods and an observation reads one Workload's Pods.
+	// workloadLabel lets a spread constraint and an observation each count one
+	// Workload's Pods.
 	workloadLabel = "k8s-resilience-lab/workload"
 
-	// nodePoolLabel carries the name of a Node's NodePool, so one selector names
-	// one NodePool's Nodes. Every Node carries it, per
-	// docs/adr/2026-10-09-every-nodepool-is-named-where-it-is-declared.md. It is
-	// spelled in internal/scenario, which refuses a NodePool stating it.
+	// Every Node carries nodePoolLabel, so one selector names one NodePool's
+	// Nodes; internal/scenario refuses a NodePool stating it.
 	nodePoolLabel = scenario.NodePoolLabel
 
-	// fakeNodeAnnotation marks a Node as one KWOK simulates, and fakeNodeLabel is
-	// the marking the KWOK controller is started to select the Nodes it maintains
-	// by (runtime.go manageMarkedNodesArgument). A Failure takes the label off its
-	// Node and leaves the annotation, so the Node still reads as a simulated one.
-	// The label stays a literal of this package, because the container's command
-	// is composed from this package's own constants alone (engine_surface_test.go);
-	// the pin test of the lab's own Node label keys holds it to the spelling
-	// internal/scenario refuses a NodePool stating.
+	// fakeNodeLabel is the marking the KWOK controller selects the Nodes it
+	// maintains by (manageMarkedNodesArgument). A Failure takes the label off
+	// and leaves the annotation, so the Node still reads as simulated. The
+	// label stays a literal of this package, because the container's command is
+	// composed from this package's own constants alone.
 	fakeNodeAnnotation      = "kwok.x-k8s.io/node"
 	fakeNodeAnnotationValue = "fake"
 	fakeNodeLabel           = "type"
 	fakeNodeLabelValue      = "kwok"
 
-	// podReadyDelayAnnotation and podReadyJitterDelayAnnotation are the two Pod
-	// annotations the lab's pod-ready Stage reads a Startup time from: the delay
-	// before a placed Pod is Ready, and the bound of a time drawn at random above
-	// it (stages.go, measured on the pinned KWOK release).
+	// The lab's pod-ready Stage reads a Startup time from these annotations:
+	// the delay before a placed Pod is Ready, and the bound of a time drawn at
+	// random above it.
 	podReadyDelayAnnotation       = "pod-ready.stage.kwok.x-k8s.io/delay"
 	podReadyJitterDelayAnnotation = "pod-ready.stage.kwok.x-k8s.io/jitter-delay"
 
-	// nodeReadyReason is the reason a provisioned Node reports Ready with. A
-	// provisioned Node is Ready at creation rather than after a heartbeat, per
-	// docs/adr/2026-10-03-go-program-on-a-kwok-simulated-cluster.md.
+	// A provisioned Node is Ready at creation rather than after a heartbeat.
 	nodeReadyReason = "KubeletReady"
 
-	// nodeLostHeartbeatReason and nodeLostHeartbeatMessage are what a Node that
-	// stopped responding reports its Ready condition Unknown with: the words a
-	// control plane uses for a Node it has stopped hearing from.
+	// These are the words a control plane uses for a Node it has stopped
+	// hearing from.
 	nodeLostHeartbeatReason  = "NodeStatusUnknown"
 	nodeLostHeartbeatMessage = "Kubelet stopped posting node status."
 
-	// workloadImage is the image a Workload's Pod template names, and
-	// workloadContainer the container's name. The image is never pulled: a
-	// Simulated Cluster's Pods are fake, so the reference only has to be valid
-	// (docs/system-design.md § Overview).
+	// The image is never pulled: a Simulated Cluster's Pods are fake, so the
+	// reference only has to be valid.
 	workloadImage     = "registry.k8s.io/pause:3.10"
 	workloadContainer = "workload"
 
-	// probeLabel and probeLabelValue mark a Pod as one provisioning created to ask
-	// the scheduler whether it holds a Node; probePodNamePrefix names such a Pod
-	// after the Node it asks about, and probeContainer is its container. A probe
-	// Pod carries no Workload label, so an observation of a Workload reads none of
-	// them (docs/adr/2026-10-04-scheduler-observable-provisioning.md).
-	// bytesPerMebibyte is the bytes a Kubernetes memory quantity holds for one of
-	// the mebibytes the lab's own Memory is stated in, which is the one place the
-	// two units meet.
+	// A probe Pod carries no Workload label, so an observation of a Workload
+	// reads none of them.
+	//
+	// bytesPerMebibyte is the one place the lab's mebibytes and Kubernetes'
+	// bytes meet.
 	bytesPerMebibyte = 1024 * 1024
 
 	probeLabel         = "k8s-resilience-lab/probe"
@@ -87,7 +72,6 @@ const (
 	probeContainer     = "probe"
 )
 
-// observedPhases maps the phases the control plane reports onto the lab's own.
 // A phase outside this map is read as PodUnknown, so no foreign value reaches
 // internal/scenario.
 var observedPhases = map[corev1.PodPhase]scenario.PodPhase{
@@ -97,43 +81,30 @@ var observedPhases = map[corev1.PodPhase]scenario.PodPhase{
 	corev1.PodFailed:    scenario.PodFailed,
 }
 
-// workloadLabels are the labels one Workload's Pods carry. The Deployment's
-// selector, each spread constraint and an observation's Pod selector are all
-// built from this one value, so a Workload name is carried structurally and the
-// client renders it, rather than being concatenated into a selector expression
-// three times over (docs/architecture-principles.md § Persistence and boundary
-// mapping).
+// The Deployment's selector, each spread constraint and an observation's
+// selector are built from this one value, so a Workload name is carried
+// structurally and the client renders it rather than being concatenated into a
+// selector expression.
 func workloadLabels(workloadName string) labels.Set {
 	return labels.Set{workloadLabel: workloadName}
 }
 
-// podSelectorOf is the selector that reads one Workload's Pods, built from the
-// same structured labels the Deployment's own selector is.
 func podSelectorOf(workload scenario.Workload) string {
 	return workloadLabels(workload.Name()).String()
 }
 
-// probeLabels are the labels every probe Pod carries. Provisioning's own list
-// calls are built from this one value, the same way a Workload's are built from
-// workloadLabels.
 func probeLabels() labels.Set {
 	return labels.Set{probeLabel: probeLabelValue}
 }
 
-// probeSelector is the selector that reads provisioning's probe Pods, built from
-// the same structured labels a probe Pod carries.
 func probeSelector() string {
 	return probeLabels().String()
 }
 
-// toProbePod is the Pod provisioning creates to ask the scheduler whether it
-// holds one Node. The Pod names that Node by its hostname label rather than
-// binding itself to it, so the scheduler alone can place it, and a Running probe
-// Pod then proves the Node is in the scheduler's own snapshot
-// (docs/adr/2026-10-04-scheduler-observable-provisioning.md). It tolerates
-// that Node's own taints, each by its key and value, so a tainted Node is
-// provisioned as any other, per
-// docs/adr/2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md.
+// The probe Pod names its Node by the hostname label rather than binding to it,
+// so the scheduler alone places it and a Running probe proves the Node is in
+// the scheduler's snapshot. It tolerates the Node's own taints, so a tainted
+// Node is provisioned as any other.
 func toProbePod(node scenario.Node) *corev1.Pod {
 	return &corev1.Pod{
 		Name: probePodNamePrefix + node.Name, Labels: probeLabels(),
@@ -147,8 +118,6 @@ func toProbePod(node scenario.Node) *corev1.Pod {
 	}
 }
 
-// toleratingEach is a toleration of each of these taints, matching its key and
-// value, or none where there is no taint.
 func toleratingEach(taints scenario.NodeTaints) []corev1.Toleration {
 	var tolerations []corev1.Toleration
 	for _, taint := range taints.Taints() {
@@ -160,9 +129,8 @@ func toleratingEach(taints scenario.NodeTaints) []corev1.Toleration {
 	return tolerations
 }
 
-// nodesHoldingRunningProbe are the Nodes an observation reports a Running probe
-// Pod on. A probe Pod the scheduler has not placed, or has placed and the cluster
-// has not started, says nothing about its Node, so only a Running one counts.
+// A probe Pod not yet placed or not yet started says nothing about its Node, so
+// only a Running one counts.
 func nodesHoldingRunningProbe(observed []corev1.Pod) []string {
 	holding := make([]string, 0, len(observed))
 	for _, pod := range observed {
@@ -174,17 +142,12 @@ func nodesHoldingRunningProbe(observed []corev1.Pod) []string {
 	return holding
 }
 
-// toNode is the Node the lab creates for one Node of a Topology: a fake Node,
-// Ready at creation, reporting the capacity the Topology declared, and carrying
-// the labels its NodePool states, then the Zone and hostname labels a spread
-// rule's domain is read from and its NodePool's name. The lab's own labels are
-// written last, so they hold whatever was stated, per
-// docs/adr/2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md.
-// It carries the taints its NodePool states as its own.
+// The lab's own labels are written after the stated ones, so they hold whatever
+// was stated.
 //
 // The capacity is reported allocatable as well as whole, because the scheduler
-// fits the requests of the Pods it places against what a Node reports allocatable
-// and nothing of a Simulated Cluster's Node is reserved.
+// fits requests against what a Node reports allocatable and nothing of a
+// Simulated Cluster's Node is reserved.
 func toNode(node scenario.Node) *corev1.Node {
 	stated := node.Labels.Pairs()
 	labelled := make(map[string]string, len(stated)+len(scenario.LabsOwnNodeLabelKeys()))
@@ -213,8 +176,6 @@ func toNode(node scenario.Node) *corev1.Node {
 	}
 }
 
-// toTaints are the taints a Node carries for those its NodePool states, in the
-// order the domain holds them, or none where it states none.
 func toTaints(stated scenario.NodeTaints) []corev1.Taint {
 	var taints []corev1.Taint
 	for _, taint := range stated.Taints() {
@@ -224,10 +185,8 @@ func toTaints(stated scenario.NodeTaints) []corev1.Taint {
 	return taints
 }
 
-// toResourceList is the room one Node reports, in all three dimensions: the Pods
-// it holds, and the cpu and memory the scheduler fits a Pod's request against.
-// Each quantity is built from the integer the lab holds, never parsed from a
-// string, so no path through this mapper can panic on a quantity.
+// Each quantity is built from an integer, never parsed from a string, so this
+// mapper cannot panic on a quantity.
 func toResourceList(capacity scenario.NodeCapacity) corev1.ResourceList {
 	return corev1.ResourceList{
 		corev1.ResourcePods:   *resource.NewQuantity(int64(capacity.Pods()), resource.DecimalSI),
@@ -236,10 +195,6 @@ func toResourceList(capacity scenario.NodeCapacity) corev1.ResourceList {
 	}
 }
 
-// toCPUQuantity and toMemoryQuantity are the one quantity each of the lab's own
-// amounts becomes: the millicores a cpu amount is held in, and the bytes a
-// memory amount's mebibytes make up, in the format Kubernetes spells each of them
-// in.
 func toCPUQuantity(cpu scenario.CPU) *resource.Quantity {
 	return resource.NewMilliQuantity(int64(cpu), resource.DecimalSI)
 }
@@ -249,31 +204,23 @@ func toMemoryQuantity(memory scenario.Memory) *resource.Quantity {
 }
 
 // PodSpecAccess is full access: a Scenario's own change to the Kubernetes Pod
-// specification, for a setting the lab's own vocabulary does not name. It is
-// declared here, with the mapper that runs it, so internal/scenario holds no
-// function value and internal/lab names this type rather than Kubernetes' own,
-// per docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
+// specification. It is declared here, beside the mapper that runs it, so
+// internal/scenario holds no function value and internal/lab names this type
+// rather than Kubernetes' own.
 type PodSpecAccess func(pod *corev1.PodSpec)
 
-// PodSpecAccessInPlace is one full access in the place a Workload line wrote it:
-// the change itself, and how many of the specification's settings the mapper
-// transcribes before running it. The place is what makes the later of two
-// Customizations naming one Kubernetes field the one that stands.
+// PodSpecAccessInPlace pairs a full access with how many settings the mapper
+// transcribes before running it, which makes the later of two Customizations
+// naming one field the one that stands.
 type PodSpecAccessInPlace struct {
 	Access        PodSpecAccess
 	AfterSettings int
 }
 
-// toDeployment is the Deployment the lab creates for a Workload, so the control
-// plane's own controllers produce the Placement. The Pod specification the
-// Workload declared is transcribed onto the Pod template field by field; the
-// container, the Workload label and the selector are the mapper's own, because a
-// specification is a package-level value and can name neither, per
-// docs/adr/2026-10-05-workload-declares-a-predefined-pod-specification.md.
-//
-// The accesses are the full accesses the Workload line wrote, which reach the Pod
-// specification alone: the Deployment, its selector and the label the Workload's
-// Pods are counted by stay beyond them.
+// The container, the Workload label and the selector are the mapper's own,
+// because a specification is a package-level value and can name neither. A full
+// access reaches the Pod specification alone, so the Deployment, its selector
+// and the counted label stay beyond it.
 func toDeployment(workload scenario.Workload, accesses ...PodSpecAccessInPlace) *appsv1.Deployment {
 	replicas := int32(workload.Pods())
 	selector := workloadLabels(workload.Name())
@@ -294,12 +241,9 @@ func toDeployment(workload scenario.Workload, accesses ...PodSpecAccessInPlace) 
 	}
 }
 
-// toStartupAnnotations are the annotations a Pod takes its Startup time from: the
-// shortest as the delay and the longest as the bound above it, so equal bounds
-// are one time. They are formatted from the validated whole seconds the domain
-// holds, never from a string a Scenario wrote, and they sit on the template's
-// metadata, which full access does not reach, per
-// docs/adr/2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md.
+// Equal bounds are one time. The annotations are formatted from validated whole
+// seconds, never from a string a Scenario wrote, and sit on the template's
+// metadata, which full access does not reach.
 func toStartupAnnotations(startup scenario.StartupTime) map[string]string {
 	return map[string]string{
 		podReadyDelayAnnotation:       startup.Shortest().String(),
@@ -307,16 +251,12 @@ func toStartupAnnotations(startup scenario.StartupTime) map[string]string {
 	}
 }
 
-// toPodSpec is the Pod specification a Workload's Pods are deployed with: the
-// container the mapper owns, the declared settings transcribed in the order the
-// specification holds them, and each full access run in the place it was written,
-// so what it reads is what the settings before it wrote.
+// Each full access runs in the place it was written, so what it reads is what
+// the settings before it wrote.
 //
-// The tolerations the Pod template carries are the specification's own, written
-// once more after the last full access: they are the lab's, and the waiting time
-// before a Pod leaves an unresponsive Node holds whatever a full access left out,
-// per the same ADR. A toleration a full access writes itself therefore does not
-// stand, which is what keeps that waiting time the lab's to decide.
+// The specification's tolerations are written once more after the last full
+// access, so a toleration a full access writes does not stand and the waiting
+// time before leaving an unresponsive Node stays the lab's to decide.
 func toPodSpec(workload scenario.Workload, accesses []PodSpecAccessInPlace) corev1.PodSpec {
 	declared := workload.PodSpecification()
 	settings := declared.Settings()
@@ -336,8 +276,6 @@ func toPodSpec(workload scenario.Workload, accesses []PodSpecAccessInPlace) core
 	return pod
 }
 
-// runAccessesWrittenAfter runs every full access written once that many settings
-// are transcribed, in the order the Workload line wrote them.
 func runAccessesWrittenAfter(pod *corev1.PodSpec, transcribed int, accesses []PodSpecAccessInPlace) {
 	for _, written := range accesses {
 		if written.AfterSettings == transcribed {
@@ -346,10 +284,8 @@ func runAccessesWrittenAfter(pod *corev1.PodSpec, transcribed int, accesses []Po
 	}
 }
 
-// transcribeSetting transcribes one setting of a specification onto the Pod
-// specification: the one constraint, the one toleration or the one request it is,
-// written in the place the specification holds it. The settings are sealed in
-// internal/scenario, so these three are every kind there is.
+// The settings are sealed in internal/scenario, so these three are every kind
+// there is.
 func transcribeSetting(pod *corev1.PodSpec, declared scenario.Setting, workloadName string) {
 	switch setting := declared.(type) {
 	case scenario.TopologySpread:
@@ -362,19 +298,16 @@ func transcribeSetting(pod *corev1.PodSpec, declared scenario.Setting, workloadN
 	}
 }
 
-// transcribeRequest writes what one Pod asks for onto every container of the Pod
-// specification, which is the container the mapper owns unless a full access
-// written before it replaced them. The request stands where the specification
-// holds it, the way a full access does, so a later Customization decides.
+// The request goes onto every container, which is the mapper's own unless an
+// earlier full access replaced them. It stands where the specification holds
+// it, so a later Customization decides.
 func transcribeRequest(pod *corev1.PodSpec, declared scenario.Request) {
 	for at := range pod.Containers {
 		pod.Containers[at].Resources.Requests = toRequestedResources(declared)
 	}
 }
 
-// toRequestedResources is the resources.requests one request setting becomes: the
-// cpu and the memory it asks for, under the names Kubernetes gives them, built
-// fresh for each container so no two share one list.
+// The list is built fresh for each container so no two share one.
 func toRequestedResources(declared scenario.Request) corev1.ResourceList {
 	return corev1.ResourceList{
 		corev1.ResourceCPU:    *toCPUQuantity(declared.CPU()),
@@ -382,10 +315,7 @@ func toRequestedResources(declared scenario.Request) corev1.ResourceList {
 	}
 }
 
-// toSpreadConstraint is the one constraint a spread setting becomes, each field
-// as that setting names it. The selector is the mapper's own: it selects the Pods
-// by their Workload label, so a constraint counts one Workload's Pods, per
-// docs/adr/2026-10-04-scenario-declared-pod-spread.md.
+// The selector is the mapper's own, so a constraint counts one Workload's Pods.
 func toSpreadConstraint(declared scenario.TopologySpread, workloadName string) corev1.TopologySpreadConstraint {
 	taintsPolicy := corev1.NodeInclusionPolicy(declared.NodeTaintsPolicy())
 
@@ -398,8 +328,6 @@ func toSpreadConstraint(declared scenario.TopologySpread, workloadName string) c
 	}
 }
 
-// toTolerations are the tolerations a specification's toleration settings become,
-// one each and in definition order.
 func toTolerations(declared []scenario.Toleration) []corev1.Toleration {
 	tolerations := make([]corev1.Toleration, 0, len(declared))
 	for _, tolerated := range declared {
@@ -412,12 +340,9 @@ func toTolerations(declared []scenario.Toleration) []corev1.Toleration {
 	return tolerations
 }
 
-// toToleration is the one toleration a toleration setting becomes, each field as
-// that setting names it: the taint it names, matched the way it says, and for a
-// NoExecute taint the waiting time it sets rather than the admission default, per
-// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md. A toleration of
-// a NoSchedule taint carries no waiting time, which Kubernetes takes for
-// NoExecute alone.
+// A NoExecute toleration carries the waiting time the setting names rather than
+// the admission default. A NoSchedule toleration carries none, since Kubernetes
+// takes it for NoExecute alone.
 func toToleration(declared scenario.Toleration) corev1.Toleration {
 	tolerated := corev1.Toleration{
 		Key:      declared.Key(),
@@ -433,10 +358,8 @@ func toToleration(declared scenario.Toleration) corev1.Toleration {
 	return tolerated
 }
 
-// toUnresponsive is the status of a Node that stopped responding: the status it
-// reported, with its Ready condition Unknown and the reason a lost heartbeat
-// carries. Every other condition is left as reported, because the lab stops the
-// Node answering and does not decide what else is true of it.
+// Every other condition is left as reported, because the lab stops the Node
+// answering and does not decide what else is true of it.
 func toUnresponsive(reported corev1.NodeStatus) corev1.NodeStatus {
 	unresponsive := reported
 	unresponsive.Conditions = append(conditionsOtherThanReady(reported.Conditions), corev1.NodeCondition{
@@ -449,9 +372,8 @@ func toUnresponsive(reported corev1.NodeStatus) corev1.NodeStatus {
 	return unresponsive
 }
 
-// conditionsOtherThanReady are the conditions a Node reports apart from its Ready
-// one, in a slice of their own, so replacing that one condition does not write
-// through the Node the lab read.
+// The conditions are copied, so replacing the Ready one does not write through
+// the Node the lab read.
 func conditionsOtherThanReady(reported []corev1.NodeCondition) []corev1.NodeCondition {
 	others := make([]corev1.NodeCondition, 0, len(reported)+1)
 	for _, condition := range reported {
@@ -463,10 +385,8 @@ func conditionsOtherThanReady(reported []corev1.NodeCondition) []corev1.NodeCond
 	return others
 }
 
-// withoutTheKWOKMarking are the labels of a Node the KWOK controller no longer
-// maintains: the labels it carried, less the marking the controller selects by.
-// Its Zone and hostname labels stay, so the Node keeps its place in every
-// Topology read and every spread domain.
+// The Zone and hostname labels stay, so the Node keeps its place in every
+// Topology read and spread domain.
 func withoutTheKWOKMarking(labelled map[string]string) map[string]string {
 	unmarked := maps.Clone(labelled)
 	delete(unmarked, fakeNodeLabel)
@@ -474,8 +394,7 @@ func withoutTheKWOKMarking(labelled map[string]string) map[string]string {
 	return unmarked
 }
 
-// readyNodesIn are the observed Nodes the control plane reports Ready. Only a
-// Ready Node can hold a Pod, so a Placement is read against these alone.
+// Only a Ready Node can hold a Pod, so a Placement is read against these alone.
 func readyNodesIn(observed []corev1.Node) []corev1.Node {
 	ready := make([]corev1.Node, 0, len(observed))
 	for _, node := range observed {
@@ -487,7 +406,6 @@ func readyNodesIn(observed []corev1.Node) []corev1.Node {
 	return ready
 }
 
-// isReady reports whether a Node carries a Ready condition that is true.
 func isReady(node corev1.Node) bool {
 	for _, condition := range node.Status.Conditions {
 		if condition.Type == corev1.NodeReady {
@@ -498,10 +416,7 @@ func isReady(node corev1.Node) bool {
 	return false
 }
 
-// isPodReady reports whether a Pod carries a Ready condition that is true, which
-// is the condition kubectl rollout status waits on and the one a Wait for every
-// Pod Ready holds until. A Pod reporting no such condition is not Ready, the way
-// a Node reporting none is no Ready Node.
+// A Pod's Ready condition is the one kubectl rollout status waits on.
 func isPodReady(pod corev1.Pod) bool {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady {
@@ -512,10 +427,9 @@ func isPodReady(pod corev1.Pod) bool {
 	return false
 }
 
-// fromNodes reads the Nodes of one observation. A Node's Zone, NodePool and
-// stated labels come from its labels rather than from its name, so an
-// observation reports what the control plane holds and not what the Topology
-// asked for.
+// A Node's Zone, NodePool and labels come from its labels rather than its name,
+// so an observation reports what the control plane holds and not what the
+// Topology asked for.
 func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 	nodes := make([]scenario.Node, 0, len(observed))
 	for _, node := range observed {
@@ -545,8 +459,6 @@ func fromNodes(observed []corev1.Node) ([]scenario.Node, error) {
 	return nodes, nil
 }
 
-// statedTaintsOf are the taints an observed Node carries other than the ones the
-// control plane sets from its conditions: the ones its NodePool stated.
 func statedTaintsOf(carried []corev1.Taint) []scenario.Taint {
 	var stated []scenario.Taint
 	for _, taint := range carried {
@@ -558,8 +470,6 @@ func statedTaintsOf(carried []corev1.Taint) []scenario.Taint {
 	return stated
 }
 
-// statedLabelsOf are the labels an observed Node carries other than the lab's
-// own: the ones its NodePool stated, and any the control plane added.
 func statedLabelsOf(carried map[string]string) map[string]string {
 	stated := maps.Clone(carried)
 	maps.DeleteFunc(stated, func(key, _ string) bool { return scenario.IsLabsOwnNodeLabel(key) })
@@ -567,10 +477,8 @@ func statedLabelsOf(carried map[string]string) map[string]string {
 	return stated
 }
 
-// fromReportedCapacity is the Node capacity one observed resource list reports,
-// in the units the lab holds each dimension in. It round-trips exactly against
-// what toResourceList wrote, every Node of a Simulated Cluster being one the lab
-// created.
+// This round-trips exactly against toResourceList, since every Node of a
+// Simulated Cluster is one the lab created.
 func fromReportedCapacity(reported corev1.ResourceList) (scenario.NodeCapacity, error) {
 	return scenario.NewNodeCapacity(
 		int(reported.Pods().Value()),
@@ -578,12 +486,8 @@ func fromReportedCapacity(reported corev1.ResourceList) (scenario.NodeCapacity, 
 		scenario.Memory(reported.Memory().Value()/bytesPerMebibyte))
 }
 
-// fromPods reads the Pods of one observation, each with the Node the control
-// plane placed it on and the phase it reports. A Pod the control plane has
-// marked for deletion is left out: it is leaving, which is how the Workload's
-// own ReplicaSet counts it, so a Pod still terminating on a Node that stopped
-// responding holds no place in the Placement, per
-// docs/adr/2026-10-05-node-failure-withholds-the-nodes-status.md.
+// A Pod marked for deletion is left out, as the ReplicaSet counts it, so a Pod
+// still terminating on a failed Node holds no place in the Placement.
 func fromPods(observed []corev1.Pod) []scenario.Pod {
 	pods := make([]scenario.Pod, 0, len(observed))
 	for _, pod := range observed {
@@ -601,9 +505,6 @@ func fromPods(observed []corev1.Pod) []scenario.Pod {
 	return pods
 }
 
-// observedPhaseOf is the phase the control plane reports for one Pod, read
-// through the lab's own phases, so a phase it does not name reaches
-// internal/scenario as PodUnknown rather than unread.
 func observedPhaseOf(pod corev1.Pod) scenario.PodPhase {
 	phase, named := observedPhases[pod.Status.Phase]
 	if !named {
@@ -613,17 +514,15 @@ func observedPhaseOf(pod corev1.Pod) scenario.PodPhase {
 	return phase
 }
 
-// recordedChanges maps the watch event types a Timeline records onto the lab's
-// own changes. A type outside this map — a bookmark, or a stream's own error —
-// is no change to an object and becomes no entry.
+// A bookmark or a stream's own error is no change to an object and becomes no
+// entry.
 var recordedChanges = map[watch.EventType]scenario.Change{
 	watch.Added:    scenario.ChangeAdded,
 	watch.Modified: scenario.ChangeModified,
 	watch.Deleted:  scenario.ChangeRemoved,
 }
 
-// reportedKinds maps the kinds a Kubernetes Event can be about onto the lab's
-// own. An Event about a kind no Timeline records becomes no entry, so no foreign
+// An Event about a kind no Timeline records becomes no entry, so no foreign
 // kind reaches internal/scenario.
 var reportedKinds = map[string]scenario.ObjectKind{
 	"Node":       scenario.NodeObject,
@@ -632,10 +531,9 @@ var reportedKinds = map[string]scenario.ObjectKind{
 	"ReplicaSet": scenario.ReplicaSetObject,
 }
 
-// toEntry is the one place a watched Kubernetes object becomes an entry of a
-// Timeline: the named fields of that object alone cross into internal/scenario,
-// so no foreign type and no unread field reaches a printed or filed Timeline
-// (docs/security-principles.md § Language Realization).
+// toEntry is the one place a watched object becomes a Timeline entry: only the
+// named fields cross into internal/scenario, so no foreign type or unread field
+// reaches a printed or filed Timeline.
 func toEntry(elapsed time.Duration, event watch.Event) (scenario.Entry, bool) {
 	if reported, isEvent := event.Object.(*corev1.Event); isEvent {
 		return fromReportedEvent(elapsed, reported)
@@ -672,11 +570,8 @@ func toEntry(elapsed time.Duration, event watch.Event) (scenario.Entry, bool) {
 	}
 }
 
-// fromReportedEvent is the entry one Kubernetes Event becomes: the control
-// plane's own reason for what it did to the object the Event names, which is
-// where the reason for a Placement comes from. An Event is always read as
-// reported, because an Event is the control plane reporting rather than the
-// object changing.
+// An Event is always read as reported, because it is the control plane
+// reporting rather than the object changing.
 func fromReportedEvent(elapsed time.Duration, reported *corev1.Event) (scenario.Entry, bool) {
 	kind, recorded := reportedKinds[reported.InvolvedObject.Kind]
 	if !recorded {
@@ -689,8 +584,6 @@ func fromReportedEvent(elapsed time.Duration, reported *corev1.Event) (scenario.
 	}, true
 }
 
-// readinessOf is the Ready condition the control plane reports for a Node, in
-// the words internal/scenario owns, so neither side of this mapper writes them.
 func readinessOf(node corev1.Node) scenario.NodeReadiness {
 	if isReady(node) {
 		return scenario.NodeReady
@@ -699,11 +592,8 @@ func readinessOf(node corev1.Node) scenario.NodeReadiness {
 	return scenario.NodeNotReady
 }
 
-// capacityOf is the room a Node reports: the cpu and memory a Pod's request is
-// fitted against, then the Pods it holds, each as the control plane spells it.
-// It is the line a run reports a Node's capacity on, which is where a reader
-// verifies the capacity a Topology stated, so it names the three in the order
-// every reported capacity names them.
+// The order cpu, memory, Pods matches every reported capacity, so a reader can
+// check the capacity a Topology stated.
 func capacityOf(node corev1.Node) string {
 	reported := node.Status.Capacity
 
@@ -711,9 +601,6 @@ func capacityOf(node corev1.Node) string {
 		reported.Cpu(), reported.Memory(), reported.Pods().Value())
 }
 
-// replicasReady is how much of a Workload's own object the control plane reports
-// ready, which is how a Deployment and a ReplicaSet change reads. An object
-// declaring no replica count reports only what is ready.
 func replicasReady(ready int32, declared *int32) string {
 	if declared == nil {
 		return fmt.Sprintf("%d Pods ready", ready)

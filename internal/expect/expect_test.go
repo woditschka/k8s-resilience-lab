@@ -15,10 +15,10 @@ const (
 	aThirdZone      = "zone-3"
 )
 
-// recordedReports is a T that keeps what a failing assertion reported instead of
-// failing the suite, which is the only way to read expect's own output. It is a
-// real implementation of the one interface expect declares — the same shape the
-// lab command's Scenario runner has — not a stand-in for a collaborator.
+// recordedReports keeps what a failing assertion reported instead of failing
+// the suite, which is the only way to read expect's own output. It is a real
+// implementation of the interface expect declares, not a stand-in for a
+// collaborator.
 type recordedReports struct {
 	reports []string
 }

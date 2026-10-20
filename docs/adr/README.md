@@ -62,29 +62,18 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 |------|----------|--------|
 | 2026-10-03 | [Non-goal — real-cluster runs](2026-10-03-non-goal-real-cluster-runs.md) | Accepted |
 | 2026-10-03 | [Non-goal — application-level recovery](2026-10-03-non-goal-application-level-recovery.md) | Accepted |
-| 2026-10-03 | [The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md) | Accepted |
+| 2026-10-03 | [The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md) | Accepted, amended 2026-10-04 |
 | 2026-10-03 | [Kubernetes version pin for the Simulated Cluster](2026-10-03-kubernetes-version-pin.md) | Accepted |
-| 2026-10-03 | [The lab provisions the Simulated Cluster it drives](2026-10-03-lab-provisioned-simulated-cluster.md) | Accepted |
-| 2026-10-03 | [Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) | Accepted, amended 2026-10-09 and 2026-10-19 |
-| 2026-10-04 | [A Scenario's Workload declares the spread of its own Pods](2026-10-04-scenario-declared-pod-spread.md) | Accepted |
-| 2026-10-04 | [Each Scenario provisions its own Simulated Cluster](2026-10-04-cluster-per-scenario.md) | Accepted, amended 2026-10-09 |
+| 2026-10-03 | [The lab provisions the Simulated Cluster it drives](2026-10-03-lab-provisioned-simulated-cluster.md) | Accepted, amended 2026-10-04 and 2026-10-09 |
+| 2026-10-03 | [Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) | Accepted, amended 2026-10-07, 2026-10-09 and 2026-10-19 |
 | 2026-10-04 | [Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md) | Accepted |
 | 2026-10-04 | [The gate runs the tests under the race detector](2026-10-04-race-detector-in-the-gate.md) | Accepted |
-| 2026-10-04 | [The module-rule tests share one test-support package](2026-10-04-module-rule-test-support.md) | Accepted |
-| 2026-10-05 | [A Timeline is recorded from the API's watch stream and filed as JSON Lines](2026-10-05-timeline-from-the-watch-stream.md) | Accepted |
-| 2026-10-05 | [A run prints a Timeline summary derived from the record](2026-10-05-timeline-summary-derived-from-the-record.md) | Accepted |
+| 2026-10-05 | [A Timeline is recorded from the API's watch stream and filed as JSON Lines](2026-10-05-timeline-from-the-watch-stream.md) | Accepted, amended 2026-10-05 |
 | 2026-10-05 | [A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md) | Accepted |
 | 2026-10-05 | [A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md) | Accepted, amended 2026-10-18 (three times) |
 | 2026-10-06 | [A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md) | Accepted |
-| 2026-10-07 | [A Scenario writes its own Wait, with its Given or as a Step of its own](2026-10-07-a-scenario-writes-its-own-wait.md) | Accepted |
-| 2026-10-07 | [The lab's Scenarios write one Step per line](2026-10-07-the-labs-scenarios-write-one-step-per-line.md) | Accepted |
+| 2026-10-07 | [A Scenario writes its own Wait, with its Given or as a Step of its own](2026-10-07-a-scenario-writes-its-own-wait.md) | Accepted, amended 2026-10-07 and 2026-10-08 |
 | 2026-10-08 | [The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md) | Accepted, amended 2026-10-09 and 2026-10-18 |
-| 2026-10-08 | [A Topology declares the NodePools every Zone holds](2026-10-08-a-topology-declares-the-nodepools-every-zone-holds.md) | Superseded by [ADR-2026-10-09](2026-10-09-every-nodepool-is-named-where-it-is-declared.md) |
-| 2026-10-09 | [Every NodePool is named where it is declared](2026-10-09-every-nodepool-is-named-where-it-is-declared.md) | Accepted, amended 2026-10-09 and 2026-10-18 |
-| 2026-10-09 | [Every NodePool states its Node capacity or names one its Scenarios define](2026-10-09-every-nodepool-states-or-names-its-node-capacity.md) | Accepted, amended 2026-10-18 |
-| 2026-10-18 | [Every predefined Pod specification is defined by the Scenarios, with its own Startup time](2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md) | Accepted, amended 2026-10-18 (twice) |
-| 2026-10-18 | [The Scenarios name leaving an unresponsive Node as one setting, and a run reports every setting a Workload's Pods carry](2026-10-18-the-scenarios-name-leaving-an-unresponsive-node-as-one-setting.md) | Accepted, amended 2026-10-18 |
-| 2026-10-18 | [Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md) | Accepted |
-| 2026-10-18 | [Pod and Node settings are keyed literals under Kubernetes' names, refused at their Given](2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md) | Accepted, amended 2026-10-19 |
-| 2026-10-18 | [A NodePool states its own Node labels beside the lab's, and a Then counts Pods per value](2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md) | Accepted |
+| 2026-10-08 | [A Topology declares the NodePools every Zone holds](2026-10-08-a-topology-declares-the-nodepools-every-zone-holds.md) | Accepted, amended 2026-10-09 (twice) and 2026-10-18 (twice) |
+| 2026-10-18 | [Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md) | Accepted, amended 2026-10-18 and 2026-10-19 |
 | 2026-10-19 | [A NodePool states NoSchedule taints, and a later Workload deploys beside the earlier, judged alone](2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md) | Accepted |

@@ -1,12 +1,12 @@
 # A Scenario writes its own Wait, with its Given or as a Step of its own
 
-**Status:** Accepted
+**Status:** Accepted, amended 2026-10-07: the lab's own Scenarios write each Wait as a Step of its own, option 42; amended 2026-10-08: a Scenario's doc comment states its intention alone, option 46
 
 ## Context
 
-[ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) left every wait implicit: its option 14 had the first Then apply the Topology, deploy the Workload and settle, and every When settle before injecting its Failure. Its option 15, a settle Step a Scenario writes, was declined then — "Scenarios stay fast and need no wait setting".
+On 2026-10-03, [ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) left every wait implicit, option 38. The first Then applied the Topology, deployed the Workload and settled. A When injected one Failure and discarded the observation it injected into, so the next Step needing a Placement awaited a fresh Settled one. Option 39, a settle Step a Scenario writes, was declined then: "Scenarios stay fast and need no wait setting." A Scenario studying a Failure read as the one before it plus one When line, and paid one settle wait per When.
 
-Shown the Zone loss Scenario's opening lines, the owner revised that: "Look at this sequence: after Given and before Then there is something missing. A When(... status has settled ...) would make the timing and the precondition visible (possible with a timeout)." The time a Scenario waits is the lab's own subject — after a Failure it is how long the cluster took to place the Pods again — and no line of a Scenario reported it.
+On 2026-10-07, shown the Zone loss Scenario's opening lines, the owner revised that: "Look at this sequence: after Given and before Then there is something missing. A When(... status has settled ...) would make the timing and the precondition visible (possible with a timeout)." The time a Scenario waits is the lab's own subject — after a Failure it is how long the cluster took to place the Pods again — and no line of a Scenario reported it.
 
 The owner asked for Kubernetes' words rather than the lab's: "Probably a more Kubernetes-native naming? AllPodsLive, AllPodsReady, AllPodsLiveAndReady?", then "Also WhenAllNodesLive?". And for a shorter form beside the Step of its own: "What we could do in addition, if this is possible: chain? `s.Given().Topology(lab.Zones(3), lab.NodesPerZone(3))` . when - AllNodesReady(). Is this possible with Go and this design?"
 
@@ -23,6 +23,10 @@ The Wait Step left the time a Wait states for a later slice, and the owner opene
 The owner then moved the time out of the argument: "Maybe we add a second version of AllPodsReady: AllPodsReadyWithinSeconds(15)?" Challenged once — it doubles the names per Wait and per option, and leaves the typed-argument pattern a Step's mandatory values follow — the owner answered: "True for the framework, but simpler for the user, and AllPodsReady() can just delegate to AllPodsReadyWithinSeconds with the default."
 
 The lab waits its own waiting time whatever a Wait states, so a run reports how long recovery really took. A Wait cancelled at its stated time would report the bound instead of the measurement, which is the lab's own subject.
+
+The same day the question was which form the lab's own Scenarios write: all three shipped with the chained one. Shown the two long Given lines that leaves, the owner picked the standalone form: "(c) standalone Waits". The owner asked whether every Step kind could chain: "I think it could make sense to allow all three to chain in any sequence, When Given Then." Challenged, the owner answered: "Looks good to me, keep it as is." A Scenario is the lab's own subject matter: an engineer reads it, inserts a Step, removes one, reorders them, and runs it again.
+
+On 2026-10-08, reading the three sources once the layout had landed, the owner found the prose above the Steps restating them: "I find the comments in the Scenarios way too long. How about just a short description of the high-level intention, like in the README?" Reading the trimmed comments, the owner withdrew the name-first form: "The Scenario comment repeats the function name ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding. This is not needed and not great; just describe the intention of the Scenario." Shown the comment above `package scenarios`, the owner answered: "I would remove this comment also."
 
 The slice left one case open: the Scenario whose Placement settles with Pods still Pending. REQ-SIM-011's Scenario is that case — one Zone stops responding, and the Nodes still responding have room for six of the nine Pods. A Wait for every Pod Ready would end such a Scenario at that Wait, after waiting the lab's whole waiting time. The state it needs is the one `AwaitSettled` already holds for, and the glossary already names that state Settled.
 
@@ -111,19 +115,42 @@ Where the line reads the stated time from:
 35. **A marker beside the budget** — the plain form keeps delegating with the waiting time, and the Step records that the Scenario did not state it.
 36. **The budget compared on the line** — `internal/lab` reads the waiting time and prints no stated time where the two agree, which a Wait stating ninety seconds reads wrong.
 
+How a Then after a When judges, before a Scenario wrote its Wait:
+
+37. **One observation per Scenario** — every Then judges the Placement the Scenario first settled at, so a Then after a When judges the Placement from before the Failure.
+38. **A When discards the observation it injected into** — the next Step needing a Placement awaits a fresh Settled one, and no Scenario line states a wait.
+39. **A settle Step a Scenario writes** — the Scenario carries a waiting time of its own, which the owner declined on 2026-10-03.
+
+Which form the lab's own Scenarios write, with options 4 and 5 in force:
+
+40. **The chained form wherever a Given precedes the Wait** — the shortest Scenario, the form first committed.
+41. **The chained form wrapped over several lines** — the same chain, its calls no longer on one line.
+42. **A Step of its own throughout** — every line one Step, opened on the Scenario.
+43. **Any Step kind chainable in any sequence** — `Given`, `When` and `Then` in one expression.
+
+What a Scenario's doc comment states:
+
+44. **The Steps in prose** — the comments first written, which restate the lines below them.
+45. **The function's name first** — Go's doc convention, which the owner withdrew.
+46. **The intention alone** — a sentence or two, as the README beside the Scenarios gives it.
+
 ## Decision
 
 Options 2, 4 and 5, 8 and 9, 14 and 18. A Wait is the fourth Step kind: a Given declares, a When changes the cluster, a Wait waits for a state of it, a Then judges. It is written `WaitFor()`, on the Scenario or on the Given before it. A Given's `WaitFor()` returns a type offering the one Wait that fits what it declared. A chain therefore reaches no other Step, and every Wait is written through `WaitFor()`. The Scenario's own `WaitFor()` offers both Waits, and `When()` keeps the Failures alone. Either form reports the same line, after the Given's own, with the time it took: `Wait for all Pods Ready, reached in 6.5s`. That time is measured from the Step before it, so a reader of a restore time reasons about one Wait rather than about the run. The Step carries it as a value of its own rather than inside its name, so what a Step is named stays what its line says. `within` names no measurement: it names the bound on the Wait's own name, `AllPodsReadyWithinSeconds`.
 
 `AllPodsReady` holds until every Pod the Workloads declared reports the Ready condition, `AllNodesReady` until every Node the Topology declared reports it. Beneath either the lab observes that the Placement has stopped changing, so the Thens after a Wait judge a Settled Placement. The Pod wait is a second wait over the polling loop `AwaitSettled` already runs. A Wait for a Placement that settles with Pods Pending is a later slice, and so is a waiting time a Wait names itself.
 
-A Given declares, and the first Step after its line applies what it declared, which this grammar makes a Wait. One line's further calls therefore reach the cluster once, and `ApplyTopology` stays create-only. A Failure When applies nothing and waits for nothing beforehand. It reads the Placement the last Wait reached, which is the moment its Required Capacity is judged at, per [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md). A Then, or a Failure, with no Wait since the Given or the Failure before it ends the Scenario at that Step. A Scenario with no Wait after its Givens therefore ends at its first Then, with nothing deployed. A Wait the lab's waiting time outlasts ends it there, naming what was not Ready. Two Waits in a row are admitted, and a Wait for every Pod before any Workload is declared waits for no Pod.
+A Given declares, and the first Step after its line applies what it declared, which this grammar makes a Wait. One line's further calls therefore reach the cluster once, and `ApplyTopology` stays create-only. A Failure When applies nothing and waits for nothing beforehand. It discards the observation it injected into, as option 38 had it. It reads the Placement the last Wait reached, which is the moment its Required Capacity is judged at, per [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md). A Then, or a Failure, with no Wait since the Given or the Failure before it ends the Scenario at that Step. A Scenario with no Wait after its Givens therefore ends at its first Then, with nothing deployed. A Wait the lab's waiting time outlasts ends it there, naming what was not Ready. Two Waits in a row are admitted, and a Wait for every Pod before any Workload is declared waits for no Pod.
 
 Options 20, 23 and 25. A Wait states the time it must be reached in as a second name per Wait, `AllPodsReadyWithinSeconds` and `AllNodesReadyWithinSeconds`, in whole seconds, on the Scenario's own `WaitFor()` and on a Given's alike. The plain name states none, and is held to the lab's own waiting time, so every Wait is held to a time. The time belongs to the name rather than to an argument: a Scenario reads one call, and the Step vocabulary takes no further type.
 
 The lab's own waiting time moves to `internal/scenario`, beside the unresponsive-Node wait already there. It is what a stated time is refused against, so that refusal is the domain core's own and the Step surface carries no bound of its own. A time of no seconds, and one above that waiting time, are refused at the Wait, named with the waiting time the lab can hold it to.
 
 A Wait waits the lab's own waiting time whatever it states, and the time it took is judged against the time it stated once reached. A Wait reached later ends the Scenario at that Step, its line naming the time it was held to. A Wait the lab's own waiting time outlasts ends it as before, named with what was not Ready: what held the Wait open is more use than the time it missed. Both Failure Scenarios state thirty seconds on the Wait after their Failure — some three times the slowest restore measured, and a third of the lab's own waiting time — so a loaded machine reports a restore rather than a Finding. Every run reports the lab's own waiting time at its start, beside the control-plane settings it sets.
+
+Option 42, since 2026-10-07. Every Scenario of the lab writes each Wait as a Step of its own, so each of its lines is one Step opened on `s`. Such a line is inserted, removed or reordered on its own, which is what tinkering with a Scenario means. Options 40 and 41 are set aside: a chain reads as an expression and keeps the Step kind off the column a reader scans. The chained form stays offered to an engineer writing a Scenario, and the Step-surface tests exercise both. A Given's `WaitFor()` earns its place by scope: the compiler offers the one Wait fitting what that Given declared. Option 43 is declined: a general chain buys syntax rather than scope, and a line's Step kind stops being its opener. The Scenarios' own rule test reads the layout off the sources, as it reads the Step-ordering rules.
+
+Option 46, since 2026-10-08. A Scenario's doc comment states in a sentence or two what it is for. It names neither its own function nor a Step, Wait, time or count: the lines below it hold those. The place the Scenarios sit in carries no package comment, the README beside them holding what it holds.
 
 Options 26 and 29. `PlacementSettled` is the third Wait, with `PlacementSettledWithinSeconds` beside it as options 20, 23 and 25 fixed for the two before it. Its line reads `Wait for the Placement Settled, reached in 12.4s`. It holds for what `AwaitSettled` already holds for, so the predicate reaching the cluster is the one the two Ready Waits sit on. Every declared Pod is accounted for there, placed or not, so a Placement holding Pending Pods settles. One written before any Workload is declared is reached at once, as a Wait with nothing to wait for is.
 
@@ -146,6 +173,8 @@ A Scenario states a restore time, so the lab judges recovery rather than only re
 The lab's Waits are three states and six calls, which the next Wait option weighs again. A Scenario expecting Pods to stay Pending reads its intent on two lines: the Wait that holds for a Settled Placement, and the Then that counts the Pods left Pending. A Workload meeting its minimum with Pods Pending reports no Finding. Required Capacity is judged at the same two moments as before, per [ADR: A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md). The Scenario-place rules carry the new Wait in the names they read a line's kind by, so a Wait those rules do not know is still reported.
 
 A reader tells the time the cluster took from the time the Scenario allowed it, on the Wait's own line and without reading the Scenario. The three Wait kinds read alike. A Wait the lab's own waiting time outlasts names that time on its line as well as what was not Ready, so the two misses read the same way. `internal/lab` derives the waiting time no longer, and the Step surface carries no bound of its own. A Wait's Step carries four values where it carried two, because a line that drops the measured time on a miss cannot be read off two durations. Every line constant a test matches on moves with the wording, and so does every line quoted beside the Scenarios.
+
+A Failure Scenario of the lab reads two lines longer than the chained form, and every line of it starts with `s.`. No Scenario of the lab writes the chained form, so the Step-surface tests alone assert its scoping. A Scenario added later is held to the layout by the rule test rather than by review. Its doc comment is held by review, because the scanner the rule tests run parses each file without comments. Go's name-first doc convention is set aside, and a package comment with it: `revive`'s `exported` and `package-comments` rules are off, and `godot` checks the closing period alone.
 
 ## Implementation
 

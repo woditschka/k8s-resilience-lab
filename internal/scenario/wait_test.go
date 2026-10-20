@@ -11,22 +11,15 @@ import (
 )
 
 const (
-	// theWaitingTimeInSeconds is the lab's own waiting time in the whole seconds a
-	// Wait states a time in, which is the longest time a Wait may state.
 	theWaitingTimeInSeconds = int(scenario.WaitingTime / time.Second)
 
-	// aTimeAWaitStates is a time well inside that waiting time, and aMomentOfIt the
-	// margin the judgement below is read on either side of it.
 	aTimeAWaitStates = 15
 	aMomentOfIt      = 100 * time.Millisecond
 
-	// noSecondsAtAll and aNegativeTime are the times no state of the cluster is
-	// reached in, so a Wait stating one of them is refused.
 	noSecondsAtAll = 0
 	aNegativeTime  = -1
 )
 
-// aStatedWaitOf is the time a Wait of that many whole seconds is held to.
 func aStatedWaitOf(t *testing.T, seconds int) scenario.StatedWait {
 	t.Helper()
 
@@ -71,19 +64,15 @@ func TestAWaitStatingATimeAboveTheLabsOwnWaitingTime_ShouldBeRefusedNamingThatWa
 	}
 }
 
-// The lab's own waiting time is the longest a Wait may state and the time a Wait
-// stating none is held to, so it is admitted rather than refused as above itself.
 func TestAWaitStatingTheLabsOwnWaitingTime_ShouldBeHeldToExactlyThatTime(t *testing.T) {
 	stated := aStatedWaitOf(t, theWaitingTimeInSeconds)
 
 	expect.Expect(t, stated.HeldTo()).To(expect.Equal(scenario.WaitingTime))
 }
 
-// A Wait stating no time is held to the lab's own waiting time, so every Wait has
-// a time, and it carries no statement of one. The statement travels beside the
-// time rather than being re-derived from it, because a line naming the time a
-// Wait was held to marks a stated time and leaves the lab's own waiting time
-// unmarked: a reader never reads that bound for a time a Scenario chose.
+// The statement travels beside the time rather than being re-derived from it,
+// because a Wait's line marks a stated time and leaves the lab's own waiting
+// time unmarked.
 func TestTheTimeAWaitIsHeldTo_ShouldBeTheTimeItStatesOrTheLabsOwnWaitingTimeWhereItStatesNone(t *testing.T) {
 	waits := map[string]struct {
 		held   scenario.StatedWait
@@ -110,8 +99,8 @@ func TestTheTimeAWaitIsHeldTo_ShouldBeTheTimeItStatesOrTheLabsOwnWaitingTimeWher
 	}
 }
 
-// A Wait is judged once it is reached, so the time read against the time stated
-// is the whole wait and a Wait reached at the time it states is reached in it.
+// A Wait is judged once it is reached, so a Wait reached exactly at the time it
+// states is reached in it.
 func TestTheTimeAWaitTook_ShouldBeReachedOnlyWhereItIsWithinTheTimeStated(t *testing.T) {
 	stated := aStatedWaitOf(t, aTimeAWaitStates)
 

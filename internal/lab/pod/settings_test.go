@@ -13,9 +13,8 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// A setting the lab offers is Kubernetes' own type under its own name, holding
-// fields of Kubernetes' names alone, so a Scenario's literal reads as the
-// manifest it becomes (docs/adr/2026-10-18-pod-and-node-settings-are-keyed-literals-refused-at-their-given.md).
+// Kubernetes' own field names let a Scenario's literal read as the manifest it
+// becomes.
 func TestASettingsFields_ShouldBeFieldsOfTheKubernetesTypeOfItsName(t *testing.T) {
 	settings := map[string]struct {
 		offered    reflect.Type
@@ -39,17 +38,15 @@ func TestASettingsFields_ShouldBeFieldsOfTheKubernetesTypeOfItsName(t *testing.T
 	}
 }
 
-// Kubernetes has no type for one Pod's requests, so a Request's fields are the
-// resource names a Pod asks for under.
+// Kubernetes has no type for one Pod's requests.
 func TestARequestsFields_ShouldBeTheResourceNamesAPodAsksForUnder(t *testing.T) {
 	expect.Expect(t, lowercaseFieldsOf(reflect.TypeFor[pod.Request]())).
 		To(expect.Equal([]string{string(corev1.ResourceCPU), string(corev1.ResourceMemory)}))
 }
 
-// Every value the pod package offers is the domain's own spelling, which
-// internal/scenario's mapping test pins to the client library's constant, and
-// pod.Gi is the unit node.Gi spells, so a request and a capacity are written in
-// one unit.
+// internal/scenario's mapping test pins each spelling to the client library's
+// constant. pod.Gi is the unit node.Gi spells, so a request and a capacity are
+// written in one unit.
 func TestThePodValues_ShouldBeTheDomainsOwnSpelling(t *testing.T) {
 	expect.Expect(t, []string{string(pod.DoNotSchedule), string(pod.Honor), string(pod.Exists), string(pod.Equal), string(pod.NoExecute), string(pod.NoSchedule)}).
 		To(expect.Equal([]string{
@@ -58,8 +55,6 @@ func TestThePodValues_ShouldBeTheDomainsOwnSpelling(t *testing.T) {
 	expect.Expect(t, pod.Gi).To(expect.Equal(node.Gi))
 }
 
-// fieldsMissingFrom is every field of offered the Kubernetes type holds no field
-// of that name for.
 func fieldsMissingFrom(kubernetes, offered reflect.Type) []string {
 	var missing []string
 	for field := range offered.Fields() {

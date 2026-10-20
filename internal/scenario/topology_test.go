@@ -7,17 +7,14 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// The dimensions a Node capacity is stated in, where a test here states one at
-// all: no test turns on the numbers, the Workload tests being where a capacity
-// matters. The cpu is the millicores and the memory the mebibytes the two
-// quantity types hold.
+// No test here turns on these numbers; the Workload tests are where a capacity
+// matters.
 const (
 	somePodsPerNode   = 10
 	someCPUPerNode    = scenario.CPU(4000)
 	someMemoryPerNode = scenario.Memory(16384)
 )
 
-// aCapacity is the named default for a Node capacity no test cares about.
 func aCapacity(t *testing.T) scenario.NodeCapacity {
 	t.Helper()
 
@@ -29,12 +26,8 @@ func aCapacity(t *testing.T) scenario.NodeCapacity {
 	return capacity
 }
 
-// theGeneralNodePool is the name of the one NodePool a test turns on nothing but
-// the Zones and Nodes of.
 const theGeneralNodePool = "general"
 
-// topologyOfTheGeneralNodePool is a Topology of zones Zones each holding the one
-// NodePool general of nodesPerZone Nodes at capacity.
 func topologyOfTheGeneralNodePool(zones, nodesPerZone int, capacity scenario.NodeCapacity) (scenario.Topology, error) {
 	pool, err := scenario.NewNodePool(theGeneralNodePool, nodesPerZone, capacity)
 	if err != nil {
@@ -88,8 +81,7 @@ func TestTwoRunsOfTheSameTopology_ShouldReportTheSameZoneAndNodeNames(t *testing
 	expect.Expect(t, secondRun.Nodes()).To(expect.Equal(firstRun.Nodes()))
 }
 
-// A Node always has room for a Pod that asks for something, so each of the three
-// dimensions is refused at none where it is stated.
+// A Node always has room for a Pod that asks for something.
 func TestANodeCapacityOfNoPodNoCpuOrNoMemory_ShouldBeRefusedWhereItIsStated(t *testing.T) {
 	const noPodAtAll, noCPUAtAll, noMemoryAtAll = 0, scenario.CPU(0), scenario.Memory(0)
 
@@ -114,7 +106,6 @@ func TestANodeCapacityOfNoPodNoCpuOrNoMemory_ShouldBeRefusedWhereItIsStated(t *t
 	}
 }
 
-// aNodePool is a NodePool of the name, Node count and capacity stated.
 func aNodePool(t *testing.T, name string, nodesPerZone int, capacity scenario.NodeCapacity) scenario.NodePool {
 	t.Helper()
 
@@ -126,9 +117,8 @@ func aNodePool(t *testing.T, name string, nodesPerZone int, capacity scenario.No
 	return pool
 }
 
-// A Zone's Nodes are counted from one through its NodePools in the order the
-// Topology declares them, so a Node's name stays positional and only its NodePool
-// tells a Node of one kind from another (docs/prd.md REQ-SIM-013).
+// A Node's name stays positional, so only its NodePool tells a Node of one kind
+// from another.
 func TestTheNodesOfAZone_ShouldBeNumberedThroughItsNodePoolsInDeclarationOrder(t *testing.T) {
 	const twoZones, twoNodesPerZone, oneNodePerZone, gpu = 2, 2, 1, "gpu"
 	const aLargerNodeHoldsTwiceAsMuch = 2
@@ -156,10 +146,8 @@ func TestTheNodesOfAZone_ShouldBeNumberedThroughItsNodePoolsInDeclarationOrder(t
 	}))
 }
 
-// A NodePool of no Node, one stating no name, and one whose name no Kubernetes
-// label value can hold, are refused where they are stated (docs/prd.md
-// REQ-SIM-013 edge cases 1, 3 and 5). The names the rule admits and refuses are
-// pinned to the client library's own in internal/cluster.
+// The names the rule admits and refuses are pinned to the client library's own
+// in internal/cluster.
 func TestANodePoolOfNoNodeNoNameOrANameNoLabelCanHold_ShouldBeRefused(t *testing.T) {
 	const noNode, someNodesPerZone, someName, noName, aNameNoLabelCanHold = 0, 1, "gpu", "", "gpu nodes"
 
@@ -183,9 +171,6 @@ func TestANodePoolOfNoNodeNoNameOrANameNoLabelCanHold_ShouldBeRefused(t *testing
 	}
 }
 
-// A Named Node capacity states its name and its capacity, so one without either
-// is refused where it is defined (docs/prd.md REQ-SIM-015). The package defines
-// no name of its own: every name is one a Scenario gives.
 func TestANamedNodeCapacityOfNoNameOrNoCapacity_ShouldBeRefusedWhereItIsDefined(t *testing.T) {
 	const someName, noName = "Large", ""
 	var noNodeCapacity scenario.NodeCapacity
@@ -209,8 +194,6 @@ func TestANamedNodeCapacityOfNoNameOrNoCapacity_ShouldBeRefusedWhereItIsDefined(
 	}
 }
 
-// A Named Node capacity stands for the capacity it is defined with, under the
-// name a Scenario gives it.
 func TestANamedNodeCapacity_ShouldStandForTheNameAndCapacityItIsDefinedWith(t *testing.T) {
 	const aNameOfItsOwn = "Large"
 	capacity := aCapacity(t)
@@ -224,11 +207,8 @@ func TestANamedNodeCapacity_ShouldStandForTheNameAndCapacityItIsDefinedWith(t *t
 	expect.Expect(t, named.Capacity()).To(expect.Equal(capacity))
 }
 
-// A NodePool states its Node capacity or names one its Scenarios define, so the zero
-// capacity no constructor builds is refused where it is stated. On the Step
-// surface a NodePool omitting its capacity, or a capacity omitting its Pod
-// count, does not compile, so this zero value is the one omission left to
-// refuse at run time.
+// On the Step surface a NodePool omitting its capacity does not compile, so
+// this zero value is the one omission left to refuse at run time.
 func TestANodePoolStatingNoCompleteNodeCapacity_ShouldBeRefusedWhereItIsStated(t *testing.T) {
 	const someName, someNodesPerZone = "general", 1
 	var noNodeCapacity scenario.NodeCapacity
@@ -240,9 +220,6 @@ func TestANodePoolStatingNoCompleteNodeCapacity_ShouldBeRefusedWhereItIsStated(t
 	}
 }
 
-// A Topology holds at least one NodePool, and each of its NodePools can be told
-// from every other, so no two share a name (docs/prd.md REQ-SIM-013 edge cases 2
-// and 5).
 func TestATopologyOfNoNodePoolOrOfTwoNodePoolsUnderOneName_ShouldBeRefused(t *testing.T) {
 	const someZones, someNodesPerZone, someName = 2, 1, "gpu"
 

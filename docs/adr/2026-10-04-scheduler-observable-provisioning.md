@@ -25,7 +25,7 @@ The wait stays inside `ApplyTopology`. A Workload deployed without it reports a 
 
 Option 1 is rejected because the snapshot is not API-observable: no agreement count over the API proves anything about it, and a wider interval is a guessed length.
 
-Option 2 is rejected on the lab's own subject. While a domain is missing, a declared count makes the scheduler treat the global minimum as zero, so each domain holds one Pod at a maximum Skew of one: a lost Zone leaves seven of nine Pods Pending, and a lost Node leaves one. That is the outcome [ADR: A Scenario's Workload declares the spread of its own Pods](2026-10-04-scenario-declared-pod-spread.md) rejects Pod anti-affinity for.
+Option 2 is rejected on the lab's own subject. While a domain is missing, a declared count makes the scheduler treat the global minimum as zero, so each domain holds one Pod at a maximum Skew of one: a lost Zone leaves seven of nine Pods Pending, and a lost Node leaves one. That is the outcome [ADR: A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md) rejects Pod anti-affinity for.
 
 Option 3 is rejected because a Node returning from a Failure legitimately leaves a Skew above the declared maximum, spread never being re-evaluated. The check would fail the Scenarios the lab exists to run.
 
@@ -46,5 +46,5 @@ A Scenario's own constraints are unchanged, so what the lab observes stays the s
 ## References
 
 - [system-design.md § Contracts](../system-design.md)
-- [ADR: A Scenario's Workload declares the spread of its own Pods](2026-10-04-scenario-declared-pod-spread.md)
+- [ADR: A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
 - [ADR: The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md)

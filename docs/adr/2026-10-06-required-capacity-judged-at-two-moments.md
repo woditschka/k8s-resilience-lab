@@ -6,7 +6,7 @@
 
 The owner named the property the lab is ultimately for: a cluster serves its Required Capacity through a Failure, and the assertions carry that as a first-class citizen. The owner placed the declaration on the Workload and named the property Failure tolerance.
 
-Every Then awaits the Settled Placement, so the moment a Failure was injected has no observation of its own. The control plane goes on reporting a failed Node's Pods Running for the eviction wait, per [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md). An observation taken right after the Failure would therefore read every Pod Running and prove nothing.
+When this was decided, every Then awaited the Settled Placement, so the moment a Failure was injected has no observation of its own. The control plane goes on reporting a failed Node's Pods Running for the eviction wait, per [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md). An observation taken right after the Failure would therefore read every Pod Running and prove nothing.
 
 The When already holds two things at that moment: the Settled Placement from before the Failure, and the Nodes it is stopping.
 

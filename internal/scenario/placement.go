@@ -5,81 +5,61 @@ import (
 	"slices"
 )
 
-// SpreadDomain is the axis a Placement's Skew is read over: how evenly a
-// Workload's Pods sit over the Zones of its Topology, or over its Nodes. A
-// Workload declares its spread as the settings of its Pod specification, so this
-// is a way of reading an observation and not a declaration.
+// SpreadDomain is a way of reading an observation and not a declaration, since
+// a Workload declares its spread through its Pod specification.
 type SpreadDomain string
 
 const (
-	// SpreadOverZones reads a Placement over the Zones of its Topology.
 	SpreadOverZones SpreadDomain = "Zones"
-	// SpreadOverNodes reads a Placement over the Nodes of its Topology.
 	SpreadOverNodes SpreadDomain = "Nodes"
 )
 
-// PodPhase is the phase the control plane reports for one observed Pod.
 type PodPhase string
 
 const (
-	// PodPending is a Pod the control plane has not placed on a Node, or has
-	// placed on one and that Pod is still inside its Startup time.
-	PodPending PodPhase = "Pending"
-	// PodRunning is a Pod placed on a Node and running there.
-	PodRunning PodPhase = "Running"
-	// PodSucceeded is a Pod whose containers all ran to completion.
+	// PodPending also covers a placed Pod still inside its Startup time.
+	PodPending   PodPhase = "Pending"
+	PodRunning   PodPhase = "Running"
 	PodSucceeded PodPhase = "Succeeded"
-	// PodFailed is a Pod whose containers stopped and at least one failed.
-	PodFailed PodPhase = "Failed"
-	// PodUnknown is a Pod in a phase the lab does not name, so a phase the
-	// control plane reports can never reach a Scenario unread.
+	PodFailed    PodPhase = "Failed"
+	// PodUnknown covers a phase the lab does not name, so no reported phase
+	// reaches a Scenario unread.
 	PodUnknown PodPhase = "Unknown"
 )
 
-// Pod is one observed replica of a Workload, placed on a Node or left unplaced.
-// The name comes from the control plane, so the type carries no invariant of its
-// own.
+// Pod carries no invariant of its own, since its name comes from the control
+// plane.
 type Pod struct {
 	Name string
-	// Node is the Node this Pod is placed on, empty while it is unplaced.
+	// Node is empty while the Pod is unplaced.
 	Node  string
 	Phase PodPhase
-	// Ready is whether the control plane reports this Pod's Ready condition true,
-	// which is the condition a Wait for every Pod Ready holds until, per
-	// docs/adr/2026-10-07-a-scenario-writes-its-own-wait.md.
 	Ready bool
 }
 
-// Placed reports whether the control plane has put this Pod on a Node.
 func (p Pod) Placed() bool {
 	return p.Node != ""
 }
 
-// Placement is where a Workload's Pods sit at one observation, read against the
-// Nodes that could have held them. A Node or a Zone holding no Pod is counted as
-// zero, so an empty domain is visible in the report rather than missing from it.
+// Placement counts a Node or a Zone holding no Pod as zero, so an empty domain
+// is visible in the report rather than missing from it.
 type Placement struct {
 	nodes []Node
 	pods  []Pod
 }
 
-// NewPlacement records one observation of a Workload against the Nodes observed
-// with it.
 func NewPlacement(nodes []Node, pods []Pod) Placement {
 	return Placement{nodes: slices.Clone(nodes), pods: slices.Clone(pods)}
 }
 
-// Nodes are the Nodes this observation was read against.
 func (p Placement) Nodes() []Node {
 	return slices.Clone(p.nodes)
 }
 
-// Pods are the Pods this observation found, in the order they were observed.
 func (p Placement) Pods() []Pod {
 	return slices.Clone(p.pods)
 }
 
-// PodsInPhase are the observed Pods the control plane reports in phase.
 func (p Placement) PodsInPhase(phase PodPhase) []Pod {
 	var inPhase []Pod
 	for _, pod := range p.pods {
@@ -91,10 +71,8 @@ func (p Placement) PodsInPhase(phase PodPhase) []Pod {
 	return inPhase
 }
 
-// PodsNotReady are the observed Pods the control plane does not report Ready, in
-// the order they were observed. A Wait for every Pod Ready names them when the
-// lab's waiting time outlasts it, so a reader of an expired Wait sees which Pods
-// held it open.
+// PodsNotReady are what a Wait for every Pod Ready names when it expires, so a
+// reader sees which Pods held it open.
 func (p Placement) PodsNotReady() []Pod {
 	var notReady []Pod
 	for _, pod := range p.pods {
@@ -106,11 +84,9 @@ func (p Placement) PodsNotReady() []Pod {
 	return notReady
 }
 
-// PodsStarting are the observed Pods the control plane has placed on a Node and
-// still reports Pending: Pods inside their Startup time, in the order they were
-// observed. Such a Pod has not stopped changing, so a Placement holding one is
-// not yet Settled (docs/prd.md REQ-SIM-012). An unplaced Pod is not starting: it
-// stays Pending until a Node has room for it.
+// PodsStarting are Pods that have not stopped changing, so a Placement holding
+// one is not yet Settled. An unplaced Pod is not starting: it stays Pending
+// until a Node has room for it.
 func (p Placement) PodsStarting() []Pod {
 	var starting []Pod
 	for _, pod := range p.pods {
@@ -122,10 +98,8 @@ func (p Placement) PodsStarting() []Pod {
 	return starting
 }
 
-// PodsRunningApartFrom are the observed Pods the control plane reports Running on
-// a Node other than the ones named, which is what a Workload kept at the moment a
-// Failure stopped those Nodes. A Pod the control plane has placed nowhere is on no
-// such Node and is among none of them.
+// PodsRunningApartFrom is what a Workload kept at the moment a Failure stopped
+// those Nodes. An unplaced Pod is among none of them.
 func (p Placement) PodsRunningApartFrom(nodes []string) []Pod {
 	stopped := make(map[string]struct{}, len(nodes))
 	for _, node := range nodes {
@@ -142,9 +116,8 @@ func (p Placement) PodsRunningApartFrom(nodes []string) []Pod {
 	return kept
 }
 
-// PodsPerNode counts this Workload's Pods on each observed Node, an empty Node
-// included as zero. A Pod on a Node this observation does not hold is counted
-// under that Node's name, because the report states what was observed.
+// PodsPerNode still counts a Pod on a Node this observation does not hold under
+// that Node's name, because the report states what was observed.
 func (p Placement) PodsPerNode() map[string]int {
 	counts := make(map[string]int, len(p.nodes))
 	for _, node := range p.nodes {
@@ -159,18 +132,14 @@ func (p Placement) PodsPerNode() map[string]int {
 	return counts
 }
 
-// PodsPerZone counts this Workload's Pods in each observed Zone, an empty Zone
-// included as zero. A Pod on a Node this observation does not hold belongs to no
-// known Zone and is counted in none.
+// PodsPerZone counts a Pod on a Node this observation does not hold in no Zone,
+// since it belongs to no known Zone.
 func (p Placement) PodsPerZone() map[string]int {
 	return p.podsPerGroup(func(node Node) string { return node.Zone })
 }
 
-// PodsPerLabelValue counts this Workload's Pods under each value of key the
-// observed Nodes carry, a value whose Nodes hold no Pod included as zero. A Pod
-// on a Node carrying no value of key, or on a Node this observation does not
-// hold, is counted under none, per
-// docs/adr/2026-10-18-a-nodepool-states-its-own-node-labels-beside-the-labs.md.
+// PodsPerLabelValue counts under none a Pod on a Node carrying no value of key,
+// or on a Node this observation does not hold.
 func (p Placement) PodsPerLabelValue(key string) map[string]int {
 	valueOf := make(map[string]string, len(p.nodes))
 	counts := make(map[string]int)
@@ -189,17 +158,12 @@ func (p Placement) PodsPerLabelValue(key string) map[string]int {
 	return counts
 }
 
-// PodsPerNodePool counts this Workload's Pods on each observed NodePool's Nodes,
-// a NodePool whose Nodes hold no Pod included as zero. A Pod on a Node this
-// observation does not hold belongs to no known NodePool and is counted in none.
+// PodsPerNodePool counts a Pod on a Node this observation does not hold in no
+// NodePool, since it belongs to no known NodePool.
 func (p Placement) PodsPerNodePool() map[string]int {
 	return p.podsPerGroup(func(node Node) string { return node.NodePool })
 }
 
-// podsPerGroup counts this Workload's placed Pods in each group of observed
-// Nodes, the group of a Node being what groupOf reads off it, a group holding no
-// Pod included as zero. A Pod on a Node this observation does not hold is
-// counted in no group.
 func (p Placement) podsPerGroup(groupOf func(Node) string) map[string]int {
 	groupOfNode := make(map[string]string, len(p.nodes))
 	counts := make(map[string]int)
@@ -216,14 +180,10 @@ func (p Placement) podsPerGroup(groupOf func(Node) string) map[string]int {
 	return counts
 }
 
-// PodsItCannotAccountFor are the Pods this observation found on a Node it was
-// not read against. It can name no Zone for such a Pod, so it counts it in none,
-// which is why the Placement reports it rather than passing it over.
-//
-// An unplaced Pod is accounted for: the observation holds no Node for it because
-// the control plane has placed it nowhere, which the Placement already states.
-// A Pod on a Node that has left the observation is the other case — a Node that
-// stopped responding still holding a Pod the control plane has yet to move.
+// PodsItCannotAccountFor reports the Pods the observation can name no Zone for
+// rather than passing them over. Such a Pod is still held by a Node that
+// stopped responding, and the control plane has yet to move it; an unplaced
+// Pod is accounted for.
 func (p Placement) PodsItCannotAccountFor() []Pod {
 	held := make(map[string]struct{}, len(p.nodes))
 	for _, node := range p.nodes {
@@ -240,8 +200,6 @@ func (p Placement) PodsItCannotAccountFor() []Pod {
 	return unaccounted
 }
 
-// Skew is the gap between the fullest and the emptiest domain of this
-// observation: zero when every domain holds the same number of Pods.
 func (p Placement) Skew(domain SpreadDomain) int {
 	counts := p.countsOver(domain)
 	if len(counts) == 0 {
@@ -257,7 +215,6 @@ func (p Placement) Skew(domain SpreadDomain) int {
 	return fullest - emptiest
 }
 
-// countsOver is this observation's Pod count per domain member.
 func (p Placement) countsOver(domain SpreadDomain) map[string]int {
 	if domain == SpreadOverNodes {
 		return p.PodsPerNode()
@@ -266,10 +223,8 @@ func (p Placement) countsOver(domain SpreadDomain) map[string]int {
 	return p.PodsPerZone()
 }
 
-// Equal reports whether two observations found the same Pods on the same Nodes,
-// which is what AwaitSettled compares consecutive observations through. It is
-// also the equality go-cmp compares this type through, since its fields are
-// unexported.
+// Equal is what AwaitSettled compares consecutive observations through, and
+// go-cmp too, since the fields are unexported.
 func (p Placement) Equal(other Placement) bool {
 	return slices.EqualFunc(p.nodes, other.nodes, Node.Equal) && slices.Equal(p.pods, other.pods)
 }

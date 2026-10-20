@@ -83,7 +83,7 @@ The same command holds the lab to its declared dependencies, free of known vulne
 4. A run names a Kubernetes version the lab cannot obtain. The run stops and names that version before any Scenario starts.
 5. The container runtime cannot start one Scenario's Simulated Cluster while others start. That Scenario ends at its first Step and names why, and the others run on.
 
-**ADR:** [ADR: Kubernetes version pin](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: The lab provisions the Simulated Cluster it drives](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: Each Scenario provisions its own Simulated Cluster](adr/2026-10-04-cluster-per-scenario.md) · [ADR: A Scenario's Workload declares the spread of its own Pods](adr/2026-10-04-scenario-declared-pod-spread.md)  ·  **Design:** [system-design.md](system-design.md)
+**ADR:** [ADR: Kubernetes version pin](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: The lab provisions the Simulated Cluster it drives](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: A Workload declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ### Declaring a Workload's Pods
 
@@ -108,7 +108,7 @@ A Scenario states the intent behind its Workload, not the settings carrying it o
 4. Full access leaves out a setting the lab depends on. That setting holds and the Workload is deployed.
 5. Full access names a setting the control plane refuses. The Scenario ends at the Step deploying its Workload, as for any refused Customization.
 
-**ADR:** [ADR: A Workload declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md) · [ADR: A Scenario's Workload declares the spread of its own Pods](adr/2026-10-04-scenario-declared-pod-spread.md) · [ADR: The Scenarios name leaving an unresponsive Node as one setting](adr/2026-10-18-the-scenarios-name-leaving-an-unresponsive-node-as-one-setting.md)  ·  **Design:** [system-design.md](system-design.md)
+**ADR:** [ADR: A Workload declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ### Stating what decides a Placement
 
@@ -398,7 +398,7 @@ Each name a Scenario writes shows the subject it belongs to, a Pod, a Node, or t
 2. A Customization writes another time for one of the two tolerations. The lab's waiting time holds, and the lines beneath the Given line report that time.
 3. A setting of several values leaves out a value Kubernetes would default. It is refused all the same, since no value deciding a Placement falls to a default. A Scenario needing a zero sets it through full access.
 
-**ADR:** [ADR: Every predefined Pod specification is defined by the Scenarios](adr/2026-10-18-every-pod-specification-is-defined-by-the-scenarios.md) · [ADR: The Scenarios name leaving an unresponsive Node as one setting](adr/2026-10-18-the-scenarios-name-leaving-an-unresponsive-node-as-one-setting.md) · [ADR: Scenario code stays idiomatic Go, read by subject](adr/2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)  ·  **Design:** [system-design.md](system-design.md)
+**ADR:** [ADR: A Workload declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md) · [ADR: Scenario code stays idiomatic Go, read by subject](adr/2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ## Superseded
 

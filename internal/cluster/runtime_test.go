@@ -12,13 +12,9 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 )
 
-// requireEngine is the one guard every test that needs a container engine goes
-// through. The engine is the real one on this machine's socket rather than a
-// double, per docs/system-design.md § Contracts, which § Security Context states
-// as the runtime assumption. A machine with no engine therefore cannot drive a
-// Simulated Cluster, and the calling test fails here naming why none answered;
-// it fails on its own, so every test that needs no engine still runs
-// (docs/testing-principles.md § Mocking Policy).
+// The engine is the real one on this machine's socket rather than a double.
+// requireEngine fails only the calling test where none answers, so every test
+// that needs no engine still runs.
 func requireEngine(t *testing.T) Endpoint {
 	t.Helper()
 
@@ -26,27 +22,23 @@ func requireEngine(t *testing.T) Endpoint {
 	if err != nil {
 		t.Fatalf("no container engine answers on this machine, so the Simulated Cluster cannot be driven: %v", err)
 	}
-	// Each test resolves the engine for itself, so each is the run that releases
-	// what it held open — the same lifecycle cmd/lab gives one endpoint per run.
+	// Each test is the run that releases what it held open, as cmd/lab does
+	// once per run.
 	t.Cleanup(endpoint.Close)
 
 	return endpoint
 }
 
-// discardedWarnings is the named default for a logger whose output no test reads.
 func discardedWarnings() *slog.Logger {
 	return slog.New(slog.DiscardHandler)
 }
 
-// recordedWarnings reads back what detection warned about.
 func recordedWarnings() (*slog.Logger, *bytes.Buffer) {
 	var written bytes.Buffer
 
 	return slog.New(slog.NewTextHandler(&written, nil)), &written
 }
 
-// aSocketThatIsNotThere is a path in the test's own directory where nothing
-// listens, so dialing it fails the way an absent engine does.
 func aSocketThatIsNotThere(t *testing.T) string {
 	t.Helper()
 
@@ -82,10 +74,8 @@ func TestADockerHostNamingADeadUnixSocket_ShouldFallThroughToALiveCandidate(t *t
 	}
 }
 
-// A DOCKER_HOST of another scheme could name an engine on another machine, which
-// the lab never drives (docs/system-design.md § Threat Model). The listener below
-// would answer a connection, so the count it keeps is the observation that none
-// was made.
+// The listener would answer a connection, so its count is the observation that
+// none was made.
 func TestADockerHostOfAnotherScheme_ShouldBeSkippedWithoutADialAndTheLiveCandidateUsed(t *testing.T) {
 	t.Parallel()
 	live := requireEngine(t)
@@ -113,12 +103,10 @@ func TestADockerHostOfAnotherScheme_ShouldBeSkippedWithoutADialAndTheLiveCandida
 	}
 }
 
-// The schemes the lab declines are the ones that can carry a user and a
-// password, and a declined value reaches both a warning and the run's final
-// error, which a reader pastes into an issue or a CI log. Neither may carry the
-// password (docs/security-principles.md § Trust Boundaries). A value is declined
-// on two branches: one that parses as a URL and is redacted, and one that does not
-// parse, whose url.Parse error quotes the raw value back.
+// A declined value reaches a warning and the run's final error, neither of
+// which may carry the password. A value is declined on two branches: one that
+// parses and is redacted, and one whose url.Parse error quotes the raw value
+// back.
 func TestADeclinedDockerHost_ShouldBeReportedWithoutItsPassword(t *testing.T) {
 	const password = "the-engine-password"
 	const passwordURLParseRejects = "the-engine-pass word"
@@ -157,13 +145,9 @@ func TestADeclinedDockerHost_ShouldBeReportedWithoutItsPassword(t *testing.T) {
 	}
 }
 
-// A value that does not parse is reported by its variable name and a fixed
-// cause, and by no part of the value itself. The shapes below are the ones whose
-// parse error quotes part of the input back: net/url quotes the whole value in
-// the *url.Error it wraps every cause in, three bytes of it at a bad percent
-// escape, and the port it read at a bad port. The first two can carry a part of a
-// password, and no part of any of them reaches a warning or the run's final error
-// (docs/security-principles.md § Trust Boundaries).
+// These are the shapes whose parse error quotes part of the input back: the
+// whole value in the *url.Error, three bytes at a bad percent escape, and the
+// port at a bad port.
 func TestAParseFailure_ShouldBeReportedWithoutTheValueThatFailed(t *testing.T) {
 	fixedCause := []string{dockerHostVariable + " (it is not a URL: " + unparsableCause + ")"}
 
@@ -210,8 +194,8 @@ func TestAParseFailure_ShouldBeReportedWithoutTheValueThatFailed(t *testing.T) {
 func TestADockerHostThatIsNotAURL_ShouldBeSkippedWithAWarningAndTheLiveCandidateUsed(t *testing.T) {
 	t.Parallel()
 	live := requireEngine(t)
-	// A percent escape that is not hexadecimal is the one DOCKER_HOST shape that
-	// does not parse as a URL at all.
+	// A non-hexadecimal percent escape is the one DOCKER_HOST shape that does
+	// not parse as a URL at all.
 	const notAURL = "unix://%zz"
 	warnings, written := recordedWarnings()
 
@@ -251,12 +235,8 @@ func TestWhenNoSocketAnswers_ShouldFailNamingEveryPathTriedAndWhy(t *testing.T) 
 	}
 }
 
-// aListenerCountingItsDials accepts on a loopback port and counts the connections
-// it is given, so a test can observe that the lab never opened one. A machine
-// that refuses the listener leaves the dial count unobservable, so the calling
-// test fails here naming why rather than skipping; it fails on its own, so every
-// test that needs no listener still runs (docs/testing-principles.md § Mocking
-// Policy).
+// A machine that refuses the listener leaves the dial count unobservable, so
+// the calling test fails here rather than skipping.
 func aListenerCountingItsDials(t *testing.T) (string, *atomic.Int64) {
 	t.Helper()
 

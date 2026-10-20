@@ -17,10 +17,7 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 )
 
-// admittedVersions are the shapes a run may name its Kubernetes version in, and
-// refusedValues the shapes that are not a version at all. Both tables seed the
-// fuzz corpus below, so a value either suite names is a value the fuzzer starts
-// from.
+// Both tables seed the fuzz corpus below.
 var (
 	admittedVersions = map[string]string{
 		"with a leading v":   "v1.36.1",
@@ -72,17 +69,9 @@ func TestAValueThatIsNotAVersion_ShouldBeRefusedBeforeAnyRequest(t *testing.T) {
 	}
 }
 
-// FuzzAnAdmittedVersion_ShouldReachTheImageTagAsDigitsAndDotsAlone is the
-// adversarial half of the two tables above: the tables name the values a reader
-// should see refused, and the fuzzer searches for a value neither table
-// anticipated that the version pattern admits anyway.
-//
-// The property is the one the version type exists for: whatever a run names, the
-// image a Simulated Cluster pulls is the pinned repository's KWOK image, and the
-// only part of its tag that comes from the run is digits and dots
-// (docs/adr/2026-10-03-kubernetes-version-pin.md). Asserting the composed
-// reference rather than the pattern keeps the test independent of how the
-// pattern is written.
+// The fuzzer searches for a value neither table anticipated that the version
+// pattern admits anyway. It asserts the composed image reference rather than
+// the pattern, so the test stays independent of how the pattern is written.
 func FuzzAnAdmittedVersion_ShouldReachTheImageTagAsDigitsAndDotsAlone(f *testing.F) {
 	for _, named := range admittedVersions {
 		f.Add(named)
@@ -115,20 +104,14 @@ func FuzzAnAdmittedVersion_ShouldReachTheImageTagAsDigitsAndDotsAlone(f *testing
 	})
 }
 
-// isNeitherDigitNorDot reports whether a rune is something other than the digits
-// and dots a version is made of.
 func isNeitherDigitNorDot(character rune) bool {
 	return !unicode.IsDigit(character) && character != '.'
 }
 
-// admittedParameters are the only types an exported method of the engine surface
-// may take. An image reference or a container identifier would widen the surface
-// from "the cluster this run created" to "anything on the machine", which the
-// engine socket cannot scope down for us
-// (docs/system-design.md § Threat Model, the engine-socket row).
+// An image reference or a container identifier would widen the surface to
+// anything on the machine, which the engine socket cannot scope down.
 var admittedParameters = []string{"context.Context", "KubernetesVersion"}
 
-// restrictedSurface are the types whose exported methods carry that restriction.
 var restrictedSurface = []string{"Engine", "ClusterContainer"}
 
 func TestNoExportedEngineMethod_ShouldTakeAnImageOrAContainerIdentifier(t *testing.T) {
@@ -148,9 +131,8 @@ func TestNoExportedEngineMethod_ShouldTakeAnImageOrAContainerIdentifier(t *testi
 	}
 }
 
-// listingEndpoints are the engine API paths that answer about containers or
-// images the lab did not create. The package names none of them, so it cannot
-// reach another container even by mistake.
+// The package names none of these paths, so it cannot reach another container
+// even by mistake.
 var listingEndpoints = []string{"/containers/json", "/images/json", "/containers/prune", "/images/prune"}
 
 func TestTheEngineSurface_ShouldNameNoEndpointThatListsOrPrunesTheMachine(t *testing.T) {
@@ -169,34 +151,21 @@ func TestTheEngineSurface_ShouldNameNoEndpointThatListsOrPrunesTheMachine(t *tes
 	}
 }
 
-// clusterCommandDeclaration is the package-level list a Simulated Cluster's
-// container is created with, and createRequestCommandKey the field of the create
-// request it is sent as.
 const (
 	clusterCommandDeclaration = "clusterArguments"
 	createRequestCommandKey   = "Cmd"
 )
 
-// TestTheContainersCommand_ShouldBeComposedFromThePackagesOwnConstantsAlone
-// asserts what a container start rests on: the command the cluster inside the
-// container is created with is written in this package and nowhere else, so no
-// run input reaches the image, the container or its arguments
-// (docs/system-design.md § Threat Model).
-//
-// It reads the package's own declarations like the two tests above, so it needs
-// no engine: a value composed at call time out of something a run supplied would
-// read here as an expression that is neither a literal nor one of this package's
-// constants. Both halves are needed — a command composed inline would leave the
-// constants untouched, and a constant list the request does not send proves
-// nothing about the container.
+// The command is read from the package's own declarations, so the test needs no
+// engine: a value composed from run input would read as an expression that is
+// neither a literal nor a package constant. Both halves are needed, since a
+// command composed inline would leave the constants untouched, and a constant
+// list the request does not send proves nothing.
 func TestTheContainersCommand_ShouldBeComposedFromThePackagesOwnConstantsAlone(t *testing.T) {
 	expect.Expect(t, commandSentToTheEngine(t)).To(expect.Equal(clusterCommandDeclaration))
 	expect.Expect(t, argumentsThatAreNoConstant(t)).To(expect.Equal([]string{}))
 }
 
-// argumentsThatAreNoConstant is every argument of the container's command that is
-// built from something other than a string literal and this package's own string
-// constants, as the source spells it.
 func argumentsThatAreNoConstant(t *testing.T) []string {
 	t.Helper()
 
@@ -212,10 +181,8 @@ func argumentsThatAreNoConstant(t *testing.T) []string {
 	return offenders
 }
 
-// composedOfConstants reports whether expression is built from string literals and
-// this package's own constants alone. A call, a variable, a parameter or a
-// conversion is none of those, and is the shape a run-supplied value would arrive
-// in.
+// A call, a variable, a parameter or a conversion is the shape a run-supplied
+// value would arrive in.
 func composedOfConstants(expression ast.Expr, constants map[string]ast.Expr) bool {
 	switch named := expression.(type) {
 	case *ast.BasicLit:
@@ -233,10 +200,8 @@ func composedOfConstants(expression ast.Expr, constants map[string]ast.Expr) boo
 	}
 }
 
-// commandSentToTheEngine is what the request creating a container names as that
-// container's command, as the source spells it. More than one such request, or
-// none, is itself a finding: the property holds over the one place the command is
-// sent from.
+// More than one such request, or none, is itself a finding: the property holds
+// over the one place the command is sent from.
 func commandSentToTheEngine(t *testing.T) string {
 	t.Helper()
 
@@ -261,8 +226,6 @@ func commandSentToTheEngine(t *testing.T) string {
 	return sent[0]
 }
 
-// fieldNameOf is the field a request body's key names, and empty for a key that
-// is no string literal at all.
 func fieldNameOf(pair *ast.KeyValueExpr) string {
 	key, isLiteral := pair.Key.(*ast.BasicLit)
 	if !isLiteral || key.Kind != token.STRING {
@@ -276,8 +239,6 @@ func fieldNameOf(pair *ast.KeyValueExpr) string {
 	return named
 }
 
-// stringConstantsOf is every package-level constant of this package, by name,
-// with the expression it is declared as.
 func stringConstantsOf(t *testing.T) map[string]ast.Expr {
 	t.Helper()
 
@@ -297,8 +258,6 @@ func stringConstantsOf(t *testing.T) map[string]ast.Expr {
 	return constants
 }
 
-// elementsOf is the elements of the package-level list variable named, as the
-// source declares them.
 func elementsOf(t *testing.T, named string) []ast.Expr {
 	t.Helper()
 
@@ -324,8 +283,6 @@ func elementsOf(t *testing.T, named string) []ast.Expr {
 	return nil
 }
 
-// valueSpecsOf is every value this declaration declares under kind, and nothing
-// for a declaration of another kind.
 func valueSpecsOf(declaration ast.Decl, kind token.Token) []*ast.ValueSpec {
 	general, isGeneral := declaration.(*ast.GenDecl)
 	if !isGeneral || general.Tok != kind {
@@ -342,16 +299,13 @@ func valueSpecsOf(declaration ast.Decl, kind token.Token) []*ast.ValueSpec {
 	return values
 }
 
-// exportedMethod is one exported method of the engine surface, as the package's
-// own source declares it.
 type exportedMethod struct {
 	receiver   string
 	name       string
 	parameters []string
 }
 
-// exportedMethodsOf is every exported method declared on one of receivers, read
-// from the package's own source rather than from reflection, so the assertion
+// The methods are read from source rather than reflection, so the assertion
 // covers the declaration a reviewer reads.
 func exportedMethodsOf(t *testing.T, receivers []string) []exportedMethod {
 	t.Helper()
@@ -379,8 +333,6 @@ func exportedMethodsOf(t *testing.T, receivers []string) []exportedMethod {
 	return methods
 }
 
-// parameterTypesOf is the type of every parameter of function, as the source
-// spells it.
 func parameterTypesOf(function *ast.FuncDecl) []string {
 	var types []string
 	for _, parameter := range function.Type.Params.List {
@@ -393,8 +345,6 @@ func parameterTypesOf(function *ast.FuncDecl) []string {
 	return types
 }
 
-// typeNameOf is the type an expression names, with the pointer, slice and
-// variadic markers stripped so that *ClusterContainer reads as ClusterContainer.
 func typeNameOf(expression ast.Expr) string {
 	switch named := expression.(type) {
 	case *ast.StarExpr:
@@ -412,13 +362,11 @@ func typeNameOf(expression ast.Expr) string {
 	}
 }
 
-// sourceLiteral is one string literal of the package, with where it is written.
 type sourceLiteral struct {
 	position string
 	value    string
 }
 
-// stringLiteralsOf is every string literal in the package's own source files.
 func stringLiteralsOf(t *testing.T) []sourceLiteral {
 	t.Helper()
 
@@ -448,16 +396,14 @@ func stringLiteralsOf(t *testing.T) []sourceLiteral {
 	return literals
 }
 
-// packageFiles are this package's own parsed source files.
 func packageFiles(t *testing.T) []*ast.File {
 	t.Helper()
 
 	return parsedWith(t, token.NewFileSet())
 }
 
-// parsedWith parses this package's own production source files into files. Test
-// files are left out: the rules asserted here govern what the lab's own shipped
-// code declares, and a test naming a forbidden path is how the test states it.
+// Test files are left out: a test naming a forbidden path is how the test
+// states the rule.
 func parsedWith(t *testing.T, files *token.FileSet) []*ast.File {
 	t.Helper()
 
@@ -482,25 +428,13 @@ func parsedWith(t *testing.T, files *token.FileSet) []*ast.File {
 	return parsed
 }
 
-// The engine socket grants control of every container on the machine, so the
-// property that matters is observed against the machine as it is: every container
-// that was already there is left exactly as it was, and the only container the
-// run adds and removes is its own.
+// Only containers the lab did not create going away is asserted, not the whole
+// inventory: another invocation of the lab may create and remove its own
+// Simulated Clusters meanwhile, which is the supported concurrent case. That
+// the lab cannot reach a foreign container is asserted from declarations by the
+// tests above; this one is the observable outcome on a real machine.
 //
-// What is asserted is that no container the lab did not create goes away while the
-// run goes on, not the whole inventory and not each container's state: another
-// invocation of the lab, or any other work on the machine, may create, start, stop
-// and — for a Simulated Cluster of its own — remove containers while this run goes
-// on, and that is the concurrent-invocation case the lab supports rather than a
-// breach (docs/adr/2026-10-04-cluster-per-scenario.md). assertUntouched below
-// states where that tolerance stops.
-// That the lab *cannot* reach a container it did not create is asserted from the
-// package's own declarations by the two tests above; this one is the observable
-// outcome of a run on a real machine.
-//
-// The inventory is read and never written. The only create, start and remove here
-// go through the lab's own code, and only for the cluster it created
-// (docs/system-design.md § Threat Model, the engine-socket row).
+// The inventory is read and never written.
 func TestARun_ShouldTouchNoContainerBesidesItsOwnSimulatedCluster(t *testing.T) {
 	t.Parallel()
 	engine := requireEngine(t)
@@ -529,16 +463,9 @@ func TestARun_ShouldTouchNoContainerBesidesItsOwnSimulatedCluster(t *testing.T) 
 	assertUntouched(t, standingBy, afterTheRun)
 }
 
-// assertUntouched reports any container that was on the engine before the run and
-// has since gone away, other than a Simulated Cluster of the lab's own.
-//
-// A lab-named container standing by is another invocation's Simulated Cluster, and
-// that invocation removes it when its own Scenario ends — inside this run's window
-// when the two overlap, which is the supported concurrent-invocation case and not
-// this run's doing. Tolerating it here is what keeps the assertion as wide as its
-// subject: every container the lab did not create, and so every container whose
-// removal would be a breach. That an invocation removes only the Simulated Cluster
-// it created is asserted where both identities are known, by
+// A lab-named container standing by is another invocation's Simulated Cluster,
+// which may be removed inside this run's window. That each invocation removes
+// only its own cluster is asserted by
 // TestConcurrentRuns_ShouldEachRemoveOnlyTheClusterTheyCreated.
 func assertUntouched(t *testing.T, before, now map[string]string) {
 	t.Helper()
@@ -554,10 +481,8 @@ func assertUntouched(t *testing.T, before, now map[string]string) {
 	}
 }
 
-// containersOnTheEngine is the state of every container the engine holds, running
-// or not, by name. It is a read of the machine's own state, which is why it lives
-// in a test: the lab itself declares no call that could list or reach a container
-// it did not create.
+// Listing lives in a test because the lab itself declares no call that could
+// list a container it did not create.
 func containersOnTheEngine(t *testing.T, endpoint Endpoint) map[string]string {
 	t.Helper()
 
@@ -570,7 +495,7 @@ func containersOnTheEngine(t *testing.T, endpoint Endpoint) map[string]string {
 	}
 
 	// The engine reports a container's name with a leading slash; the lab names
-	// its own container without one.
+	// its own without one.
 	held := make(map[string]string, len(listed))
 	for _, container := range listed {
 		for _, name := range container.Names {

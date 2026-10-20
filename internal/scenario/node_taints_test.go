@@ -8,15 +8,11 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// The taint a test states where it turns on a stated taint: a key and value a
-// dedicated NodePool of gpu Nodes carries. someTaint is the other key a test states.
 const (
 	gpuKey     = "nvidia.com/gpu"
 	gpuPresent = "present"
 )
 
-// taintsOf is the Node taints stated, which a test building taints the domain
-// admits states.
 func taintsOf(t *testing.T, stated ...scenario.Taint) scenario.NodeTaints {
 	t.Helper()
 
@@ -28,8 +24,7 @@ func taintsOf(t *testing.T, stated ...scenario.Taint) scenario.NodeTaints {
 	return taints
 }
 
-// A NodePool's taints are read in key order whatever order they were stated in,
-// so a run reports them alike every time.
+// Key order makes a run report the taints alike every time.
 func TestNodeTaints_ShouldBeReadInKeyOrder(t *testing.T) {
 	taints := taintsOf(t,
 		scenario.Taint{Key: gpuKey, Value: gpuPresent, Effect: scenario.NoSchedule},
@@ -42,9 +37,6 @@ func TestNodeTaints_ShouldBeReadInKeyOrder(t *testing.T) {
 	}))
 }
 
-// A NodePool states NoSchedule taints alone, every field of each, under a key and
-// value Kubernetes holds, and under no key the control plane sets on a Node it
-// stopped hearing from. One key is stated once.
 func TestNodeTaints_ShouldRefuseATaintTheLabCannotHold(t *testing.T) {
 	const noValue = ""
 	gpu := scenario.Taint{Key: gpuKey, Value: gpuPresent, Effect: scenario.NoSchedule}
@@ -85,8 +77,6 @@ func TestNodeTaints_ShouldRefuseATaintTheLabCannotHold(t *testing.T) {
 	}
 }
 
-// Taints added to taints already stated hold both, and a key stated in both is
-// refused naming that key.
 func TestNodeTaintsAdded_ShouldHoldBothAndRefuseAKeyStatedTwice(t *testing.T) {
 	gpu := scenario.Taint{Key: gpuKey, Value: gpuPresent, Effect: scenario.NoSchedule}
 	other := scenario.Taint{Key: someTaint, Value: someValue, Effect: scenario.NoSchedule}
@@ -100,8 +90,6 @@ func TestNodeTaintsAdded_ShouldHoldBothAndRefuseAKeyStatedTwice(t *testing.T) {
 	expect.Expect(t, refusalNaming(err, gpuKey)).To(expect.Equal(true))
 }
 
-// A NodePool's Nodes carry its taints and the other NodePools' Nodes none, and
-// the Topology names the NodePools it holds.
 func TestATopologyOfATaintedNodePool_ShouldTaintItsNodesAlone(t *testing.T) {
 	const oneZone, oneNodePerZone, gpu = 1, 1, "gpu"
 	gpuTaints := taintsOf(t, scenario.Taint{Key: gpuKey, Value: gpuPresent, Effect: scenario.NoSchedule})
@@ -121,7 +109,6 @@ func TestATopologyOfATaintedNodePool_ShouldTaintItsNodesAlone(t *testing.T) {
 	expect.Expect(t, topology.HoldsNodePool(someValue)).To(expect.Equal(false))
 }
 
-// A NodePool tainted twice holds both taints, and refuses a key it already holds.
 func TestANodePoolTaintedTwice_ShouldHoldBothAndRefuseAKeyItAlreadyHolds(t *testing.T) {
 	const oneNodePerZone = 1
 	gpu := scenario.Taint{Key: gpuKey, Value: gpuPresent, Effect: scenario.NoSchedule}
@@ -139,8 +126,7 @@ func TestANodePoolTaintedTwice_ShouldHoldBothAndRefuseAKeyItAlreadyHolds(t *test
 	expect.Expect(t, refusalNaming(err, gpuKey)).To(expect.Equal(true))
 }
 
-// Two Nodes or two NodePools alike in all else are equal exactly when their
-// taints are, so comparing Placements or Topologies notices a taint.
+// Comparing Placements or Topologies then notices a taint.
 func TestTwoValuesAlikeButForTheirTaints_ShouldBeEqualOnlyWhenTheirTaintsAre(t *testing.T) {
 	const oneNodePerZone = 1
 	gpuTaints := taintsOf(t, scenario.Taint{Key: gpuKey, Value: gpuPresent, Effect: scenario.NoSchedule})
