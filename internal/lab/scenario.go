@@ -84,7 +84,7 @@ type StepKind string
 const (
 	GivenStep StepKind = "Given"
 	WhenStep  StepKind = "When"
-	WaitStep  StepKind = "Wait"
+	WaitStep  StepKind = scenario.WaitStepNamed
 	ThenStep  StepKind = "Then"
 )
 
@@ -115,6 +115,12 @@ type Step struct {
 	// Settings stay out of the name, so a Finding and the Step a Scenario ended
 	// at stay one short line.
 	Settings []string
+	// Narrative and Board are a Wait's alone. The Narrative is given once the
+	// record has stopped; the Board is observed as the Wait ended, reached or
+	// not, and BoardNotObserved says why a Wait has none.
+	Narrative        scenario.WaitNarrative
+	Board            scenario.PlacementBoard
+	BoardNotObserved error
 }
 
 func (s Step) String() string {
@@ -174,6 +180,9 @@ type Scenario struct {
 
 	steps    []Step
 	findings []Finding
+	// lineOpen is a Given or Then a further call may still complete, so its
+	// note waits for the next Step or the Scenario's end.
+	lineOpen bool
 
 	failed      []string
 	failedZones []string
@@ -189,11 +198,17 @@ type Scenario struct {
 	workloadDeclaredAs string
 
 	observed scenario.Placement
+	// board is the one the last Wait drew, which the next marks its newcomers
+	// against.
+	board scenario.PlacementBoard
 	// settled is cleared by a When alone, so the next Wait applies nothing and
 	// holds for the world the Failure left.
 	topologyApplied  bool
 	workloadDeployed bool
 	settled          bool
+	// changedTheCluster is set before the first change is attempted, so a
+	// change that fails partway still has its board observed.
+	changedTheCluster bool
 
 	endedAt Step
 	cause   error
@@ -225,16 +240,39 @@ func (s *Scenario) Then() Then {
 	return Then{scenario: s}
 }
 
-// record reports false once the Scenario has ended, recording nothing.
+// record reports false once the Scenario has ended, recording nothing. A When
+// is noted at once, before it stops its first Node, and a Wait as it ends.
 func (s *Scenario) record(kind StepKind, name string) (Step, bool) {
+	s.noteTheOpenLine()
 	if s.cause != nil {
 		return Step{}, false
 	}
 
 	step := Step{Kind: kind, Name: name}
 	s.steps = append(s.steps, step)
+	switch kind {
+	case GivenStep, ThenStep:
+		s.lineOpen = true
+	case WhenStep:
+		s.note(step)
+	case WaitStep:
+		// Noted as it ends, after its board.
+	}
 
 	return step, true
+}
+
+func (s *Scenario) noteTheOpenLine() {
+	if !s.lineOpen {
+		return
+	}
+
+	s.lineOpen = false
+	s.note(s.steps[len(s.steps)-1])
+}
+
+func (s *Scenario) note(step Step) {
+	s.provisioned.NoteStep(string(step.Kind), step.String())
 }
 
 // rename exists because an optional setting is a further call on the same line,
@@ -293,6 +331,9 @@ func (s *Scenario) await(named string, held scenario.StatedWait, reaching func()
 	if !open {
 		return
 	}
+	// Deferred, so a Wait that ends the Scenario still draws its board and is
+	// noted.
+	defer s.endWait()
 	if !s.apply(step) {
 		return
 	}
@@ -315,12 +356,49 @@ func (s *Scenario) awaitStating(named string, seconds int, reaching func() (scen
 	if err != nil {
 		if step, open := s.record(WaitStep, named); open {
 			s.end(step, err)
+			s.endWait()
 		}
 
 		return
 	}
 
 	s.await(named, held, reaching)
+}
+
+// Every recorded Wait is noted exactly once, after its board, so the k-th
+// Wait note is the k-th Wait Step's.
+func (s *Scenario) endWait() {
+	s.drawBoard()
+	s.note(s.steps[len(s.steps)-1])
+}
+
+// drawBoard observes under a waiting time of its own rather than the Wait's,
+// so a Wait that expired still shows where every Pod stood as it ended. Before
+// the Scenario first changes its own cluster no Workload Pod can exist, so the
+// declared Nodes alone are the board and nothing is observed.
+func (s *Scenario) drawBoard() {
+	last := len(s.steps) - 1
+	var observed []scenario.Pod
+	if s.changedTheCluster {
+		placed, err := s.observeEveryWorkload()
+		if err != nil {
+			s.steps[last].BoardNotObserved = fmt.Errorf("observe the Placement board: %w", err)
+			s.end(s.steps[last], s.steps[last].BoardNotObserved)
+
+			return
+		}
+		observed = placed.Pods()
+	}
+
+	s.board = scenario.NewPlacementBoard(s.topology, observed, s.board)
+	s.steps[last].Board = s.board
+}
+
+func (s *Scenario) observeEveryWorkload() (scenario.Placement, error) {
+	observing, cancel := context.WithTimeout(s.ctx, scenario.WaitingTime)
+	defer cancel()
+
+	return s.provisioned.ObserveEveryWorkload(observing)
 }
 
 // A Wait reached later than it was held to ends the Scenario, since the Steps
@@ -389,6 +467,7 @@ func (s *Scenario) awaitSettledPlacementWithinSeconds(seconds int) {
 // can give is named here, and one the lab checks itself stays at the Given.
 func (s *Scenario) apply(at Step) bool {
 	if s.topologyDeclaredAs != "" && !s.topologyApplied {
+		s.changedTheCluster = true
 		if err := s.provisioned.ApplyTopology(s.ctx, s.topology); err != nil {
 			s.end(at, fmt.Errorf("apply %s: %w", s.topologyDeclaredAs, err))
 
@@ -401,6 +480,7 @@ func (s *Scenario) apply(at Step) bool {
 		pending = append(pending, declaredDeployment{workload: s.workload, accesses: s.accesses, declaredAs: s.workloadDeclaredAs})
 	}
 	for _, deploying := range pending {
+		s.changedTheCluster = true
 		if err := s.provisioned.Deploy(s.ctx, deploying.workload, deploying.accesses...); err != nil {
 			s.end(at, fmt.Errorf("deploy %s: %w", deploying.declaredAs, err))
 
@@ -718,6 +798,7 @@ func (w When) NodesLabelledFail(labels node.Labels) {
 // the Failure.
 func (s *Scenario) stop(at Step, nodes []string) bool {
 	for _, node := range nodes {
+		s.changedTheCluster = true
 		if err := s.provisioned.FailNode(s.ctx, node); err != nil {
 			s.end(at, fmt.Errorf("stop Node %s responding: %w", node, err))
 

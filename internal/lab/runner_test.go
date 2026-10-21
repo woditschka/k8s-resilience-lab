@@ -12,6 +12,7 @@ import (
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
+	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
 )
 
@@ -264,4 +265,50 @@ func theFailureOf(carried []Carried, named string) string {
 	}
 
 	return ""
+}
+
+// Which Node changed and when does not bear on the pairing, only that each
+// Wait's note closes a narrative of its own.
+const (
+	someNodeName       = "zone-1-node-1"
+	whenTheNodeCameUp  = 120 * time.Millisecond
+	whenTheFirstWait   = 1500 * time.Millisecond
+	whenTheNodeWasLost = 2000 * time.Millisecond
+	whenTheSecondWait  = 2500 * time.Millisecond
+	someWaitLine       = "Wait for all Nodes Ready"
+	someTopologyLine   = "Given a Topology of 1 Zone"
+	someFailureLine    = "When 1 Node fails"
+	someWaitStepName   = "all Nodes Ready"
+	someWhenStepName   = "1 Node fails"
+	someTopologyName   = "a Topology of 1 Zone"
+	aWaitNoteIsNamed   = scenario.WaitStepNamed
+	aWhenNoteIsNamed   = string(WhenStep)
+	aGivenNoteIsNamed  = string(GivenStep)
+)
+
+func aTimelineOfTwoWaits() scenario.Timeline {
+	return scenario.NewTimeline([]scenario.Entry{
+		{Elapsed: whenTheNodeCameUp, Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: aGivenNoteIsNamed, Detail: someTopologyLine},
+		{Elapsed: whenTheNodeCameUp, Change: scenario.ChangeAdded, Kind: scenario.NodeObject, Name: someNodeName, Reason: string(scenario.NodeReady)},
+		{Elapsed: whenTheFirstWait, Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: aWaitNoteIsNamed, Detail: someWaitLine},
+		{Elapsed: whenTheFirstWait, Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: aWhenNoteIsNamed, Detail: someFailureLine},
+		{Elapsed: whenTheNodeWasLost, Change: scenario.ChangeModified, Kind: scenario.NodeObject, Name: someNodeName, Reason: string(scenario.NodeNotReady)},
+		{Elapsed: whenTheSecondWait, Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: aWaitNoteIsNamed, Detail: someWaitLine},
+	})
+}
+
+// A Wait left with no note of its own gets no narrative rather than a
+// neighbour's.
+func TestEachWaitStep_ShouldBeGivenTheNarrativeEndingAtItsOwnNoteInOrder(t *testing.T) {
+	recorded := aTimelineOfTwoWaits()
+	narratives := recorded.WaitNarratives()
+	given := Step{Kind: GivenStep, Name: someTopologyName}
+	wait := Step{Kind: WaitStep, Name: someWaitStepName}
+	when := Step{Kind: WhenStep, Name: someWhenStepName}
+	firstWait, secondWait := wait, wait
+	firstWait.Narrative, secondWait.Narrative = narratives[0], narratives[1]
+
+	narrated := givenTheirNarratives([]Step{given, wait, when, wait, wait}, narratives)
+
+	expect.Expect(t, narrated).To(expect.Equal([]Step{given, firstWait, when, secondWait, wait}))
 }

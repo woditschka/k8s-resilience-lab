@@ -428,3 +428,67 @@ func TestAStreamTheLabCannotOpen_ShouldStopThoseAlreadyOpenAndNameTheKindAndTheC
 	expectNaming(t, err.Error(), theKindWatched, theClusterRecorded, theRefusalTheServerGave)
 	expect.Expect(t, alreadyOpen.stopped).To(expect.Equal(true))
 }
+
+const (
+	aLaterVersion = "88143"
+	theStepNoted  = scenario.WaitStepNamed
+	theLineNoted  = "Wait for all Pods Ready, reached in 3s"
+)
+
+// Elapsed times are the clock's, so an entry is compared without its own.
+func withoutTheirTimes(entries []scenario.Entry) []scenario.Entry {
+	timeless := slices.Clone(entries)
+	for at := range timeless {
+		timeless[at].Elapsed = 0
+	}
+
+	return timeless
+}
+
+func theStepNoteRecorded() scenario.Entry {
+	return scenario.Entry{Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: theStepNoted, Detail: theLineNoted}
+}
+
+func aPodChangeRecorded() scenario.Entry {
+	return scenario.Entry{Change: scenario.ChangeModified, Kind: scenario.PodObject, Name: watchedPodName, Reason: string(scenario.PodUnknown)}
+}
+
+// Each send below returns only once the owning goroutine has taken it, so the
+// order sent is the order received.
+func TestATimeline_ShouldRecordEachStepAtItsMoment(t *testing.T) {
+	changes := make(chan watched)
+	recorded := newRecording(func() {})
+	go recorded.own(changes, &entriesDelivered{})
+
+	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
+	recorded.note(theStepNoted, theLineNoted)
+	changes <- watched{event: aPodChangedAt(aLaterVersion)}
+	close(changes)
+	<-recorded.done
+
+	expect.Expect(t, withoutTheirTimes(recorded.timeline.Entries())).To(expect.Equal([]scenario.Entry{
+		aPodChangeRecorded(), theStepNoteRecorded(), aPodChangeRecorded(),
+	}))
+}
+
+func TestAStepNotedAfterTheRecordStopped_ShouldBeNotedNowhere(t *testing.T) {
+	changes := make(chan watched)
+	recorded := newRecording(func() {})
+	go recorded.own(changes, &entriesDelivered{})
+	close(changes)
+	<-recorded.done
+
+	recorded.note(theStepNoted, theLineNoted)
+
+	expect.Expect(t, recorded.timeline.Entries()).To(expect.HaveLen[scenario.Entry](noChange))
+}
+
+func TestAStepNotedOnAClusterNotRecording_ShouldBeNotedNowhere(t *testing.T) {
+	var noCluster *SimulatedCluster
+	notRecording := &SimulatedCluster{}
+
+	noCluster.NoteStep(theStepNoted, theLineNoted)
+	notRecording.NoteStep(theStepNoted, theLineNoted)
+
+	expect.Expect(t, notRecording.StopRecording().Entries()).To(expect.HaveLen[scenario.Entry](noChange))
+}

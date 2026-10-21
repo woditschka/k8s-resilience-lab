@@ -10,25 +10,76 @@ Declare a Topology of Zones and Nodes, and deploy a Workload under the spread ru
 
 ## What It Looks Like in Practice
 
-Every Scenario is a Go function in [scenarios/scenarios.go](scenarios/scenarios.go), one Step per line. This is the lab's simplest one:
+Every Scenario is a Go function in [scenarios/scenarios.go](scenarios/scenarios.go), one Step per line. This is the one that stops a Node:
 
 ```go
-// An even Placement over Zones and Nodes with room for more than one Pod is the
-// scheduler honouring Resilient placement.
-func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
+// Capacity comes back after one Node stops responding, on the Nodes still
+// responding.
+func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab.Scenario) {
 	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement())
+	s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
-	s.Then().PodsPerNode(1)
+
+	s.When().NodesFail(lab.Nodes(1))
+	s.WaitFor().AllPodsReadyWithinSeconds(30)
+
+	s.Then().PodsPerZone(3)
+	s.Then().NoPodsOnTheFailedNodes()
+	s.Then().RequiredCapacityHeld()
 }
 ```
 
 A Scenario reads like a test without the `Test` prefix. A Given declares and reaches no cluster. A Wait applies what the Givens declared and holds until the cluster reports the state it names. A When injects the Failure. A Then judges the Placement the last Wait reached, and a Then the Placement does not meet records a Finding while the later Steps still run.
 
-The Scenario's name is the condition half of its function's name, so the function above runs as `a-workload-placed-for-resilience`. Adding a Scenario is a function in that file and one line in `All`. The vocabulary a Scenario writes, every Step and setting, is documented in [scenarios/README.md](scenarios/README.md).
+The Scenario's name is the condition half of its function's name, so this one runs as `a-node-that-stops-responding`. Adding a Scenario is a function in that file and one line in `All`. The vocabulary a Scenario writes, every Step and setting, is documented in [scenarios/README.md](scenarios/README.md).
+
+A run reports every Scenario under its name and the Simulated Cluster it ran on, one line per Step. A Wait names the time it took, and a Then names what it judged. Under every Wait stands its Wait narrative: the moments since the previous Wait that changed the Placement. Behind a separator follows its Placement board: every Node under its Zone with the Pods on it. A `+` marks a Pod new on that Node, and a second separator closes the board before the Thens. A Skew line and the line naming the filed Timeline close the Scenario, and a heavier rule of `=` divides one Scenario from the next. The report of the Scenario `a-node-that-stops-responding` follows, abridged. The run's opening lines, the Topology's Given and Wait and the setting lines are left out, and a `...` line stands for further lines of the same kind. Every line the report may print is documented in [scenarios/README.md](scenarios/README.md).
+
+```text
+======================================================================================================================================
+Scenario a-node-that-stops-responding, on k8s-resilience-lab-a-node-that-stops-responding-b7pzswsf
+  Given a Workload checkout of 9 Pods declaring Resilient placement, each Pod starting in 500ms to 1s, keeping at least 6 Pods Running
+  Wait for all Pods Ready, reached in 2.2s
+  +8.223s  Pod checkout-5llj7 scheduled on zone-1-node-1, Running at +9.084s
+  +8.224s  Pod checkout-xdtwv scheduled on zone-2-node-1, Running at +8.800s
+  ...
+  --------------------------------------------------------------------------
+  zone-1
+    zone-1-node-1  general  +checkout-5llj7
+  ...
+  --------------------------------------------------------------------------
+  Then 3 Pods per Zone
+  When 1 Node fails, zone-1-node-1
+  Wait for all Pods Ready, reached in 7.4s of the 30s stated
+  +10.421s  Node zone-1-node-1 NotReady
+  +15.834s  Pod checkout-5llj7 evicted from zone-1-node-1
+  +15.838s  Pod checkout-p9ddt scheduled on zone-1-node-2, Running at +16.818s
+  ----------------------------------------------------------------------------
+  zone-1
+    zone-1-node-1  general
+    zone-1-node-2  general  checkout-5xfkb, +checkout-p9ddt
+    zone-1-node-3  general  checkout-4jsxj
+  zone-2
+    zone-2-node-1  general  checkout-xdtwv
+    zone-2-node-2  general  checkout-mln4h
+    zone-2-node-3  general  checkout-dsmf2
+  zone-3
+    zone-3-node-1  general  checkout-8b9b7
+    zone-3-node-2  general  checkout-gwslt
+    zone-3-node-3  general  checkout-hq4q5
+  ----------------------------------------------------------------------------
+  Then 3 Pods per Zone
+  Then no Pod on the Nodes that failed
+  Then the Required Capacity held: a minimum of 6 Pods, 8 at the moment of the Failure and 9 once Settled
+  Skew of checkout: 0 over Zones, 1 over Nodes
+  --------------------------------------------------------------------------------------------------------
+  Timeline, 189 entries, filed at timelines/k8s-resilience-lab-a-node-that-stops-responding-b7pzswsf.jsonl
+```
+
+The narrative states an eviction and the replacement scheduled after it in order, and claims no link between them.
 
 ## Quick Start
 
@@ -39,22 +90,12 @@ git clone https://github.com/woditschka/k8s-resilience-lab.git
 cd k8s-resilience-lab
 
 make run                                 # every Scenario, each on a Simulated Cluster of its own
-make run ARGS="--whole-timeline"         # print every Timeline entry under each summary
+make run ARGS="--whole-timeline"         # print every Timeline entry under each filing line
 make run ARGS="--k8s-version <version>"  # mirror another Kubernetes version
 make ci                                  # the full quality gate, the Scenarios included
 ```
 
-All Scenarios run at once, so a run lasts about as long as its slowest Scenario. Each reports its Steps in order under its name and the Simulated Cluster it ran on. A Wait names the time it took, and a Then names what it judged. Abridged, with the setting lines and the Timeline summary left out:
-
-```text
-Scenario a-workload-placed-for-resilience, on k8s-resilience-lab-a-workload-placed-for-resilience-q4x7m2ab
-  Given a Topology of 3 Zones of a NodePool general of 3 Standard Nodes holding 16 cpu, 64Gi memory and 10 Pods each
-  Wait for all Nodes Ready, reached in 1.2s
-  Given a Workload checkout of 9 Pods declaring Resilient placement, each Pod starting in 500ms to 1s
-  Wait for all Pods Ready, reached in 3.4s
-  Then 3 Pods per Zone
-  Then 1 Pod per Node
-```
+All Scenarios run at once, so a run lasts about as long as its slowest Scenario, and each reports as the section What It Looks Like in Practice shows.
 
 The command suite runs every Scenario and fails when one reports a Finding or ends at a Step. The Scenarios are therefore the lab's own acceptance tests.
 
@@ -71,7 +112,7 @@ On that cluster a Scenario declares what a real team would declare, then watches
 - **A Failure** that stops one Node, every Node of a Zone, or every Node of one label value. The lab withholds the Node's heartbeat, so the control plane marks it unresponsive and reschedules exactly as it would after a lost machine.
 - **Assertions** on the Placement once it has Settled: Pods per Zone, per Node and per NodePool, and the Required Capacity a Workload kept serving through the Failure.
 
-Every Scenario also leaves a Timeline, recorded from the API's own watch streams, naming each Node, Pod and Workload change and the scheduler's reason for each Placement. A run prints its summary and files it, so what happened inside the cluster is explainable afterwards.
+Every Scenario also leaves a Timeline, recorded from the API's own watch streams, naming each Node, Pod and Workload change, the scheduler's reason for each Placement, and each Step at its moment. A run narrates from it under every Wait and files it, so what happened inside the cluster is explainable afterwards.
 
 The lab never touches a real cluster. It provisions and removes the Simulated Cluster it uses, reads no kubeconfig, and dials only a local engine socket. The reasons are recorded in [the non-goal ADR](docs/adr/2026-10-03-non-goal-real-cluster-runs.md).
 

@@ -415,6 +415,29 @@ func (c *SimulatedCluster) Observe(ctx context.Context, workload scenario.Worklo
 	return scenario.NewPlacement(nodes, fromPods(listed.Items)), nil
 }
 
+// ObserveEveryWorkload reads every Node, Ready or not, so a Node that stopped
+// responding keeps its place on a Placement board. It selects Pods by the
+// Workload label being present, which a probe Pod never carries.
+func (c *SimulatedCluster) ObserveEveryWorkload(ctx context.Context) (scenario.Placement, error) {
+	listedNodes, err := c.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return scenario.Placement{}, fmt.Errorf("list the Nodes of %s: %w", c.Name(), err)
+	}
+	nodes, err := fromNodes(listedNodes.Items)
+	if err != nil {
+		return scenario.Placement{}, err
+	}
+
+	listedPods, err := c.client.CoreV1().Pods(workloadNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: everyWorkloadsPods(),
+	})
+	if err != nil {
+		return scenario.Placement{}, fmt.Errorf("list the Pods of every Workload of %s: %w", c.Name(), err)
+	}
+
+	return scenario.NewPlacement(nodes, fromPods(listedPods.Items)), nil
+}
+
 // AwaitSettled reports a Placement from a wait rather than from a single
 // observation, since the control plane is eventually consistent. It is the
 // settle-only wait no Scenario writes yet, so it is kept for the first that

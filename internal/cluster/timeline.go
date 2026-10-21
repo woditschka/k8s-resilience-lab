@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"iter"
 	"sync"
 	"time"
 
@@ -36,7 +37,7 @@ func (c *SimulatedCluster) Record(ctx context.Context, into EntrySink) error {
 		return err
 	}
 
-	recorded := &recording{stop: stop, started: time.Now(), done: make(chan struct{})}
+	recorded := newRecording(stop)
 	go recorded.own(readStreams(watching, opened), into)
 	c.recording = recorded
 
@@ -56,21 +57,51 @@ func (c *SimulatedCluster) StopRecording() scenario.Timeline {
 	return c.recording.timeline
 }
 
+// NoteStep notes a Step into the Timeline, carrying its line, timed on receipt
+// among the changes. A cluster that is not recording, or no cluster at all,
+// notes nothing.
+func (c *SimulatedCluster) NoteStep(step, line string) {
+	if c == nil || c.recording == nil {
+		return
+	}
+
+	c.recording.note(step, line)
+}
+
 // The Timeline is written once, before done is closed, and read once after, so
 // the record holds no shared state and needs no lock.
 type recording struct {
 	stop     context.CancelFunc
 	started  time.Time
 	done     chan struct{}
+	notes    chan stepNoted
 	timeline scenario.Timeline
 }
 
-// own times each change as it reads it, rather than in the streams, so the
-// order of a Timeline is the order the lab received its changes.
+type stepNoted struct {
+	step string
+	line string
+}
+
+func newRecording(stop context.CancelFunc) *recording {
+	return &recording{stop: stop, started: time.Now(), done: make(chan struct{}), notes: make(chan stepNoted)}
+}
+
+// note returns once the owning goroutine has taken the note, so a change
+// received after it stands after it. A record already stopped takes none.
+func (r *recording) note(step, line string) {
+	select {
+	case r.notes <- stepNoted{step: step, line: line}:
+	case <-r.done:
+	}
+}
+
+// own times each change and each Step's note as it reads it, rather than in the
+// streams, so the order of a Timeline is the order the lab received them.
 func (r *recording) own(changes <-chan watched, into EntrySink) {
 	var recorded []scenario.Entry
-	for change := range changes {
-		entry, carried := change.entry(time.Since(r.started))
+	for received := range r.received(changes) {
+		entry, carried := received.entry(time.Since(r.started))
 		if !carried {
 			continue
 		}
@@ -83,12 +114,37 @@ func (r *recording) own(changes <-chan watched, into EntrySink) {
 	close(r.done)
 }
 
+// received ends with the changes, since the streams closing is what stops a
+// record.
+func (r *recording) received(changes <-chan watched) iter.Seq[watched] {
+	return func(yield func(watched) bool) {
+		for {
+			select {
+			case change, open := <-changes:
+				if !open || !yield(change) {
+					return
+				}
+			case noted := <-r.notes:
+				if !yield(watched{step: noted}) {
+					return
+				}
+			}
+		}
+	}
+}
+
 type watched struct {
 	event watch.Event
 	note  string
+	step  stepNoted
 }
 
 func (w watched) entry(elapsed time.Duration) (scenario.Entry, bool) {
+	if w.step.step != "" {
+		return scenario.Entry{
+			Elapsed: elapsed, Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: w.step.step, Detail: w.step.line,
+		}, true
+	}
 	if w.note != "" {
 		return scenario.Entry{Elapsed: elapsed, Change: scenario.ChangeNoted, Detail: w.note}, true
 	}

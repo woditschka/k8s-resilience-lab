@@ -34,6 +34,9 @@ type Outcome struct {
 	Steps     []Step
 	Findings  []Finding
 	Placement scenario.Placement
+	// JudgedWorkload names the Workload the Placement is of, the newest the
+	// Scenario declared; it is empty while none is declared.
+	JudgedWorkload string
 	// EndedAt and Cause are empty for a Scenario that carried out every Step.
 	EndedAt Step
 	Cause   error
@@ -48,18 +51,56 @@ func (o Outcome) Ended() bool {
 	return o.Cause != nil
 }
 
+// HoldsASettledPlacement is false after a Failure no Wait followed, since the
+// Failure discarded the Placement, and before any Workload's Pods were observed.
+func (o Outcome) HoldsASettledPlacement() bool {
+	return !o.Ended() && len(o.Placement.Pods()) > 0
+}
+
 func (o Outcome) Held() bool {
 	return !o.Ended() && len(o.Findings) == 0
 }
 
 func (s *Scenario) outcome() Outcome {
 	return Outcome{
-		Steps:     slices.Clone(s.steps),
-		Findings:  slices.Clone(s.findings),
-		Placement: s.observed,
-		EndedAt:   s.endedAt,
-		Cause:     s.cause,
+		Steps:          slices.Clone(s.steps),
+		Findings:       slices.Clone(s.findings),
+		Placement:      s.observed,
+		JudgedWorkload: s.workload.Name(),
+		EndedAt:        s.endedAt,
+		Cause:          s.cause,
 	}
+}
+
+// finish notes the line a further call could still have completed, stops the
+// record and gives each Wait Step its narrative.
+func (s *Scenario) finish() Outcome {
+	s.noteTheOpenLine()
+	recorded := s.provisioned.StopRecording()
+
+	finished := s.outcome()
+	finished.Timeline = recorded
+	finished.Steps = givenTheirNarratives(finished.Steps, recorded.WaitNarratives())
+
+	return finished
+}
+
+// The k-th narrative is the k-th Wait Step's, since each recorded Wait is
+// noted once. A Wait Step past the narratives keeps none.
+func givenTheirNarratives(steps []Step, narratives []scenario.WaitNarrative) []Step {
+	narrated := slices.Clone(steps)
+	waits := 0
+	for at, step := range narrated {
+		if step.Kind != WaitStep {
+			continue
+		}
+		if waits < len(narratives) {
+			narrated[at].Narrative = narratives[waits]
+		}
+		waits++
+	}
+
+	return narrated
 }
 
 // Carried pairs a Scenario's Outcome with the lab's own failure while carrying
@@ -192,12 +233,11 @@ func (r *Runner) runNamed(ctx context.Context, name string, steps func(*Scenario
 	running := newScenario(ctx, provisioned)
 	steps(running)
 
-	recorded := provisioned.StopRecording()
+	reported = running.finish()
 	filed.Close()
 
-	reported = running.outcome()
 	reported.Name, reported.Cluster = name, provisioned.Name()
-	reported.Timeline, reported.FiledAt, reported.NotFiled = recorded, filed.Path(), filed.Err()
+	reported.FiledAt, reported.NotFiled = filed.Path(), filed.Err()
 
 	return reported, nil
 }

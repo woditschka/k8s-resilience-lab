@@ -614,12 +614,15 @@ func TestAWaitNotReachedInTheTimeItStates_ShouldEndTheScenarioNamingThatTimeAlon
 }
 
 // The refusal stands before the Wait applies anything, so these Scenarios reach
-// no cluster.
+// no cluster, and each board lists the declared Nodes with no Pod on them.
 func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeItStates(t *testing.T) {
+	everyDeclaredNodeAndNoPod := scenario.NewPlacementBoard(aTopologyOf(t, twoZones, twoNodesPerZone), nil, scenario.PlacementBoard{}).Lines()
+	var noNodeLine []string
 	waits := map[string]struct {
 		write func(*Scenario)
 		named string
 		step  Step
+		board []string
 	}{
 		"chained onto the Topology it declares": {
 			write: func(ending *Scenario) {
@@ -628,6 +631,7 @@ func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeIt
 			},
 			named: secondsRead(theSecondsAboveTheLabsWaitingTime),
 			step:  allNodesReadyStep(),
+			board: everyDeclaredNodeAndNoPod,
 		},
 		"chained onto the Workload it declares": {
 			write: func(ending *Scenario) {
@@ -636,6 +640,7 @@ func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeIt
 			},
 			named: strconv.Itoa(noSecondsAtAll),
 			step:  allPodsReadyStep(),
+			board: noNodeLine,
 		},
 		"a Wait Step of its own for the Nodes": {
 			write: func(ending *Scenario) {
@@ -643,6 +648,7 @@ func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeIt
 			},
 			named: strconv.Itoa(noSecondsAtAll),
 			step:  allNodesReadyStep(),
+			board: noNodeLine,
 		},
 		"a Wait Step of its own for the Pods": {
 			write: func(ending *Scenario) {
@@ -650,6 +656,7 @@ func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeIt
 			},
 			named: secondsRead(theSecondsAboveTheLabsWaitingTime),
 			step:  allPodsReadyStep(),
+			board: noNodeLine,
 		},
 	}
 
@@ -663,6 +670,7 @@ func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeIt
 			expect.Expect(t, ended.EndedAt).To(expect.Equal(wait.step))
 			causeNames(t, ended, wait.named)
 			causeNames(t, ended, scenario.WaitingTime.String())
+			expect.Expect(t, ended.Steps[len(ended.Steps)-1].Board.Lines()).To(expect.Equal(wait.board))
 		})
 	}
 }

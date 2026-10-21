@@ -10,10 +10,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"os"
-	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab"
@@ -53,20 +52,24 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	defer engine.Close()
 
 	reported := &runReport{to: report}
-	reported.printf("engine socket:      %s\n", engine.Socket())
-	reported.printf("engine version:     %s\n", engine.EngineVersion())
-	reported.printf("Kubernetes version: %s\n", asked.version)
+	var opening reportPart
+	opening.addf("engine socket:      %s", engine.Socket())
+	opening.addf("engine version:     %s", engine.EngineVersion())
+	opening.addf("Kubernetes version: %s", asked.version)
 	// No total is derived from these settings: what a run waits for after a
 	// Failure is the control plane's to decide, and these are only the parts
 	// the lab sets.
-	reported.printf("unresponsive Node:  its Pods leave after %s, where a default cluster waits %s\n",
+	opening.addf("unresponsive Node:  its Pods leave after %s, where a default cluster waits %s",
 		scenario.UnresponsiveNodeWait, scenario.DefaultUnresponsiveNodeWait)
-	reported.printf("Node heartbeats:    at factor %s, where this cluster image runs them at factor %s\n",
+	opening.addf("Node heartbeats:    at factor %s, where this cluster image runs them at factor %s",
 		cluster.NodeHeartbeatFactor, cluster.DefaultNodeHeartbeatFactor)
-	reported.printf("Node eviction rate: %s unresponsive Nodes of a Zone per second, where a default cluster taints %s\n",
+	opening.addf("Node eviction rate: %s unresponsive Nodes of a Zone per second, where a default cluster taints %s",
 		cluster.NodeEvictionRate, cluster.DefaultNodeEvictionRate)
-	reported.printf("lab waiting time:   at most %s for a state of the cluster, and the most a Wait may state\n",
+	opening.addf("lab waiting time:   at most %s for a state of the cluster, and the most a Wait may state",
 		scenario.WaitingTime)
+	// The opening lines print before any Scenario runs, so a reader sees the
+	// settings while the run is under way.
+	reported.printPart(opening)
 
 	// The command names no Scenario, so adding one touches the Scenarios' place
 	// alone.
@@ -92,7 +95,7 @@ func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) 
 	flags := flag.NewFlagSet("lab", flag.ContinueOnError)
 	flags.SetOutput(warnings)
 	named := flags.String("k8s-version", "", "the Kubernetes version each Simulated Cluster mirrors; the lab's pinned default when absent")
-	whole := flags.Bool("whole-timeline", false, "print every entry of each Scenario's Timeline under its summary")
+	whole := flags.Bool("whole-timeline", false, "print every entry of each Scenario's Timeline under its filing line")
 	if err := flags.Parse(arguments); err != nil {
 		return runSetting{}, fmt.Errorf("read the lab's arguments: %w", err)
 	}
@@ -121,57 +124,57 @@ func resolveVersion(named string) (cluster.KubernetesVersion, error) {
 func writeRun(report *runReport, carried []lab.Carried, asked runSetting) error {
 	var failures []error
 	for _, each := range carried {
-		writeCarried(report, each, asked)
+		var part reportPart
+		writeCarried(&part, each, asked)
+		report.printBelowAHeavierSeparator(part)
 		failures = append(failures, each.Err, notFiled(each.Outcome), didNotHold(each.Outcome))
 	}
 
 	return errors.Join(failures...)
 }
 
-func writeCarried(report *runReport, carried lab.Carried, asked runSetting) {
+func writeCarried(part *reportPart, carried lab.Carried, asked runSetting) {
 	if !carried.Reported() {
-		report.printf("\nScenario %s, ended before it reported: %v\n", carried.Outcome.Name, carried.Err)
+		part.addf("Scenario %s, ended before it reported: %v", carried.Outcome.Name, carried.Err)
 
 		return
 	}
 
-	writeOutcome(report, carried.Outcome, asked)
+	writeOutcome(part, carried.Outcome, asked)
 }
 
 // A Scenario that ended at a Step still has its Timeline reported, because that
 // record shows how far its cluster got.
-func writeOutcome(report *runReport, outcome lab.Outcome, asked runSetting) {
-	report.printf("\nScenario %s, on %s\n", outcome.Name, outcome.Cluster)
-	writeSteps(report, outcome)
-	if !outcome.Ended() {
-		writePlacement(report, outcome.Placement)
+func writeOutcome(part *reportPart, outcome lab.Outcome, asked runSetting) {
+	part.addf("Scenario %s, on %s", outcome.Name, outcome.Cluster)
+	writeSteps(part, outcome)
+	if outcome.HoldsASettledPlacement() {
+		part.addf("  Skew of %s: %d over Zones, %d over Nodes", outcome.JudgedWorkload,
+			outcome.Placement.Skew(scenario.SpreadOverZones), outcome.Placement.Skew(scenario.SpreadOverNodes))
 	}
-	writeTimeline(report, outcome, asked)
+	writeTimeline(part, outcome, asked)
 }
 
-func writeTimeline(report *runReport, outcome lab.Outcome, asked runSetting) {
-	summarised := outcome.Timeline.Summarise()
-	report.printf("  %s\n", timelineFiling(outcome, summarised))
-	for _, line := range summarised.Lines() {
-		report.printf("    %s\n", line)
-	}
-
+func writeTimeline(part *reportPart, outcome lab.Outcome, asked runSetting) {
+	filing := timelineFiling(outcome)
+	part.addf("  %s", separatorOf(utf8.RuneCountInString(filing)))
+	part.addf("  %s", filing)
 	if !asked.wholeTimeline {
 		return
 	}
 
 	for _, entry := range outcome.Timeline.Entries() {
-		report.printf("    %s\n", entry.Line())
+		part.addf("    %s", entry.Line())
 	}
 }
 
-func timelineFiling(outcome lab.Outcome, summarised scenario.TimelineSummary) string {
-	held := summarised.EntryCount()
+func timelineFiling(outcome lab.Outcome) string {
+	held := len(outcome.Timeline.Entries())
 	if outcome.NotFiled != nil {
 		return fmt.Sprintf("Timeline, %d entries, filed nowhere: %v", held, outcome.NotFiled)
 	}
 
-	return fmt.Sprintf("Timeline, %d entries, filed at %s:", held, outcome.FiledAt)
+	return fmt.Sprintf("Timeline, %d entries, filed at %s", held, outcome.FiledAt)
 }
 
 // A lost Timeline fails the run while the Scenario's own outcome stands as
@@ -186,17 +189,50 @@ func notFiled(outcome lab.Outcome) error {
 
 // A Workload's settings are reported one level deeper, so what a Named setting
 // stands for stays visible.
-func writeSteps(report *runReport, outcome lab.Outcome) {
+func writeSteps(part *reportPart, outcome lab.Outcome) {
 	for _, step := range outcome.Steps {
-		report.printf("  %s\n", step)
+		part.addf("  %s", step)
 		for _, setting := range step.Settings {
-			report.printf("    %s\n", setting)
+			part.addf("    %s", setting)
+		}
+		if step.Kind == lab.WaitStep {
+			writeBoard(part, step)
 		}
 	}
 
 	for _, finding := range outcome.Findings {
-		report.printf("  Finding, %s: %s\n", finding.Step, finding.Mismatch)
+		part.addf("  Finding, %s: %s", finding.Step, finding.Mismatch)
 	}
+}
+
+// The narrative stands above the separator, which spans the Wait's line, the
+// narrative and the board, so it reads as one rule under all three. The second
+// separator closes the board whatever follows, so a board never runs into the
+// next Step.
+func writeBoard(part *reportPart, wait lab.Step) {
+	for _, line := range wait.Narrative.Lines() {
+		part.addf("  %s", line)
+	}
+	separator := separatorOf(max(utf8.RuneCountInString(wait.String()), wait.Narrative.Width(), wait.Board.Width()))
+	part.addf("  %s", separator)
+	if wait.BoardNotObserved != nil {
+		part.addf("  no Placement board: %v", wait.BoardNotObserved)
+	}
+	for _, line := range wait.Board.Lines() {
+		part.addf("  %s", line)
+	}
+	part.addf("  %s", separator)
+}
+
+const (
+	separatorRune = "-"
+	// The heavier separator divides whole parts of the run, so it takes a rune
+	// the separators inside a Scenario do not.
+	heavierSeparatorRune = "="
+)
+
+func separatorOf(width int) string {
+	return strings.Repeat(separatorRune, width)
 }
 
 func didNotHold(outcome lab.Outcome) error {
@@ -215,22 +251,22 @@ func didNotHold(outcome lab.Outcome) error {
 	return fmt.Errorf("the Scenario %s did not hold:\n  %s", outcome.Name, strings.Join(found, "\n  "))
 }
 
-// Names are sorted so two runs of the same Topology read alike.
-func writePlacement(report *runReport, settled scenario.Placement) {
-	report.printf("  Placement settled: %d Pods, %d Running, %d Pending\n",
-		len(settled.Pods()), len(settled.PodsInPhase(scenario.PodRunning)), len(settled.PodsInPhase(scenario.PodPending)))
+// reportPart is one part the heavier separator divides: the run's opening lines
+// or one Scenario. A part is held whole until it is printed, because the
+// separator above it must reach its widest line.
+type reportPart []string
 
-	report.printf("  Pods per Zone (Skew %d):\n", settled.Skew(scenario.SpreadOverZones))
-	writeCounts(report, settled.PodsPerZone())
-
-	report.printf("  Pods per Node (Skew %d):\n", settled.Skew(scenario.SpreadOverNodes))
-	writeCounts(report, settled.PodsPerNode())
+func (p *reportPart) addf(format string, args ...any) {
+	*p = append(*p, fmt.Sprintf(format, args...))
 }
 
-func writeCounts(report *runReport, counts map[string]int) {
-	for _, name := range slices.Sorted(maps.Keys(counts)) {
-		report.printf("    %-16s %d\n", name, counts[name])
+func (p reportPart) width() int {
+	widest := 0
+	for _, line := range p {
+		widest = max(widest, utf8.RuneCountInString(line))
 	}
+
+	return widest
 }
 
 // runReport keeps the first write error and stops writing after it, so a closed
@@ -239,6 +275,21 @@ func writeCounts(report *runReport, counts map[string]int) {
 type runReport struct {
 	to  io.Writer
 	err error
+	// lastWidth is the widest line of the part printed last, which the next
+	// heavier separator must reach as well as its own part's.
+	lastWidth int
+}
+
+func (r *runReport) printPart(part reportPart) {
+	for _, line := range part {
+		r.printf("%s\n", line)
+	}
+	r.lastWidth = part.width()
+}
+
+func (r *runReport) printBelowAHeavierSeparator(part reportPart) {
+	r.printf("%s\n", strings.Repeat(heavierSeparatorRune, max(r.lastWidth, part.width())))
+	r.printPart(part)
 }
 
 func (r *runReport) printf(format string, args ...any) {

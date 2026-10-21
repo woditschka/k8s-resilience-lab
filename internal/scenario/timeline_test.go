@@ -31,14 +31,10 @@ const (
 	aSecondPodName          = "web-5d8f9b7c6-9ptwz"
 	aNestedWorkloadName     = aWorkloadName + "-cache"
 	aPodOfTheNestedWorkload = aNestedWorkloadName + "-6c8d7f5b4-mk4qv"
-	aReplicaSetName         = aWorkloadName + "-5d8f9b7c6"
 )
 
 const (
-	noneOfTwoReady = "0 of 2 Pods ready"
-	twoOfTwoReady  = "2 of 2 Pods ready"
-	noneOfOneReady = "0 of 1 Pods ready"
-	oneOfOneReady  = "1 of 1 Pods ready"
+	oneOfOneReady = "1 of 1 Pods ready"
 
 	refusedReason  = "FailedScheduling"
 	refusedMessage = "0/2 nodes are available: 2 node(s) didn't match pod topology spread constraints"
@@ -52,55 +48,59 @@ const (
 	whenTheFirstPodWasBound  = 1200 * time.Millisecond
 	whenTheFirstPodRan       = 1300 * time.Millisecond
 	whenTheSecondPodRan      = 1350 * time.Millisecond
+	whenTheFirstWaitEnded    = 1500 * time.Millisecond
 	whenTheNodeWasLost       = 2000 * time.Millisecond
-	whenThePodRanAgain       = 2200 * time.Millisecond
-	whenTheWorkloadWasReady  = 3400 * time.Millisecond
+	whenThePodWasEvicted     = 2100 * time.Millisecond
+	whenTheReplacementRan    = 2200 * time.Millisecond
+	whenTheSecondWaitEnded   = 2500 * time.Millisecond
 
-	lastNodeReadyAsRead  = "0.220s"
-	workloadLandedAsRead = "1.000s"
-	podsPendingAsRead    = "+1.100s"
-	firstPodRanAsRead    = "+1.300s"
-	secondPodRanAsRead   = "+1.350s"
-	nodeLostAsRead       = "+2.000s"
-	podRanAgainAsRead    = "+2.200s"
-	workloadReadyAsRead  = "3.400s"
+	firstNodeReadyAsRead    = "+0.120s"
+	lastNodeReadyAsRead     = "+0.220s"
+	firstPodBoundAsRead     = "+1.200s"
+	firstPodRanAsRead       = "+1.300s"
+	secondPodRanAsRead      = "+1.350s"
+	nodeLostAsRead          = "+2.000s"
+	podEvictedAsRead        = "+2.100s"
+	replacementRanAsRead    = "+2.200s"
+	aWaitLine               = "Wait for all Pods Ready"
+	aWhenLine               = "When 1 Node fails, zone-2-node-2"
+	aWhenStepNamed          = "When"
+	aPodAsTheBoardNamesIt   = aWorkloadName + "-2xk4m"
+	aSecondPodAsNamed       = aWorkloadName + "-9ptwz"
+	theNestedPodAsNamed     = aNestedWorkloadName + "-mk4qv"
+	whenTheProbePodWasAdded = 150 * time.Millisecond
+	whenTheProbePodRan      = 180 * time.Millisecond
 )
 
-const (
-	noPodLeftPending   = "Pending   none"
-	noWorkloadDeployed = "Workload  none"
-)
+func aWaitNoteAt(elapsed time.Duration) Entry {
+	return Entry{Elapsed: elapsed, Change: ChangeNoted, Kind: StepObject, Name: WaitStepNamed, Detail: aWaitLine}
+}
 
-func TestATimelineSummary_ShouldCollapseTheLabSetupOfTheTopologyToOneLine(t *testing.T) {
+func theWorkloadDeployed() Entry {
+	return Entry{
+		Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aWorkloadName,
+		Detail: oneOfOneReady,
+	}
+}
+
+func linesOf(narratives []WaitNarrative) [][]string {
+	read := make([][]string, 0, len(narratives))
+	for _, narrative := range narratives {
+		read = append(read, narrative.Lines())
+	}
+
+	return read
+}
+
+func TestAWaitNarrative_ShouldNameEachPodsNodeAndWhenItReachedRunningInOrder(t *testing.T) {
 	recorded := []Entry{
 		{
-			Elapsed: whenTheFirstNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
+			Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
 			Reason: string(NodeReady), Detail: someNodeCapacity,
 		},
-		{
-			Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aSecondNodeName,
-			Reason: string(NodeReady), Detail: someNodeCapacity,
-		},
-		{
-			Elapsed: someElapsed, Change: ChangeAdded, Kind: PodObject, Name: aProbePodName,
-			Reason: string(PodPending),
-		},
-		{
-			Elapsed: someElapsed, Change: ChangeModified, Kind: PodObject, Name: aProbePodName,
-			Reason: string(PodRunning), Detail: aNodeName,
-		},
-		{
-			Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aWorkloadName,
-			Detail: noneOfTwoReady,
-		},
-		{
-			Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
-			Reason: string(PodPending),
-		},
-		{
-			Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aSecondPodName,
-			Reason: string(PodPending),
-		},
+		theWorkloadDeployed(),
+		{Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName, Reason: string(PodPending)},
+		{Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aSecondPodName, Reason: string(PodPending)},
 		{
 			Elapsed: whenTheFirstPodWasBound, Change: ChangeModified, Kind: PodObject, Name: aPodName,
 			Reason: string(PodPending), Detail: aNodeName,
@@ -113,88 +113,21 @@ func TestATimelineSummary_ShouldCollapseTheLabSetupOfTheTopologyToOneLine(t *tes
 			Elapsed: whenTheSecondPodRan, Change: ChangeModified, Kind: PodObject, Name: aSecondPodName,
 			Reason: string(PodRunning), Detail: aSecondNodeName,
 		},
-		{
-			Elapsed: whenTheWorkloadWasReady, Change: ChangeModified, Kind: DeploymentObject, Name: aWorkloadName,
-			Detail: twoOfTwoReady,
-		},
-		{
-			Elapsed: someElapsed, Change: ChangeModified, Kind: DeploymentObject, Name: aWorkloadName,
-			Detail: twoOfTwoReady,
-		},
+		aWaitNoteAt(whenTheFirstWaitEnded),
 	}
 
-	summarised := NewTimeline(recorded).Summarise()
+	narrated := NewTimeline(recorded).WaitNarratives()
 
-	expect.Expect(t, summarised.Lines()).To(expect.Equal([]string{
-		"Topology  2 of 2 Nodes Ready after " + lastNodeReadyAsRead,
-		"Workload  " + aWorkloadName + ", " + twoOfTwoReady + " after " + workloadReadyAsRead,
-		"  " + aPodName + "  Pending " + podsPendingAsRead + " -> Running on " + aNodeName + " " + firstPodRanAsRead,
-		"  " + aSecondPodName + "  Pending " + podsPendingAsRead + " -> Running on " + aSecondNodeName + " " + secondPodRanAsRead,
-		noPodLeftPending,
-	}))
+	expect.Expect(t, linesOf(narrated)).To(expect.Equal([][]string{{
+		lastNodeReadyAsRead + "  Node " + aNodeName + " Ready",
+		firstPodBoundAsRead + "  Pod " + aPodAsTheBoardNamesIt + " scheduled on " + aNodeName + ", Running at " + firstPodRanAsRead,
+		secondPodRanAsRead + "  Pod " + aSecondPodAsNamed + " scheduled on " + aSecondNodeName + ", Running at " + secondPodRanAsRead,
+	}}))
 }
 
-func TestAPodThatReachedRunning_ShouldGetALineWithItsPathAndTheNodeItLandedOn(t *testing.T) {
-	recorded := []Entry{
-		{
-			Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
-			Reason: string(NodeReady), Detail: someNodeCapacity,
-		},
-		{
-			Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aWorkloadName,
-			Detail: oneOfOneReady,
-		},
-		{
-			Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
-			Reason: string(PodPending),
-		},
-		{
-			Elapsed: whenTheFirstPodRan, Change: ChangeModified, Kind: PodObject, Name: aPodName,
-			Reason: string(PodRunning), Detail: aNodeName,
-		},
-	}
-
-	summarised := NewTimeline(recorded).Summarise()
-
-	expect.Expect(t, summarised.Lines()).To(expect.Equal([]string{
-		"Topology  1 of 1 Nodes Ready after " + lastNodeReadyAsRead,
-		"Workload  " + aWorkloadName + ", " + oneOfOneReady + " after " + workloadLandedAsRead,
-		"  " + aPodName + "  Pending " + podsPendingAsRead + " -> Running on " + aNodeName + " " + firstPodRanAsRead,
-		noPodLeftPending,
-	}))
-}
-
-func TestAPodLeftPending_ShouldGetALineNamingTheControlPlaneReason(t *testing.T) {
-	recorded := []Entry{
-		{
-			Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
-			Reason: string(NodeReady), Detail: someNodeCapacity,
-		},
-		{
-			Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aWorkloadName,
-			Detail: noneOfOneReady,
-		},
-		{
-			Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
-			Reason: string(PodPending),
-		},
-		{
-			Elapsed: whenTheFirstPodRan, Change: ChangeReported, Kind: PodObject, Name: aPodName,
-			Reason: refusedReason, Detail: refusedMessage,
-		},
-	}
-
-	summarised := NewTimeline(recorded).Summarise()
-
-	expect.Expect(t, summarised.Lines()).To(expect.Equal([]string{
-		"Topology  1 of 1 Nodes Ready after " + lastNodeReadyAsRead,
-		"Workload  " + aWorkloadName + ", " + noneOfOneReady + " after " + workloadLandedAsRead,
-		"  " + aPodName + "  Pending " + podsPendingAsRead + ", " + refusedReason + ": " + refusedMessage,
-		"Pending   " + aPodName,
-	}))
-}
-
-func TestAScenarioThatDeployedNoWorkload_ShouldBeSummarisedByItsTopologyAlone(t *testing.T) {
+// The eviction and the replacement stand in the order they happened and
+// nothing links them.
+func TestAWaitNarrativeAfterAFailure_ShouldNameNodesNotReadyEvictionsAndReplacementsInOrder(t *testing.T) {
 	recorded := []Entry{
 		{
 			Elapsed: whenTheFirstNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
@@ -204,185 +137,157 @@ func TestAScenarioThatDeployedNoWorkload_ShouldBeSummarisedByItsTopologyAlone(t 
 			Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aSecondNodeName,
 			Reason: string(NodeReady), Detail: someNodeCapacity,
 		},
+		theWorkloadDeployed(),
 		{
-			Elapsed: someElapsed, Change: ChangeAdded, Kind: PodObject, Name: aProbePodName,
+			Elapsed: whenTheFirstPodRan, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
 			Reason: string(PodRunning), Detail: aNodeName,
 		},
-	}
-
-	summarised := NewTimeline(recorded).Summarise()
-
-	expect.Expect(t, summarised.Lines()).To(expect.Equal([]string{
-		"Topology  2 of 2 Nodes Ready after " + lastNodeReadyAsRead,
-		noWorkloadDeployed,
-		noPodLeftPending,
-	}))
-}
-
-func TestATimelineOfAScenarioThatEndedEarly_ShouldSummariseTheTopologyItHolds(t *testing.T) {
-	endings := map[string]struct {
-		recorded []Entry
-		reads    string
-	}{
-		"a Scenario that ended before a Node was brought up": {
-			recorded: []Entry{{Elapsed: someElapsed, Change: ChangeNoted, Detail: aStreamGap}},
-			reads:    "Topology  no Nodes",
-		},
-		"a Scenario whose Nodes never reported Ready": {
-			recorded: []Entry{{
-				Elapsed: whenTheFirstNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
-				Reason: string(NodeNotReady), Detail: someNodeCapacity,
-			}},
-			reads: "Topology  0 of 1 Nodes Ready",
-		},
-	}
-
-	for ending, topology := range endings {
-		t.Run(ending, func(t *testing.T) {
-			summarised := NewTimeline(topology.recorded).Summarise()
-
-			expect.Expect(t, summarised.Lines()).To(expect.Equal([]string{
-				topology.reads,
-				noWorkloadDeployed,
-				noPodLeftPending,
-			}))
-		})
-	}
-}
-
-func TestAPodPlacedAgainAfterAFailure_ShouldGetALineWithItsWholePath(t *testing.T) {
-	recorded := []Entry{
+		aWaitNoteAt(whenTheFirstWaitEnded),
+		{Elapsed: whenTheFirstWaitEnded, Change: ChangeNoted, Kind: StepObject, Name: aWhenStepNamed, Detail: aWhenLine},
 		{
-			Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
-			Reason: string(NodeReady), Detail: someNodeCapacity,
+			Elapsed: whenTheNodeWasLost, Change: ChangeModified, Kind: NodeObject, Name: aNodeName,
+			Reason: string(NodeNotReady), Detail: someNodeCapacity,
 		},
 		{
-			Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aWorkloadName,
-			Detail: oneOfOneReady,
+			Elapsed: whenThePodWasEvicted, Change: ChangeModified, Kind: PodObject, Name: aPodName,
+			Reason: string(PodTerminating), Detail: aNodeName,
 		},
 		{
-			Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
+			Elapsed: whenThePodWasEvicted, Change: ChangeAdded, Kind: PodObject, Name: aSecondPodName,
 			Reason: string(PodPending),
 		},
 		{
-			Elapsed: whenTheFirstPodRan, Change: ChangeModified, Kind: PodObject, Name: aPodName,
-			Reason: string(PodRunning), Detail: aNodeName,
-		},
-		{
-			Elapsed: whenTheNodeWasLost, Change: ChangeModified, Kind: PodObject, Name: aPodName,
-			Reason: string(PodPending),
-		},
-		{
-			Elapsed: whenThePodRanAgain, Change: ChangeModified, Kind: PodObject, Name: aPodName,
+			Elapsed: whenTheReplacementRan, Change: ChangeModified, Kind: PodObject, Name: aSecondPodName,
 			Reason: string(PodRunning), Detail: aSecondNodeName,
 		},
+		{
+			Elapsed: whenTheReplacementRan, Change: ChangeModified, Kind: PodObject, Name: aPodName,
+			Reason: string(PodTerminating), Detail: aNodeName,
+		},
+		aWaitNoteAt(whenTheSecondWaitEnded),
 	}
 
-	summarised := NewTimeline(recorded).Summarise()
+	narrated := NewTimeline(recorded).WaitNarratives()
 
-	expect.Expect(t, summarised.Lines()).To(expect.Equal([]string{
-		"Topology  1 of 1 Nodes Ready after " + lastNodeReadyAsRead,
-		"Workload  " + aWorkloadName + ", " + oneOfOneReady + " after " + workloadLandedAsRead,
-		"  " + aPodName + "  Pending " + podsPendingAsRead +
-			" -> Running on " + aNodeName + " " + firstPodRanAsRead +
-			" -> Pending " + nodeLostAsRead +
-			" -> Running on " + aSecondNodeName + " " + podRanAgainAsRead,
-		noPodLeftPending,
+	expect.Expect(t, linesOf(narrated)).To(expect.Equal([][]string{
+		{
+			firstNodeReadyAsRead + "  Node " + aNodeName + " Ready",
+			lastNodeReadyAsRead + "  Node " + aSecondNodeName + " Ready",
+			firstPodRanAsRead + "  Pod " + aPodAsTheBoardNamesIt + " scheduled on " + aNodeName + ", Running at " + firstPodRanAsRead,
+		},
+		{
+			nodeLostAsRead + "  Node " + aNodeName + " NotReady",
+			podEvictedAsRead + "  Pod " + aPodAsTheBoardNamesIt + " evicted from " + aNodeName,
+			replacementRanAsRead + "  Pod " + aSecondPodAsNamed + " scheduled on " + aSecondNodeName + ", Running at " + replacementRanAsRead,
+		},
 	}))
 }
 
-func TestAScenarioWithTwoWorkloads_ShouldGiveEachWorkloadItsOwnCountAndPodLines(t *testing.T) {
+func TestAWaitNarrative_ShouldNameEachPodLeftPendingWithTheSchedulersReason(t *testing.T) {
+	recorded := []Entry{
+		theWorkloadDeployed(),
+		{Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName, Reason: string(PodPending)},
+		{
+			Elapsed: whenTheFirstPodRan, Change: ChangeReported, Kind: PodObject, Name: aPodName,
+			Reason: refusedReason, Detail: refusedMessage,
+		},
+		aWaitNoteAt(whenTheFirstWaitEnded),
+	}
+
+	narrated := NewTimeline(recorded).WaitNarratives()
+
+	expect.Expect(t, linesOf(narrated)).To(expect.Equal([][]string{{
+		"Pod " + aPodAsTheBoardNamesIt + " left Pending, " + refusedReason + ": " + refusedMessage,
+	}}))
+}
+
+func TestAWaitNarrative_ShouldLeaveOutThePodsTheLabPlacesWhileProvisioning(t *testing.T) {
 	recorded := []Entry{
 		{
-			Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
+			Elapsed: whenTheFirstNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
 			Reason: string(NodeReady), Detail: someNodeCapacity,
 		},
+		{Elapsed: whenTheProbePodWasAdded, Change: ChangeAdded, Kind: PodObject, Name: aProbePodName, Reason: string(PodPending)},
 		{
-			Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aWorkloadName,
-			Detail: oneOfOneReady,
+			Elapsed: whenTheProbePodRan, Change: ChangeModified, Kind: PodObject, Name: aProbePodName,
+			Reason: string(PodRunning), Detail: aNodeName,
 		},
+		aWaitNoteAt(whenTheFirstWaitEnded),
+	}
+
+	narrated := NewTimeline(recorded).WaitNarratives()
+
+	expect.Expect(t, linesOf(narrated)).To(expect.Equal([][]string{{
+		firstNodeReadyAsRead + "  Node " + aNodeName + " Ready",
+	}}))
+}
+
+// A change after the last Wait's note stands under no Wait, since no board
+// follows it.
+func TestAWaitAfterWhichNothingChangedThePlacement_ShouldHaveNoNarrative(t *testing.T) {
+	recorded := []Entry{
+		{
+			Elapsed: whenTheFirstNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
+			Reason: string(NodeReady), Detail: someNodeCapacity,
+		},
+		aWaitNoteAt(whenTheFirstWaitEnded),
+		aWaitNoteAt(whenTheSecondWaitEnded),
+		{
+			Elapsed: whenTheNodeWasLost, Change: ChangeModified, Kind: NodeObject, Name: aNodeName,
+			Reason: string(NodeNotReady), Detail: someNodeCapacity,
+		},
+	}
+
+	narrated := NewTimeline(recorded).WaitNarratives()
+
+	expect.Expect(t, linesOf(narrated)).To(expect.Equal([][]string{
+		{firstNodeReadyAsRead + "  Node " + aNodeName + " Ready"},
+		{},
+	}))
+}
+
+func TestAPodScheduledBeforeOneWaitAndRunningBeforeTheNext_ShouldReadAsRunningUnderTheNext(t *testing.T) {
+	recorded := []Entry{
+		theWorkloadDeployed(),
+		{
+			Elapsed: whenTheFirstPodWasBound, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
+			Reason: string(PodPending), Detail: aNodeName,
+		},
+		aWaitNoteAt(whenTheFirstWaitEnded),
+		{
+			Elapsed: whenTheReplacementRan, Change: ChangeModified, Kind: PodObject, Name: aPodName,
+			Reason: string(PodRunning), Detail: aNodeName,
+		},
+		aWaitNoteAt(whenTheSecondWaitEnded),
+	}
+
+	narrated := NewTimeline(recorded).WaitNarratives()
+
+	expect.Expect(t, linesOf(narrated)).To(expect.Equal([][]string{
+		{firstPodBoundAsRead + "  Pod " + aPodAsTheBoardNamesIt + " scheduled on " + aNodeName},
+		{replacementRanAsRead + "  Pod " + aPodAsTheBoardNamesIt + " Running on " + aNodeName},
+	}))
+}
+
+func TestAPodOfTwoNestedWorkloadNames_ShouldBeNamedForTheLongestItBeginsWith(t *testing.T) {
+	recorded := []Entry{
+		theWorkloadDeployed(),
 		{
 			Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aNestedWorkloadName,
 			Detail: oneOfOneReady,
 		},
 		{
-			Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodOfTheNestedWorkload,
-			Reason: string(PodPending),
-		},
-		{
-			Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
-			Reason: string(PodPending),
-		},
-		{
-			Elapsed: whenTheFirstPodRan, Change: ChangeModified, Kind: PodObject, Name: aPodOfTheNestedWorkload,
+			Elapsed: whenTheFirstPodRan, Change: ChangeAdded, Kind: PodObject, Name: aPodOfTheNestedWorkload,
 			Reason: string(PodRunning), Detail: aNodeName,
 		},
-		{
-			Elapsed: whenTheSecondPodRan, Change: ChangeModified, Kind: PodObject, Name: aPodName,
-			Reason: string(PodRunning), Detail: aSecondNodeName,
-		},
+		aWaitNoteAt(whenTheFirstWaitEnded),
 	}
 
-	summarised := NewTimeline(recorded).Summarise()
+	narrated := NewTimeline(recorded).WaitNarratives()
 
-	expect.Expect(t, summarised.Lines()).To(expect.Equal([]string{
-		"Topology  1 of 1 Nodes Ready after " + lastNodeReadyAsRead,
-		"Workload  " + aWorkloadName + ", " + oneOfOneReady + " after " + workloadLandedAsRead,
-		"  " + aPodName + "  Pending " + podsPendingAsRead + " -> Running on " + aSecondNodeName + " " + secondPodRanAsRead,
-		"Workload  " + aNestedWorkloadName + ", " + oneOfOneReady + " after " + workloadLandedAsRead,
-		"  " + aPodOfTheNestedWorkload + "  Pending " + podsPendingAsRead + " -> Running on " + aNodeName + " " + firstPodRanAsRead,
-		noPodLeftPending,
-	}))
-}
-
-func TestAnEntryNamingNoObjectTheSummaryGroupsBy_ShouldReadInTheEntryCountAlone(t *testing.T) {
-	// Four entries are grouped under a Node, a Workload and a Pod, and the
-	// fifth under none.
-	const everyEntryRecorded = 5
-
-	ungrouped := map[string]Entry{
-		"a ReplicaSet, which the Workload's own Deployment entries already name": {
-			Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: ReplicaSetObject,
-			Name: aReplicaSetName, Detail: oneOfOneReady,
-		},
-		"a note the Timeline makes about itself, which names no object at all": {
-			Elapsed: someElapsed, Change: ChangeNoted, Detail: aStreamGap,
-		},
-	}
-
-	for ungroupedAs, entry := range ungrouped {
-		t.Run(ungroupedAs, func(t *testing.T) {
-			recorded := []Entry{
-				{
-					Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
-					Reason: string(NodeReady), Detail: someNodeCapacity,
-				},
-				{
-					Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aWorkloadName,
-					Detail: oneOfOneReady,
-				},
-				{
-					Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
-					Reason: string(PodPending),
-				},
-				{
-					Elapsed: whenTheFirstPodRan, Change: ChangeModified, Kind: PodObject, Name: aPodName,
-					Reason: string(PodRunning), Detail: aNodeName,
-				},
-				entry,
-			}
-
-			summarised := NewTimeline(recorded).Summarise()
-
-			expect.Expect(t, summarised.Lines()).To(expect.Equal([]string{
-				"Topology  1 of 1 Nodes Ready after " + lastNodeReadyAsRead,
-				"Workload  " + aWorkloadName + ", " + oneOfOneReady + " after " + workloadLandedAsRead,
-				"  " + aPodName + "  Pending " + podsPendingAsRead + " -> Running on " + aNodeName + " " + firstPodRanAsRead,
-				noPodLeftPending,
-			}))
-			expect.Expect(t, summarised.EntryCount()).To(expect.Equal(everyEntryRecorded))
-		})
-	}
+	expect.Expect(t, linesOf(narrated)).To(expect.Equal([][]string{{
+		firstPodRanAsRead + "  Pod " + theNestedPodAsNamed + " scheduled on " + aNodeName + ", Running at " + firstPodRanAsRead,
+	}}))
 }
 
 // Only that the two entries differ matters.
@@ -420,6 +325,10 @@ func TestAnEntryOfATimeline_ShouldReadAsTheTimeTheChangeAndTheReasonGivenForIt(t
 		"a note the Timeline makes about itself, naming no object": {
 			entry: Entry{Elapsed: someElapsed, Change: ChangeNoted, Detail: aStreamGap},
 			reads: elapsedAsRead + "  noted, " + aStreamGap,
+		},
+		"a Step's note, carrying its line": {
+			entry: Entry{Elapsed: someElapsed, Change: ChangeNoted, Kind: StepObject, Name: WaitStepNamed, Detail: aWaitLine},
+			reads: elapsedAsRead + "  Step Wait noted, " + aWaitLine,
 		},
 	}
 

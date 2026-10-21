@@ -5,7 +5,11 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+// pendingLabel heads the Pods a board holds on no Node.
+const pendingLabel = "Pending"
 
 // A Change may be a note the Timeline makes about itself, so an incomplete
 // Timeline says so rather than reading complete.
@@ -30,7 +34,13 @@ const (
 	PodObject        ObjectKind = "Pod"
 	DeploymentObject ObjectKind = "Deployment"
 	ReplicaSetObject ObjectKind = "ReplicaSet"
+	// StepObject is a Step's note, named by which of Given, When, Wait or Then
+	// the Step is and carrying the Step's line.
+	StepObject ObjectKind = "Step"
 )
+
+// WaitStepNamed names a Wait's note, the one each Wait narrative ends at.
+const WaitStepNamed = "Wait"
 
 // NodeReadiness is the one thing about a Node a Placement depends on.
 type NodeReadiness string
@@ -101,341 +111,257 @@ func (t Timeline) Entries() []Entry {
 	return slices.Clone(t.entries)
 }
 
-// Summarise is a pure function of the entries, so a Timeline read back from its
-// file summarises the way the run that recorded it did.
-func (t Timeline) Summarise() TimelineSummary {
-	reading := t.read()
-
-	return TimelineSummary{
-		entries:   len(t.entries),
-		topology:  reading.topology(),
-		workloads: reading.workloads(),
-	}
-}
-
-// Every part of the summary derives from this one pass over the entries.
-func (t Timeline) read() timelineReading {
-	reading := timelineReading{nodes: newNamedEntries(), deployments: newNamedEntries(), pods: newNamedEntries()}
+// WaitNarratives gives one narrative per Wait note, in note order. It is a pure
+// function of the entries, so a Timeline read back from its file narrates the
+// way the run that recorded it did. A change after the last Wait's note stands
+// under no Wait.
+func (t Timeline) WaitNarratives() []WaitNarrative {
+	narrating := newNarration(t.workloadsNamed())
+	var narratives []WaitNarrative
 	for _, entry := range t.entries {
-		switch entry.Kind {
-		case NodeObject:
-			reading.nodes.add(entry)
-		case DeploymentObject:
-			reading.deployments.add(entry)
-		case PodObject:
-			reading.pods.add(entry)
-		case ReplicaSetObject:
-			// A ReplicaSet entry names the Deployment's own replica set, which
-			// the Deployment entries already cover.
-		default:
-			// A note names no object, so it reads in the entry count alone.
+		if entry.notesAWait() {
+			narratives = append(narratives, narrating.cut())
+
+			continue
+		}
+		narrating.read(entry)
+	}
+
+	return narratives
+}
+
+func (t Timeline) workloadsNamed() []string {
+	var named []string
+	for _, entry := range t.entries {
+		if entry.Kind == DeploymentObject && !slices.Contains(named, entry.Name) {
+			named = append(named, entry.Name)
 		}
 	}
 
-	return reading
+	return named
 }
 
-// The labels share one column width so a summary scans down.
-const (
-	topologyLabel = "Topology"
-	workloadLabel = "Workload"
-	pendingLabel  = "Pending"
-	nothingNamed  = "none"
-	labelWidth    = 8
-)
-
-// TimelineSummary holds no file path, because where a Timeline was filed is the
-// run's to say rather than the record's.
-type TimelineSummary struct {
-	entries   int
-	topology  topologyReading
-	workloads []workloadReading
+func (e Entry) notesAWait() bool {
+	return e.Kind == StepObject && e.Name == WaitStepNamed
 }
 
-func (s TimelineSummary) EntryCount() int {
-	return s.entries
+// WaitNarrative is the moments that changed the Placement before one Wait, in
+// the order they happened, and the Pods left Pending as it ended.
+type WaitNarrative struct {
+	lines []string
 }
 
-// Lines gives lines carrying no indent of their own, so the caller prints them
-// under its own and composes no wording.
-func (s TimelineSummary) Lines() []string {
-	lines := []string{s.topology.line()}
-	if len(s.workloads) == 0 {
-		lines = append(lines, labelled(workloadLabel, nothingNamed))
+// Lines carry no indent of their own, so the caller prints them under its own.
+func (n WaitNarrative) Lines() []string {
+	return slices.Clone(n.lines)
+}
+
+// Width is what a separator below the narrative spans at least.
+func (n WaitNarrative) Width() int {
+	widest := 0
+	for _, line := range n.lines {
+		widest = max(widest, utf8.RuneCountInString(line))
 	}
 
-	for _, workload := range s.workloads {
-		lines = append(lines, workload.lines()...)
-	}
-
-	return append(lines, labelled(pendingLabel, s.podsLeftPending()))
+	return widest
 }
 
-func (s TimelineSummary) podsLeftPending() string {
-	var left []string
-	for _, workload := range s.workloads {
-		left = append(left, workload.podsLeftPending()...)
-	}
-
-	if len(left) == 0 {
-		return nothingNamed
-	}
-
-	return strings.Join(left, ", ")
+// Equal is what go-cmp compares a narrative through, since its field is
+// unexported.
+func (n WaitNarrative) Equal(other WaitNarrative) bool {
+	return slices.Equal(n.lines, other.lines)
 }
 
-type topologyReading struct {
-	nodes   int
-	ready   int
-	readyAt time.Duration
+// narration keeps each object's last reading across the whole Timeline and the
+// moments since the last cut.
+type narration struct {
+	workloads []string
+	nodes     map[string]NodeReadiness
+	pods      map[string]*podNarrated
+	podOrder  []string
+	moments   []moment
 }
 
-func (t topologyReading) line() string {
-	if t.nodes == 0 {
-		return labelled(topologyLabel, "no Nodes")
+type podNarrated struct {
+	named     string
+	node      string
+	phase     PodPhase
+	reason    string
+	ran       bool
+	evicted   bool
+	removed   bool
+	scheduled int
+}
+
+// noMoment marks a Pod whose scheduling stands under an earlier Wait, so its
+// Running reads as a moment of its own.
+const noMoment = -1
+
+type moment struct {
+	at      time.Duration
+	says    string
+	running string
+}
+
+func (m moment) line() string {
+	line := elapsedAt(m.at) + "  " + m.says
+	if m.running != "" {
+		line += ", Running at " + m.running
 	}
 
-	counted := fmt.Sprintf("%d of %d Nodes %s", t.ready, t.nodes, NodeReady)
-	if t.ready == 0 {
-		return labelled(topologyLabel, counted)
+	return line
+}
+
+func newNarration(workloads []string) *narration {
+	return &narration{workloads: workloads, nodes: map[string]NodeReadiness{}, pods: map[string]*podNarrated{}}
+}
+
+func (n *narration) read(entry Entry) {
+	switch entry.Kind {
+	case NodeObject:
+		n.readNode(entry)
+	case PodObject:
+		n.readPod(entry)
+	default:
+		// A Deployment, a ReplicaSet, a Step or a note about the record changes
+		// no Placement.
+	}
+}
+
+// A Node first seen counts as NotReady, so its coming up reads as turning
+// Ready and a Node first seen NotReady reads as nothing.
+func (n *narration) readNode(entry Entry) {
+	if !entry.observed() || entry.Change == ChangeRemoved {
+		return
 	}
 
-	return labelled(topologyLabel, counted+" after "+elapsedAfter(t.readyAt))
+	readiness := NodeReadiness(entry.Reason)
+	last, seen := n.nodes[entry.Name]
+	if !seen {
+		last = NodeNotReady
+	}
+	n.nodes[entry.Name] = readiness
+	if readiness != last {
+		n.moments = append(n.moments, moment{at: entry.Elapsed, says: "Node " + entry.Name + " " + string(readiness)})
+	}
 }
 
-type workloadReading struct {
-	name      string
-	readiness string
-	readyAt   time.Duration
-	pods      []podReading
-}
+// A Pod no Workload claims is the lab's own setup and in no narrative.
+func (n *narration) readPod(entry Entry) {
+	pod, claimed := n.podOf(entry.Name)
+	if !claimed {
+		return
+	}
+	if !entry.observed() {
+		pod.reason = entry.reasonGiven()
 
-func (w workloadReading) lines() []string {
-	lines := make([]string, 0, len(w.pods)+1)
-	lines = append(lines, labelled(workloadLabel, w.reached()))
-	for _, pod := range w.pods {
-		lines = append(lines, podIndent+pod.line())
+		return
 	}
 
-	return lines
+	if entry.Change == ChangeRemoved {
+		pod.removed = true
+	}
+	phase := PodPhase(entry.Reason)
+	if phase == PodTerminating {
+		n.evict(pod, entry)
+
+		return
+	}
+	if pod.node == "" && entry.Detail != "" {
+		pod.node = entry.Detail
+		pod.scheduled = len(n.moments)
+		n.moments = append(n.moments, moment{at: entry.Elapsed, says: "Pod " + pod.named + " scheduled on " + pod.node})
+	}
+	pod.phase = phase
+	if phase == PodRunning && !pod.ran {
+		n.run(pod, entry.Elapsed)
+	}
 }
 
-// A Workload the control plane never reported on reads as its name.
-func (w workloadReading) reached() string {
-	if w.readiness == "" {
-		return w.name
+// The lab deletes no Workload Pod, so the first entry marking one for deletion
+// is its eviction.
+func (n *narration) evict(pod *podNarrated, entry Entry) {
+	pod.phase = PodTerminating
+	if pod.evicted {
+		return
 	}
 
-	return w.name + ", " + w.readiness + " after " + elapsedAfter(w.readyAt)
+	pod.evicted = true
+	n.moments = append(n.moments, moment{at: entry.Elapsed, says: "Pod " + pod.named + " evicted from " + pod.node})
 }
 
-func (w workloadReading) podsLeftPending() []string {
-	var left []string
-	for _, pod := range w.pods {
-		if pod.leftPending() {
-			left = append(left, pod.name)
+func (n *narration) run(pod *podNarrated, at time.Duration) {
+	pod.ran = true
+	if pod.scheduled != noMoment {
+		n.moments[pod.scheduled].running = elapsedAt(at)
+
+		return
+	}
+
+	n.moments = append(n.moments, moment{at: at, says: "Pod " + pod.named + " Running on " + pod.node})
+}
+
+func (n *narration) podOf(name string) (*podNarrated, bool) {
+	if pod, seen := n.pods[name]; seen {
+		return pod, true
+	}
+
+	workload := workloadOf(name, n.workloads)
+	if workload == "" {
+		return nil, false
+	}
+
+	pod := &podNarrated{named: boardNameOf(workload, name), scheduled: noMoment}
+	n.pods[name] = pod
+	n.podOrder = append(n.podOrder, name)
+
+	return pod, true
+}
+
+// cut ends one Wait's narrative with the Pods left Pending as it ended, and
+// starts the next.
+func (n *narration) cut() WaitNarrative {
+	lines := make([]string, 0, len(n.moments))
+	for _, happened := range n.moments {
+		lines = append(lines, happened.line())
+	}
+	for _, name := range n.podOrder {
+		if pod := n.pods[name]; pod.leftPending() {
+			lines = append(lines, pod.pendingLine())
 		}
 	}
 
-	return left
-}
-
-const podIndent = "  "
-
-type podReading struct {
-	name   string
-	path   []podStep
-	reason string
-}
-
-func (p podReading) line() string {
-	line := p.name
-	if taken := p.pathTaken(); taken != "" {
-		line += "  " + taken
+	n.moments = nil
+	for _, pod := range n.pods {
+		pod.scheduled = noMoment
 	}
-	if p.leftPending() && p.reason != "" {
+
+	return WaitNarrative{lines: lines}
+}
+
+func (p *podNarrated) leftPending() bool {
+	return p.node == "" && p.phase == PodPending && !p.removed
+}
+
+func (p *podNarrated) pendingLine() string {
+	line := "Pod " + p.named + " left Pending"
+	if p.reason != "" {
 		line += ", " + p.reason
 	}
 
 	return line
 }
 
-// The whole path is printed, so a Pod placed again after a Failure reads as
-// more than its first Placement.
-func (p podReading) pathTaken() string {
-	taken := make([]string, 0, len(p.path))
-	for _, step := range p.path {
-		taken = append(taken, step.read())
-	}
-
-	return strings.Join(taken, " -> ")
-}
-
-// A Pod the lab never read a phase for counts as unplaced: it was never seen
-// running.
-func (p podReading) leftPending() bool {
-	last, taken := p.lastStep()
-
-	return !taken || last.phase == PodPending
-}
-
-func (p podReading) lastStep() (podStep, bool) {
-	if len(p.path) == 0 {
-		return podStep{}, false
-	}
-
-	return p.path[len(p.path)-1], true
-}
-
-type podStep struct {
-	phase PodPhase
-	node  string
-	at    time.Duration
-}
-
-func (s podStep) read() string {
-	if s.node == "" {
-		return string(s.phase) + " " + elapsedAt(s.at)
-	}
-
-	return string(s.phase) + " on " + s.node + " " + elapsedAt(s.at)
-}
-
-type timelineReading struct {
-	nodes       namedEntries
-	deployments namedEntries
-	pods        namedEntries
-}
-
-func (r timelineReading) topology() topologyReading {
-	reading := topologyReading{nodes: len(r.nodes.order)}
-	for _, name := range r.nodes.order {
-		readyAt, reported := firstReadyAt(r.nodes.of(name))
-		if !reported {
-			continue
-		}
-
-		reading.ready++
-		reading.readyAt = max(reading.readyAt, readyAt)
-	}
-
-	return reading
-}
-
-func (r timelineReading) workloads() []workloadReading {
-	readings := make([]workloadReading, 0, len(r.deployments.order))
-	for _, name := range r.deployments.order {
-		readiness, readyAt := readinessReached(r.deployments.of(name))
-		readings = append(readings, workloadReading{
-			name: name, readiness: readiness, readyAt: readyAt, pods: r.podsOf(name),
-		})
-	}
-
-	return readings
-}
-
-func (r timelineReading) podsOf(workload string) []podReading {
-	var readings []podReading
-	for _, name := range r.pods.order {
-		if r.workloadOf(name) != workload {
-			continue
-		}
-
-		readings = append(readings, podRead(name, r.pods.of(name)))
-	}
-
-	return readings
-}
-
-// The longest match wins where two Workload names nest. A Pod no Workload
-// claims is the lab's own setup and reads in the Topology line alone.
-func (r timelineReading) workloadOf(pod string) string {
+// The longest match wins where two Workload names nest.
+func workloadOf(pod string, workloads []string) string {
 	claimed := ""
-	for _, workload := range r.deployments.order {
+	for _, workload := range workloads {
 		if strings.HasPrefix(pod, workload+"-") && len(workload) > len(claimed) {
 			claimed = workload
 		}
 	}
 
 	return claimed
-}
-
-// Readiness is read from changes to the Node itself rather than from what the
-// control plane said about it.
-func firstReadyAt(changes []Entry) (time.Duration, bool) {
-	for _, entry := range changes {
-		if entry.observed() && entry.Reason == string(NodeReady) {
-			return entry.Elapsed, true
-		}
-	}
-
-	return 0, false
-}
-
-func readinessReached(changes []Entry) (string, time.Duration) {
-	reached := ""
-	for _, entry := range changes {
-		if entry.observed() {
-			reached = entry.Detail
-		}
-	}
-
-	for _, entry := range changes {
-		if entry.observed() && entry.Detail == reached {
-			return reached, entry.Elapsed
-		}
-	}
-
-	return reached, 0
-}
-
-// A further change in the same phase is the scheduler binding the Pod to a
-// Node, which the current step already reads as.
-func podRead(name string, changes []Entry) podReading {
-	reading := podReading{name: name}
-	for _, entry := range changes {
-		if !entry.observed() {
-			reading.reason = entry.reasonGiven()
-
-			continue
-		}
-
-		step := podStep{phase: PodPhase(entry.Reason), node: entry.Detail, at: entry.Elapsed}
-		if last, taken := reading.lastStep(); taken && last.phase == step.phase {
-			continue
-		}
-
-		reading.path = append(reading.path, step)
-	}
-
-	return reading
-}
-
-// namedEntries keeps the order each object was first named in, which is the
-// order a summary reads.
-type namedEntries struct {
-	order   []string
-	grouped map[string][]Entry
-}
-
-func newNamedEntries() namedEntries {
-	return namedEntries{grouped: map[string][]Entry{}}
-}
-
-func (n *namedEntries) add(entry Entry) {
-	if _, named := n.grouped[entry.Name]; !named {
-		n.order = append(n.order, entry.Name)
-	}
-
-	n.grouped[entry.Name] = append(n.grouped[entry.Name], entry)
-}
-
-func (n namedEntries) of(name string) []Entry {
-	return n.grouped[name]
-}
-
-func labelled(label, read string) string {
-	return fmt.Sprintf("%-*s  %s", labelWidth, label, read)
 }
 
 func elapsedAfter(elapsed time.Duration) string {

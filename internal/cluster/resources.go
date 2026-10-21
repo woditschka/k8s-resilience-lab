@@ -93,6 +93,14 @@ func podSelectorOf(workload scenario.Workload) string {
 	return workloadLabels(workload.Name()).String()
 }
 
+// The label's presence alone selects, so one list holds the Pods of every
+// Workload whatever its name.
+func everyWorkloadsPods() string {
+	return metav1.FormatLabelSelector(&metav1.LabelSelector{
+		MatchExpressions: []metav1.LabelSelectorRequirement{{Key: workloadLabel, Operator: metav1.LabelSelectorOpExists}},
+	})
+}
+
 func probeLabels() labels.Set {
 	return labels.Set{probeLabel: probeLabelValue}
 }
@@ -495,17 +503,25 @@ func fromPods(observed []corev1.Pod) []scenario.Pod {
 			continue
 		}
 		pods = append(pods, scenario.Pod{
-			Name:  pod.Name,
-			Node:  pod.Spec.NodeName,
-			Phase: observedPhaseOf(pod),
-			Ready: isPodReady(pod),
+			Name:     pod.Name,
+			Workload: pod.Labels[workloadLabel],
+			Node:     pod.Spec.NodeName,
+			Phase:    observedPhaseOf(pod),
+			Ready:    isPodReady(pod),
 		})
 	}
 
 	return pods
 }
 
+// A Pod on a stopped Node stays marked for deletion, since no simulator
+// confirms its removal, so the mark is read rather than the phase it still
+// reports.
 func observedPhaseOf(pod corev1.Pod) scenario.PodPhase {
+	if pod.DeletionTimestamp != nil {
+		return scenario.PodTerminating
+	}
+
 	phase, named := observedPhases[pod.Status.Phase]
 	if !named {
 		return scenario.PodUnknown

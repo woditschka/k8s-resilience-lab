@@ -5,8 +5,10 @@ package lab
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/node"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
+	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
 )
 
 // Each container on the engine says which Scenario it serves.
@@ -31,6 +34,10 @@ const (
 	theGpuRequestScenario      = "a-request-only-gpu-nodes-hold"
 	theLabelFailureScenario    = "a-failure-by-label"
 	theNextWorkloadScenario    = "a-next-workload"
+	theUnreachedWaitScenario   = "a-wait-the-scenario-does-not-reach"
+	theUnobservedBoardScenario = "a-board-that-cannot-be-observed"
+	theUnreachedNarrative      = "a-narrative-of-a-wait-not-reached"
+	theNotedStepsScenario      = "a-scenario-noting-its-steps"
 )
 
 // The control plane is polled rather than watched, so a Wait with nothing to
@@ -52,9 +59,9 @@ func aFullAccessTheControlPlaneRefuses() pod.Customization {
 	return pod.FullAccess(func(spec *corev1.PodSpec) { spec.RestartPolicy = theRefusedRestartPolicy })
 }
 
-// aScenarioOnAClusterFor fails only the calling test where no engine answers,
-// so every test that needs none still runs.
-func aScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario {
+// aClusterFor fails only the calling test where no engine answers, so every
+// test that needs none still runs.
+func aClusterFor(t *testing.T, scenarioName string) *cluster.SimulatedCluster {
 	t.Helper()
 
 	engine, err := cluster.DetectEngine(t.Context(), slog.New(slog.DiscardHandler))
@@ -72,6 +79,36 @@ func aScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario {
 			t.Errorf("remove the Simulated Cluster %s: %v", provisioned.Name(), err)
 		}
 	})
+
+	return provisioned
+}
+
+func aScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario {
+	t.Helper()
+
+	return newScenario(t.Context(), aClusterFor(t, scenarioName))
+}
+
+func aRecordedScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario {
+	t.Helper()
+
+	provisioned := aClusterFor(t, scenarioName)
+	filed := timeline.NewFolder(t.TempDir()).Open(timeline.Header{
+		Scenario: scenarioName, Cluster: provisioned.Name(), Kubernetes: cluster.DefaultKubernetesVersion().String(),
+	})
+	// Registered after the cluster's removal, so it runs first: the recording
+	// stops before its file closes, as a recording that outlives the file
+	// would write into a closed one.
+	t.Cleanup(func() {
+		provisioned.StopRecording()
+		filed.Close()
+		if err := filed.Err(); err != nil {
+			t.Errorf("file the Timeline of %s: %v", provisioned.Name(), err)
+		}
+	})
+	if err := provisioned.Record(t.Context(), filed); err != nil {
+		t.Fatalf("record the Timeline of %s: %v", provisioned.Name(), err)
+	}
 
 	return newScenario(t.Context(), provisioned)
 }
@@ -399,4 +436,158 @@ func TestALaterWorkload_ShouldBeDeployedBesideTheEarlierAndJudgedAlone(t *testin
 	}
 	expect.Expect(t, stillPlaced.PodsPerNodePool()).
 		To(expect.Equal(map[string]int{string(generalNodePool): generalPods, string(gpuNodePool): noPod}))
+}
+
+// The board stands as of the moment the Scenario ended, so a Wait refused its
+// stated time shows the Nodes the Wait before it brought up, and no Pod.
+func TestAWaitTheScenarioDoesNotReach_ShouldStillPrintItsPlacementBoard(t *testing.T) {
+	t.Parallel()
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	ending := aScenarioOnAClusterFor(t, theUnreachedWaitScenario)
+
+	ending.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement()).
+		WaitFor().AllPodsReadyWithinSeconds(noSecondsAtAll)
+
+	ended := ending.outcome()
+	everyNodeAndNoPod := scenario.NewPlacementBoard(declared, nil, scenario.PlacementBoard{}).Lines()
+	expect.Expect(t, boardsOf(ended.Steps)).To(expect.Equal([][]string{everyNodeAndNoPod, everyNodeAndNoPod}))
+	causeNames(t, ended, strconv.Itoa(noSecondsAtAll))
+}
+
+func boardsOf(steps []Step) [][]string {
+	var boards [][]string
+	for _, step := range steps {
+		if step.Kind == WaitStep {
+			boards = append(boards, step.Board.Lines())
+		}
+	}
+
+	return boards
+}
+
+// A run whose context is gone can observe nothing once its Wait set out to
+// change the cluster, so the Wait carries why its board is missing in the
+// board's place.
+func TestABoardThatCannotBeObserved_ShouldBeNamedOnItsWaitWithTheCause(t *testing.T) {
+	t.Parallel()
+	shared := aClusterFor(t, theUnobservedBoardScenario)
+	gone, cancel := context.WithCancel(t.Context())
+	cancel()
+	waiting := newScenario(gone, shared)
+
+	waiting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
+
+	steps := waiting.outcome().Steps
+	unobserved := steps[len(steps)-1]
+	expect.Expect(t, errors.Is(unobserved.BoardNotObserved, context.Canceled)).To(expect.Equal(true))
+	expect.Expect(t, unobserved.Board.Lines()).To(expect.HaveLen[string](0))
+}
+
+// Long enough for the scheduler to refuse the Pod with no room, and far short
+// of the lab's waiting time, since the Wait is never reached.
+const (
+	aTimeThePodWithNoRoomNeverMeets = 10
+	theSchedulersRefusal            = "left Pending, FailedScheduling: "
+)
+
+// The first Wait's narrative is every Node coming up and no probe Pod, and the
+// Wait the Scenario ends at still names the Pod left Pending with the
+// scheduler's reason.
+func TestAWaitTheScenarioDoesNotReach_ShouldStillPrintItsNarrativeUpToTheEnd(t *testing.T) {
+	t.Parallel()
+	ending := aRecordedScenarioOnAClusterFor(t, theUnreachedNarrative)
+
+	ending.Given().Topology(Zones(twoZones), node.Pool(generalNodePool, node.PerZone(twoNodesPerZone),
+		node.Capacity{CPU: someCoresPerNode, Memory: someGibibytesPerNode * node.Gi, Pods: roomForOnePodPerNode}))
+	ending.WaitFor().AllNodesReady()
+	ending.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), resilientPlacement()).
+		WaitFor().AllPodsReadyWithinSeconds(aTimeThePodWithNoRoomNeverMeets)
+
+	ended := ending.finish()
+	narratives := narrativesOf(ended.Steps)
+	expect.Expect(t, ended.Ended()).To(expect.Equal(true))
+	expect.Expect(t, narratives).To(expect.HaveLen[[]string](twoWaits))
+	expect.Expect(t, linesNaming(narratives[0], aNodeComingUp)).To(expect.HaveLen[string](twoZones * twoNodesPerZone))
+	expect.Expect(t, narratives[0]).To(expect.HaveLen[string](twoZones * twoNodesPerZone))
+	expect.Expect(t, linesNaming(narratives[1], theSchedulersRefusal)).To(expect.HaveLen[string](onePodLeftPending))
+}
+
+const (
+	twoWaits      = 2
+	aNodeComingUp = " Ready"
+)
+
+func narrativesOf(steps []Step) [][]string {
+	var narratives [][]string
+	for _, step := range steps {
+		if step.Kind == WaitStep {
+			narratives = append(narratives, step.Narrative.Lines())
+		}
+	}
+
+	return narratives
+}
+
+func linesNaming(lines []string, named string) []string {
+	var naming []string
+	for _, line := range lines {
+		if strings.Contains(line, named) {
+			naming = append(naming, line)
+		}
+	}
+
+	return naming
+}
+
+// A Given or Then is noted once its line is complete, a When before it stops
+// its first Node and a Wait after its board. Every Node is Ready at the first
+// Wait's note, so the first Step note or Node turning NotReady after it shows
+// which came first, the When's note or its Failure.
+func TestAScenarioRecordingItsSteps_ShouldNoteEachStepAtItsMomentAmongTheEntries(t *testing.T) {
+	t.Parallel()
+	noting := aRecordedScenarioOnAClusterFor(t, theNotedStepsScenario)
+
+	noting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
+	noting.When().NodesFail(Nodes(oneNodeFailing))
+	noting.WaitFor().PlacementSettled()
+	noting.Then().NoPodsOnTheFailedNodes()
+
+	noted := noting.finish()
+	entries := noted.Timeline.Entries()
+	expect.Expect(t, causeOf(noted)).To(expect.Equal(""))
+	expect.Expect(t, stepsNotedIn(entries)).To(expect.Equal([]StepKind{GivenStep, WaitStep, WhenStep, WaitStep, ThenStep}))
+	expect.Expect(t, theFirstStepOrNodeNotReadyAfterTheFirstWait(entries)).
+		To(expect.Equal(seenEntry{Kind: scenario.StepObject, Name: string(WhenStep)}))
+}
+
+type seenEntry struct {
+	Kind scenario.ObjectKind
+	Name string
+}
+
+func stepsNotedIn(entries []scenario.Entry) []StepKind {
+	var noted []StepKind
+	for _, entry := range entries {
+		if entry.Kind == scenario.StepObject {
+			noted = append(noted, StepKind(entry.Name))
+		}
+	}
+
+	return noted
+}
+
+func theFirstStepOrNodeNotReadyAfterTheFirstWait(entries []scenario.Entry) seenEntry {
+	waited := false
+	for _, entry := range entries {
+		switch {
+		case !waited:
+			waited = entry.Kind == scenario.StepObject && entry.Name == string(WaitStep)
+		case entry.Kind == scenario.StepObject,
+			entry.Kind == scenario.NodeObject && entry.Reason == string(scenario.NodeNotReady):
+			return seenEntry{Kind: entry.Kind, Name: entry.Name}
+		}
+	}
+
+	return seenEntry{}
 }

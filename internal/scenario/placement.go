@@ -25,12 +25,18 @@ const (
 	// PodUnknown covers a phase the lab does not name, so no reported phase
 	// reaches a Scenario unread.
 	PodUnknown PodPhase = "Unknown"
+	// PodTerminating is no phase Kubernetes reports: it is how the lab reads a
+	// Pod marked for deletion, the word kubectl shows.
+	PodTerminating PodPhase = "Terminating"
 )
 
 // Pod carries no invariant of its own, since its name comes from the control
 // plane.
 type Pod struct {
 	Name string
+	// Workload is read from the label the lab gives a Workload's Pods, never
+	// parsed from the Pod's name.
+	Workload string
 	// Node is empty while the Pod is unplaced.
 	Node  string
 	Phase PodPhase

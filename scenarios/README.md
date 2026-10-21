@@ -12,7 +12,7 @@ A Scenario writes these kinds of Step:
 
 - A **Given** declares the Topology or the Workload, and reaches no cluster.
 - A **When** injects the Failure.
-- A **Wait** applies what the Givens above it declared, holds until the cluster reports the state it names, and reports the time it took where it was reached and the time it was held to where it was not.
+- A **Wait** applies what the Givens above it declared, holds until the cluster reports the state it names, and reports the time it took where it was reached and the time it was held to where it was not. Reached or not, it is followed in the report by a Placement board of every Node and every Workload's Pods, and a second separator stands between that board and the Thens judging it.
 - A **Then** judges the Placement the last Wait reached, and records a Finding while the later Steps still run.
 
 A Then and a Failure both read the Placement the last Wait reached, and a Failure discards it. So a Wait stands before the first Then, and another between a Failure and the Then after it. A Scenario missing either ends at that Step rather than judging a world that is still changing.

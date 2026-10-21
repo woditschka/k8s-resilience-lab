@@ -495,25 +495,29 @@ func TestOnlyAProbePodReportedRunning_ShouldCountAsItsNodeBeingHeld(t *testing.T
 	expect.Expect(t, holding).To(expect.Equal([]string{heldNode.Name}))
 }
 
-func TestAnObservedPod_ShouldBeReadWithTheNodeItLandedOn(t *testing.T) {
-	const placedPodName, pendingPodName = "web-abc", "web-def"
+// The Workload comes from the Pod's label, so a Workload name holding a hyphen
+// is never cut at one.
+func TestAnObservedPod_ShouldBeReadWithItsWorkloadAndTheNodeItLandedOn(t *testing.T) {
+	const placedPodName, pendingPodName, aHyphenatedWorkload = "web-abc", "web-def", "web-frontend"
 	placedOn := aNode(t)
 
 	observed := fromPods([]corev1.Pod{
 		{
 			Name:   placedPodName,
+			Labels: map[string]string{workloadLabel: aHyphenatedWorkload},
 			Spec:   corev1.PodSpec{NodeName: placedOn.Name},
 			Status: corev1.PodStatus{Phase: corev1.PodRunning},
 		},
 		{
 			Name:   pendingPodName,
+			Labels: map[string]string{workloadLabel: aHyphenatedWorkload},
 			Status: corev1.PodStatus{Phase: corev1.PodPending},
 		},
 	})
 
 	expect.Expect(t, observed).To(expect.Equal([]scenario.Pod{
-		{Name: placedPodName, Node: placedOn.Name, Phase: scenario.PodRunning},
-		{Name: pendingPodName, Phase: scenario.PodPending},
+		{Name: placedPodName, Workload: aHyphenatedWorkload, Node: placedOn.Name, Phase: scenario.PodRunning},
+		{Name: pendingPodName, Workload: aHyphenatedWorkload, Phase: scenario.PodPending},
 	}))
 }
 
@@ -764,6 +768,11 @@ func aWatchedNode(ready corev1.ConditionStatus) *corev1.Node {
 	}
 }
 
+// Only that a deletion time is set matters, not which.
+func markedForDeletion() *metav1.Time {
+	return &metav1.Time{}
+}
+
 func TestAnObservedChangeToAKindATimelineReads_ShouldBecomeOneEntryOfThatChange(t *testing.T) {
 	declaredReplicas := int32(somePodCount)
 
@@ -796,6 +805,17 @@ func TestAnObservedChangeToAKindATimelineReads_ShouldBecomeOneEntryOfThatChange(
 			recorded: scenario.Entry{
 				Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.PodObject,
 				Name: watchedPodName, Reason: string(scenario.PodRunning), Detail: watchedNodeName,
+			},
+		},
+		"a Pod marked for deletion on the Node it stood on": {
+			observed: watch.Event{Type: watch.Modified, Object: &corev1.Pod{
+				Name: watchedPodName, DeletionTimestamp: markedForDeletion(),
+				Spec:   corev1.PodSpec{NodeName: watchedNodeName},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning},
+			}},
+			recorded: scenario.Entry{
+				Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.PodObject,
+				Name: watchedPodName, Reason: string(scenario.PodTerminating), Detail: watchedNodeName,
 			},
 		},
 		"a Pod the cluster no longer holds": {

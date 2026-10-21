@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
@@ -31,6 +32,8 @@ const aValueThatIsNotAVersion = "latest"
 const (
 	versionReported  = "Kubernetes version: "
 	placementSettled = "Placement settled"
+	// A board's Zone line stands alone at the Steps' indent.
+	theFirstZoneOnABoard = "\n  zone-1\n"
 )
 
 const (
@@ -302,6 +305,12 @@ func theScenarioSectionsOf(t *testing.T, reported string) []string {
 		t.Fatalf("a run reports each Scenario it carried out under its own heading, but reported:\n%s", reported)
 	}
 
+	// The heavier separator above the next Scenario belongs to neither, so it is
+	// read off the section it ends.
+	for at := range sections {
+		sections[at] = strings.TrimRight(sections[at], aHeavierSeparatorRune)
+	}
+
 	return sections[1:]
 }
 
@@ -356,7 +365,8 @@ func TestResilientPlacementWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNo
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, threePodsPerZoneJudged)
 	reportShows(t, reported, onePodPerNodeJudged)
-	reportShows(t, reported, placementSettled)
+	reportShows(t, reported, theFirstZoneOnABoard)
+	reportShows(t, reported, aSkewReported)
 	reportLacks(t, reported, aFindingReported)
 }
 
@@ -516,27 +526,32 @@ func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(
 	}
 }
 
-func TestACollapsedSummary_ShouldLeaveEveryEntryInTheTimelineFile(t *testing.T) {
+// The Steps stand among the filed entries, so the file reads as the report's
+// Steps did.
+func TestATimeline_ShouldFileEveryEntryAndEachStepAtItsMomentWhileTheReportPrintsNone(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
 
 	filed := theTimelineFiledBy(t, reported)
 	expect.Expect(t, theEntriesPrintedIn(t, reported)).To(expect.HaveLen[float64](noEntryPrinted))
 	expect.Expect(t, filed[1:]).To(expect.HaveLen[string](theEntryCountReportedIn(t, reported)))
+	reportShows(t, strings.Join(filed, "\n"), aStepFiled)
 }
 
-func TestATimelineSummary_ShouldOpenWithTheEntryCountAndTheFileItWasFiledAt(t *testing.T) {
+func TestATimelinesLine_ShouldEndAtItsFileBehindASeparator(t *testing.T) {
 	settled := lab.Outcome{
 		Name: theScenarioReported, Cluster: itsCluster,
 		Steps:    []lab.Step{aThenStep()},
 		Timeline: aTimelineOfTwoChanges(),
 		FiledAt:  someTimelinePath,
 	}
+	theLine := timelineReported + strconv.Itoa(len(settled.Timeline.Entries())) + entriesReported + filedAt + someTimelinePath
 
-	reported := whatTheRunReportsFor(t, settled, theSummaryAlone())
+	reported := whatTheRunReportsFor(t, settled, theReportAlone())
 
-	reportShows(t, reported, timelineReported+strconv.Itoa(len(settled.Timeline.Entries()))+entriesReported+filedAt+someTimelinePath)
-	reportShowsTheSummary(t, reported, settled.Timeline)
+	closing := theLinesAfter(t, reported, reportedAsAStep(aThenStep().String()), 2)
+	expect.Expect(t, spansAtLeast(closing[0], utf8.RuneCountInString(theLine))).To(expect.Equal(true))
+	expect.Expect(t, closing[1]).To(expect.Equal(reportedAsAStep(theLine)))
 }
 
 func TestARemovedSimulatedCluster_ShouldLeaveItsTimelineFileReadable(t *testing.T) {
@@ -561,11 +576,10 @@ func TestAScenarioThatFailsPartWay_ShouldStillPrintAndFileItsTimeline(t *testing
 		FiledAt:  someTimelinePath,
 	}
 
-	reported := whatTheRunReportsFor(t, endedAtItsTopology, theSummaryAlone())
+	reported := whatTheRunReportsFor(t, endedAtItsTopology, theReportAlone())
 
 	reportShows(t, reported, someTimelinePath)
-	reportShowsTheSummary(t, reported, endedAtItsTopology.Timeline)
-	reportLacks(t, reported, placementSettled)
+	reportLacks(t, reported, aSkewReported)
 }
 
 func TestATimelineThatCannotBeWritten_ShouldBeNamedWhileTheScenarioOutcomeStands(t *testing.T) {
@@ -576,11 +590,10 @@ func TestATimelineThatCannotBeWritten_ShouldBeNamedWhileTheScenarioOutcomeStands
 		NotFiled: errors.New(whyTheTimelineWasNotFiled),
 	}
 
-	reported, unfiled, found := whatTheRunReportsFor(t, heldButNotFiled, theSummaryAlone()), notFiled(heldButNotFiled), didNotHold(heldButNotFiled)
+	reported, unfiled, found := whatTheRunReportsFor(t, heldButNotFiled, theReportAlone()), notFiled(heldButNotFiled), didNotHold(heldButNotFiled)
 
 	reportShows(t, reported, aThenStep().String())
-	reportShows(t, reported, whyTheTimelineWasNotFiled)
-	reportShowsTheSummary(t, reported, heldButNotFiled.Timeline)
+	reportShows(t, reported, filedNowhere+whyTheTimelineWasNotFiled)
 	expectNamed(t, unfiled, theScenarioReported)
 	if found != nil {
 		t.Errorf("the Scenario's own outcome stands when its Timeline could not be filed, but the run reports: %v", found)
@@ -610,7 +623,7 @@ func TestARunNamingAVersion_ShouldMirrorAndReportThatVersion(t *testing.T) {
 	}
 
 	reportShows(t, reported, versionReported+named)
-	reportShows(t, reported, placementSettled)
+	reportShows(t, reported, aSkewReported)
 }
 
 func TestAVersionTheLabCannotObtain_ShouldStopTheRunBeforeAnyScenario(t *testing.T) {
@@ -775,13 +788,82 @@ func aScenarioWhoseClusterDidNotStart() lab.Carried {
 	}
 }
 
+// whatTheRunReportsForEach opens the report as a run does, so a heavier
+// separator has the run's opening lines to divide the first Scenario from.
 func whatTheRunReportsForEach(t *testing.T, carried []lab.Carried) (string, error) {
 	t.Helper()
 
 	var reported bytes.Buffer
-	err := writeRun(&runReport{to: &reported}, carried, theSummaryAlone())
+	report := &runReport{to: &reported}
+	report.printPart(reportPart{anOpeningLine})
+	err := writeRun(report, carried, theReportAlone())
 
 	return reported.String(), err
+}
+
+func thePartReportedFor(t *testing.T, carried lab.Carried) string {
+	t.Helper()
+
+	var reported bytes.Buffer
+	var part reportPart
+	writeCarried(&part, carried, theReportAlone())
+	(&runReport{to: &reported}).printPart(part)
+
+	return reported.String()
+}
+
+// Wider than any line a built Scenario reports, so the first heavier separator
+// has to reach the opening lines to pass.
+const anOpeningLine = "engine socket:      /a/socket/path/long/enough/to/be/wider/than/every/line/of/the/first/scenario/that/follows/it/in/the/run/report"
+
+const (
+	aHeavierSeparatorRune      = "="
+	oneAboveEachOfTwoScenarios = 2
+	oneAboveTheOnlyScenario    = 1
+)
+
+func theHeavierSeparatorsIn(reported string) []string {
+	var separators []string
+	for line := range strings.SplitSeq(reported, "\n") {
+		if line != "" && strings.Trim(line, aHeavierSeparatorRune) == "" {
+			separators = append(separators, line)
+		}
+	}
+
+	return separators
+}
+
+func theWidestLineOf(reported string) int {
+	widest := 0
+	for line := range strings.SplitSeq(reported, "\n") {
+		widest = max(widest, utf8.RuneCountInString(line))
+	}
+
+	return widest
+}
+
+func TestARunOfTwoScenarios_ShouldDivideItsPartsWithAHeavierSeparator(t *testing.T) {
+	first, second := aScenarioThatHeld(), aScenarioWhoseClusterDidNotStart()
+	firstPart, secondPart := thePartReportedFor(t, first), thePartReportedFor(t, second)
+
+	reported, _ := whatTheRunReportsForEach(t, []lab.Carried{first, second})
+
+	heavier := theHeavierSeparatorsIn(reported)
+	expect.Expect(t, heavier).To(expect.HaveLen[string](oneAboveEachOfTwoScenarios))
+	expect.Expect(t, reported).To(expect.Equal(anOpeningLine + "\n" + heavier[0] + "\n" + firstPart + heavier[1] + "\n" + secondPart))
+	expect.Expect(t, len(heavier[0]) >= max(theWidestLineOf(anOpeningLine), theWidestLineOf(firstPart))).To(expect.Equal(true))
+	expect.Expect(t, len(heavier[1]) >= max(theWidestLineOf(firstPart), theWidestLineOf(secondPart))).To(expect.Equal(true))
+}
+
+func TestARunOfOneScenario_ShouldPrintOneHeavierSeparatorAfterItsOpeningLines(t *testing.T) {
+	only := aScenarioThatHeld()
+	onlyPart := thePartReportedFor(t, only)
+
+	reported, _ := whatTheRunReportsForEach(t, []lab.Carried{only})
+
+	heavier := theHeavierSeparatorsIn(reported)
+	expect.Expect(t, heavier).To(expect.HaveLen[string](oneAboveTheOnlyScenario))
+	expect.Expect(t, reported).To(expect.Equal(anOpeningLine + "\n" + heavier[0] + "\n" + onlyPart))
 }
 
 // These Outcomes are built rather than run, because a Scenario whose Steps fail
@@ -813,11 +895,18 @@ const (
 
 const theScenarioRecorded = `"scenario":"` + theScenarioReported + `"`
 
+const aStepFiled = `"kind":"Step"`
+
+// An entry prints under the filing line, one level deeper than a narrative's
+// lines, which also open with a time.
+const anEntryIndent = "    "
+
 const (
 	onACluster       = ", on "
 	timelineReported = "Timeline, "
 	entriesReported  = " entries"
 	filedAt          = ", filed at "
+	filedNowhere     = ", filed nowhere: "
 )
 
 func aTopologyStep() lab.Step {
@@ -845,23 +934,15 @@ func whatTheRunReportsFor(t *testing.T, outcome lab.Outcome, asked runSetting) s
 	t.Helper()
 
 	var reported bytes.Buffer
-	writeOutcome(&runReport{to: &reported}, outcome, asked)
+	var part reportPart
+	writeOutcome(&part, outcome, asked)
+	(&runReport{to: &reported}).printPart(part)
 
 	return reported.String()
 }
 
-func theSummaryAlone() runSetting {
+func theReportAlone() runSetting {
 	return runSetting{}
-}
-
-// What the summary lines say is internal/scenario's to assert; this asserts
-// only that the run printed them.
-func reportShowsTheSummary(t *testing.T, reported string, recorded scenario.Timeline) {
-	t.Helper()
-
-	for _, line := range recorded.Summarise().Lines() {
-		reportShows(t, reported, line)
-	}
 }
 
 func theEntriesPrintedIn(t *testing.T, reported string) []float64 {
@@ -869,10 +950,10 @@ func theEntriesPrintedIn(t *testing.T, reported string) []float64 {
 
 	var received []float64
 	for line := range strings.SplitSeq(reported, "\n") {
-		printed := strings.TrimSpace(line)
-		if !strings.HasPrefix(printed, "+") {
+		if !strings.HasPrefix(line, anEntryIndent+"+") {
 			continue
 		}
+		printed := strings.TrimSpace(line)
 
 		elapsed, named := strings.CutSuffix(strings.Fields(printed)[0], "s")
 		if !named {
@@ -915,7 +996,7 @@ func theTimelineFiledBy(t *testing.T, reported string) []string {
 		t.Fatalf("the run names the file it filed its Timeline at, but reported:\n%s", reported)
 	}
 
-	path, _, _ := strings.Cut(filing, ":\n")
+	path, _, _ := strings.Cut(filing, "\n")
 	filed, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read the filed Timeline %s: %v", path, err)
@@ -933,4 +1014,252 @@ func expectNamed(t *testing.T, err error, named string) {
 	if !strings.Contains(err.Error(), named) {
 		t.Errorf("the error names %s, but reads: %v", named, err)
 	}
+}
+
+// A board of one Zone of one Node holding one Pod is enough to tell its lines
+// from the Steps around it.
+const (
+	someNodePool        = "general"
+	someNodeCPU         = scenario.CPU(16000)
+	someNodeMemory      = scenario.Memory(65536)
+	someNodePods        = 10
+	oneZone             = 1
+	oneNodePerZone      = 1
+	theOnlyNode         = "zone-1-node-1"
+	aWorkloadOnTheBoard = "checkout"
+	aPodOnTheBoard      = "checkout-5fc87ff7c8-7vd48"
+	theWaitStepName     = "all Pods Ready"
+	theWhenStepName     = "1 Node fails, zone-1-node-1"
+	aSecondThenStepName = "1 Pod per Node"
+	whyNoBoard          = "observe the Placement board: context canceled"
+	aStepIndent         = "  "
+	aSeparatorRune      = "-"
+
+	// One rune, so an empty line does not pass for a separator.
+	aSeparatorOfAnyWidth = 1
+)
+
+func aBoardOfOnePod(t *testing.T) scenario.PlacementBoard {
+	t.Helper()
+
+	return scenario.NewPlacementBoard(aTopologyOfOneNode(t), []scenario.Pod{thePodOnTheBoard()}, scenario.PlacementBoard{})
+}
+
+func thePodOnTheBoard() scenario.Pod {
+	return scenario.Pod{Name: aPodOnTheBoard, Workload: aWorkloadOnTheBoard, Node: theOnlyNode, Phase: scenario.PodRunning}
+}
+
+func aTopologyOfOneNode(t *testing.T) scenario.Topology {
+	t.Helper()
+
+	capacity, err := scenario.NewNodeCapacity(someNodePods, someNodeCPU, someNodeMemory)
+	if err != nil {
+		t.Fatalf("build a Node capacity: %v", err)
+	}
+	pool, err := scenario.NewNodePool(someNodePool, oneNodePerZone, capacity)
+	if err != nil {
+		t.Fatalf("build the NodePool %s: %v", someNodePool, err)
+	}
+	topology, err := scenario.NewTopology(oneZone, pool)
+	if err != nil {
+		t.Fatalf("build a Topology of one Node: %v", err)
+	}
+
+	return topology
+}
+
+func aWaitStepWith(board scenario.PlacementBoard) lab.Step {
+	return lab.Step{Kind: lab.WaitStep, Name: theWaitStepName, Board: board}
+}
+
+func aSecondThenStep() lab.Step {
+	return lab.Step{Kind: lab.ThenStep, Name: aSecondThenStepName}
+}
+
+func aWhenStep() lab.Step {
+	return lab.Step{Kind: lab.WhenStep, Name: theWhenStepName}
+}
+
+func anOutcomeOf(steps ...lab.Step) lab.Outcome {
+	return lab.Outcome{Name: theScenarioReported, Cluster: itsCluster, Steps: steps, Timeline: aTimelineOfTwoChanges(), FiledAt: someTimelinePath}
+}
+
+// theLinesAfter reads on from the first line equal to the one named, so a test
+// pins what stands under a Step and not where the Step falls in the report.
+// theLinesAfter fails the test rather than handing back fewer lines than asked
+// for, so a short report reads as what it lacks instead of an index panic.
+func theLinesAfter(t *testing.T, reported, line string, count int) []string {
+	t.Helper()
+
+	lines := strings.Split(reported, "\n")
+	at := slices.Index(lines, line)
+	if at < 0 {
+		t.Fatalf("the run reports the line %q, but reported:\n%s", line, reported)
+	}
+	after := lines[at+1:]
+	if len(after) < count {
+		t.Fatalf("the run reports %d lines after %q, want at least %d, reported:\n%s", len(after), line, count, reported)
+	}
+
+	return after[:count]
+}
+
+func reportedAsAStep(read string) string {
+	return aStepIndent + read
+}
+
+func reportedUnderAStep(lines []string) []string {
+	indented := make([]string, 0, len(lines))
+	for _, line := range lines {
+		indented = append(indented, aStepIndent+line)
+	}
+
+	return indented
+}
+
+// A separator is read by its length alone, since it need only reach the widest board line.
+func spansAtLeast(line string, width int) bool {
+	dashes := strings.TrimPrefix(line, aStepIndent)
+
+	return strings.Trim(dashes, aSeparatorRune) == "" && len(dashes) >= width
+}
+
+func TestAWaitWithNothingToNarrate_ShouldPrintTheSeparatorAndTheBoardDirectlyUnderItsLine(t *testing.T) {
+	board := aBoardOfOnePod(t)
+	waited := aWaitStepWith(board)
+
+	reported := whatTheRunReportsFor(t, anOutcomeOf(waited), theReportAlone())
+
+	under := theLinesAfter(t, reported, reportedAsAStep(waited.String()), 1+len(board.Lines()))
+	expect.Expect(t, spansAtLeast(under[0], board.Width())).To(expect.Equal(true))
+	expect.Expect(t, under[1:]).To(expect.Equal(reportedUnderAStep(board.Lines())))
+}
+
+func TestAWaitWithNoBoard_ShouldNameWhyInTheBoardsPlace(t *testing.T) {
+	unobserved := lab.Step{Kind: lab.WaitStep, Name: theWaitStepName, BoardNotObserved: errors.New(whyNoBoard)}
+
+	reported := whatTheRunReportsFor(t, anOutcomeOf(unobserved), theReportAlone())
+
+	under := theLinesAfter(t, reported, reportedAsAStep(unobserved.String()), 2)
+	expect.Expect(t, under[1]).To(expect.Equal(reportedAsAStep("no Placement board: " + whyNoBoard)))
+}
+
+func TestTheThensJudgingAWait_ShouldPrintAfterItsBoardBehindASecondSeparator(t *testing.T) {
+	board := aBoardOfOnePod(t)
+	waited := aWaitStepWith(board)
+
+	reported := whatTheRunReportsFor(t, anOutcomeOf(waited, aThenStep(), aSecondThenStep()), theReportAlone())
+
+	underTheBoard := theLinesAfter(t, reported, reportedAsAStep(waited.String()), 1+len(board.Lines())+3)[1+len(board.Lines()):]
+	expect.Expect(t, spansAtLeast(underTheBoard[0], board.Width())).To(expect.Equal(true))
+	expect.Expect(t, underTheBoard[1:]).To(expect.Equal([]string{
+		reportedAsAStep(aThenStep().String()),
+		reportedAsAStep(aSecondThenStep().String()),
+	}))
+}
+
+func TestAPlacementBoard_ShouldCloseWithASeparatorBeforeTheNextStep(t *testing.T) {
+	board := aBoardOfOnePod(t)
+	waited := aWaitStepWith(board)
+
+	reported := whatTheRunReportsFor(t, anOutcomeOf(waited, aWhenStep()), theReportAlone())
+
+	underTheBoard := theLinesAfter(t, reported, reportedAsAStep(waited.String()), 1+len(board.Lines())+2)[1+len(board.Lines()):]
+	expect.Expect(t, spansAtLeast(underTheBoard[0], board.Width())).To(expect.Equal(true))
+	expect.Expect(t, underTheBoard[1]).To(expect.Equal(reportedAsAStep(aWhenStep().String())))
+}
+
+// A Wait the Scenario ended at is the last Step, so the Timeline's own
+// separator and line follow its closing one.
+func TestAWaitTheScenarioEndsAt_ShouldStillCloseItsBoardWithASeparator(t *testing.T) {
+	board := aBoardOfOnePod(t)
+	waited := aWaitStepWith(board)
+
+	reported := whatTheRunReportsFor(t, anOutcomeOf(waited), theReportAlone())
+
+	underTheBoard := theLinesAfter(t, reported, reportedAsAStep(waited.String()), 1+len(board.Lines())+3)[1+len(board.Lines()):]
+	expect.Expect(t, spansAtLeast(underTheBoard[0], board.Width())).To(expect.Equal(true))
+	expect.Expect(t, strings.HasPrefix(underTheBoard[2], reportedAsAStep(timelineReported))).To(expect.Equal(true))
+}
+
+func TestAThenFollowedByAWhen_ShouldStandWithNoSeparatorBetween(t *testing.T) {
+	reported := whatTheRunReportsFor(t, anOutcomeOf(aWaitStepWith(aBoardOfOnePod(t)), aThenStep(), aWhenStep()), theReportAlone())
+
+	afterTheThen := theLinesAfter(t, reported, reportedAsAStep(aThenStep().String()), 1)
+	expect.Expect(t, afterTheThen).To(expect.Equal([]string{reportedAsAStep(aWhenStep().String())}))
+}
+
+const (
+	aSkewReported = "Skew of "
+	// A Then reads "Pods per Zone" too, so a count table is known by its
+	// heading's opening.
+	aZoneTableHead = "  Pods per Zone ("
+	aNodeTableHead = "  Pods per Node ("
+)
+
+func TestAScenarioReport_ShouldCloseWithOneSkewLineAndTheTimelinesLineAndNoCountTables(t *testing.T) {
+	board := aBoardOfOnePod(t)
+	waited := aWaitStepWith(board)
+	settled := scenario.NewPlacement(aTopologyOfOneNode(t).Nodes(), []scenario.Pod{thePodOnTheBoard()})
+	held := anOutcomeOf(waited, aThenStep())
+	held.Placement, held.JudgedWorkload = settled, aWorkloadOnTheBoard
+
+	reported := whatTheRunReportsFor(t, held, theReportAlone())
+
+	theSkew := fmt.Sprintf("Skew of %s: %d over Zones, %d over Nodes",
+		aWorkloadOnTheBoard, settled.Skew(scenario.SpreadOverZones), settled.Skew(scenario.SpreadOverNodes))
+	afterTheLastThen := theLinesAfter(t, reported, reportedAsAStep(aThenStep().String()), 3)
+	expect.Expect(t, afterTheLastThen[0]).To(expect.Equal(reportedAsAStep(theSkew)))
+	expect.Expect(t, spansAtLeast(afterTheLastThen[1], aSeparatorOfAnyWidth)).To(expect.Equal(true))
+	expect.Expect(t, strings.HasPrefix(afterTheLastThen[2], reportedAsAStep(timelineReported))).To(expect.Equal(true))
+	reportLacks(t, reported, aZoneTableHead)
+	reportLacks(t, reported, aNodeTableHead)
+	reportLacks(t, reported, placementSettled)
+}
+
+// The narrative's widest line is wider than the Wait line and the board, so the
+// separator reaching it shows the separator spans the narrative too.
+const (
+	aNodeTurningReady   = 120 * time.Millisecond
+	thePodRunning       = 1300 * time.Millisecond
+	theWaitNoted        = 1500 * time.Millisecond
+	aWaitNoteIsNamed    = scenario.WaitStepNamed
+	theWaitLineNoted    = "Wait for all Pods Ready"
+	aWideNodeName       = "a-node-whose-name-is-wider-than-the-wait-line-and-the-board"
+	someDeploymentReady = "1 of 1 Pods ready"
+)
+
+func aNarrativeOfOnePod() scenario.WaitNarrative {
+	narratives := scenario.NewTimeline([]scenario.Entry{
+		{Elapsed: aNodeTurningReady, Change: scenario.ChangeAdded, Kind: scenario.NodeObject, Name: aWideNodeName, Reason: string(scenario.NodeReady)},
+		{Elapsed: aNodeTurningReady, Change: scenario.ChangeAdded, Kind: scenario.DeploymentObject, Name: aWorkloadOnTheBoard, Detail: someDeploymentReady},
+		{Elapsed: thePodRunning, Change: scenario.ChangeAdded, Kind: scenario.PodObject, Name: aPodOnTheBoard, Reason: string(scenario.PodRunning), Detail: theOnlyNode},
+		{Elapsed: theWaitNoted, Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: aWaitNoteIsNamed, Detail: theWaitLineNoted},
+	}).WaitNarratives()
+
+	return narratives[0]
+}
+
+func TestAWaitsNarrative_ShouldPrintUnderItsLineAboveTheSeparatorAndTheBoard(t *testing.T) {
+	board, narrative := aBoardOfOnePod(t), aNarrativeOfOnePod()
+	waited := aWaitStepWith(board)
+	waited.Narrative = narrative
+	narrated := len(narrative.Lines())
+
+	reported := whatTheRunReportsFor(t, anOutcomeOf(waited), theReportAlone())
+
+	under := theLinesAfter(t, reported, reportedAsAStep(waited.String()), narrated+1+len(board.Lines()))
+	expect.Expect(t, under[:narrated]).To(expect.Equal(reportedUnderAStep(narrative.Lines())))
+	expect.Expect(t, spansAtLeast(under[narrated], narrative.Width())).To(expect.Equal(true))
+	expect.Expect(t, under[narrated+1:]).To(expect.Equal(reportedUnderAStep(board.Lines())))
+}
+
+// The filing line ends the report: nothing of a summary follows it.
+func TestAScenarioReport_ShouldPrintNoSummaryOfEachWorkloadsPods(t *testing.T) {
+	held := anOutcomeOf(aWaitStepWith(aBoardOfOnePod(t)), aThenStep())
+
+	reported := whatTheRunReportsFor(t, held, theReportAlone())
+
+	lines := strings.Split(strings.TrimSuffix(reported, "\n"), "\n")
+	expect.Expect(t, strings.HasPrefix(lines[len(lines)-1], reportedAsAStep(timelineReported))).To(expect.Equal(true))
 }
