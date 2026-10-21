@@ -20,6 +20,7 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
+	"github.com/woditschka/k8s-resilience-lab/scenarios"
 )
 
 // A well-formed version, so it passes validation and fails at the image pull.
@@ -1262,4 +1263,81 @@ func TestAScenarioReport_ShouldPrintNoSummaryOfEachWorkloadsPods(t *testing.T) {
 
 	lines := strings.Split(strings.TrimSuffix(reported, "\n"), "\n")
 	expect.Expect(t, strings.HasPrefix(lines[len(lines)-1], reportedAsAStep(timelineReported))).To(expect.Equal(true))
+}
+
+const (
+	interactive              = "--interactive"
+	aNameNoScenarioCarries   = "a-condition-no-scenario-states"
+	theLiveViewOnLoopback    = "Live view:          http://127.0.0.1:"
+	theFirstScenarioOfTheLab = "a-workload-placed-for-resilience"
+	aSecondScenarioOfTheLab  = "a-node-that-stops-responding"
+	theTimelineFiled         = "Timeline, "
+)
+
+func everyScenarioNameInOrder(t *testing.T) string {
+	t.Helper()
+
+	names, err := lab.ScenarioNames(scenarios.All())
+	if err != nil {
+		t.Fatalf("derive the name of every Scenario of the lab: %v", err)
+	}
+
+	return strings.Join(names, ", ")
+}
+
+func TestAnInteractiveRunNamingAnUnknownScenario_ShouldStopBeforeProvisioningAndNameTheScenariosThatExist(t *testing.T) {
+	_, err := aRun(t, interactive, aNameNoScenarioCarries)
+
+	expectNamed(t, err, everyScenarioNameInOrder(t))
+}
+
+func TestScenarioNamesAnInteractiveRunCannotTake_ShouldStopTheLabBeforeTheEngineNamingTheScenariosThatExist(t *testing.T) {
+	refused := map[string][]string{
+		"no name":                      {interactive},
+		"two names":                    {interactive, theFirstScenarioOfTheLab, aSecondScenarioOfTheLab},
+		"a name without --interactive": {theFirstScenarioOfTheLab},
+	}
+
+	for named, arguments := range refused {
+		t.Run(named, func(t *testing.T) {
+			_, err := aRun(t, arguments...)
+
+			expectNamed(t, err, everyScenarioNameInOrder(t))
+		})
+	}
+}
+
+// aTerminalStoppingTheLabOnceFiled stands for the engineer who reads the
+// Outcome and then stops the lab: the filing line is the Outcome's last.
+type aTerminalStoppingTheLabOnceFiled struct {
+	bytes.Buffer
+
+	stopTheLab context.CancelFunc
+}
+
+func (a *aTerminalStoppingTheLabOnceFiled) Write(line []byte) (int, error) {
+	if strings.Contains(string(line), theTimelineFiled) {
+		defer a.stopTheLab()
+	}
+
+	return a.Buffer.Write(line)
+}
+
+func TestAnInteractiveRunNamingAScenario_ShouldReportItsStepsBeforeItsFirstWhenAndWhereTheLiveViewIsReached(t *testing.T) {
+	t.Parallel()
+	requireEngine(t)
+	running, stopTheLab := context.WithCancel(t.Context())
+	terminal := &aTerminalStoppingTheLabOnceFiled{stopTheLab: stopTheLab}
+	var warned bytes.Buffer
+
+	err := run(running, []string{interactive, aSecondScenarioOfTheLab}, t.TempDir(), terminal, &warned)
+	if err != nil {
+		t.Fatalf("the Interactive run of %s: %v", aSecondScenarioOfTheLab, err)
+	}
+
+	reported := terminal.String()
+	reportShows(t, reported, theLiveViewOnLoopback)
+	reportShows(t, reported, nodeStopsRespondingReported)
+	reportShows(t, reported, threePodsPerZoneJudged)
+	reportLacks(t, reported, oneNodeFailsReported)
 }

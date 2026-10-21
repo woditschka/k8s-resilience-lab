@@ -1,6 +1,6 @@
 # The lab provisions the Simulated Cluster it drives
 
-**Status:** Accepted, amended 2026-10-04: each Scenario provisions its own Simulated Cluster, option 7 (REQ-SIM-001); amended 2026-10-09: Scenarios run at once, option 9 (REQ-SIM-014)
+**Status:** Accepted, amended 2026-10-04: each Scenario provisions its own Simulated Cluster, option 7 (REQ-SIM-001); amended 2026-10-09: Scenarios run at once, option 9 (REQ-SIM-014); amended 2026-10-21: an Interactive run holds one Simulated Cluster, option 11 (REQ-SIM-022)
 
 ## Context
 
@@ -13,6 +13,8 @@ Starting the container means reaching a container engine. Each engine publishes 
 On 2026-10-04 the question became how many clusters a run holds. A Scenario's asserted Placement is only trustworthy when nothing from another Scenario can reach it: a leftover Node, a Pod still terminating, or a Scenario that failed halfway changes the next assertion. One named Scenario run on its own (REQ-SIM-003) has to produce the outcome the full run reports for it. Two invocations share one machine, a developer's run beside a build job, and neither may disturb the other.
 
 On 2026-10-09 the Scenarios stopped running one after another. Each spends 7 to 17 seconds inside its cluster, yet about a minute of provisioning and removal surrounds each one. In sequence the shipped Scenarios cost a run several minutes, and the command tests about 15 minutes (REQ-SIM-014).
+
+On 2026-10-21 the owner asked for an Interactive run whose cluster stays up to watch: "only the first setup or the full scenario then the rest stays interactive". A reset or another pick replaces the held cluster, answered "2 exactly": one cluster at a time, removed when the lab stops (REQ-SIM-022).
 
 ## Options Considered
 
@@ -31,6 +33,11 @@ How a run schedules its Scenarios, with option 7 in force:
 
 8. **One after another** — one container at a time, and a run as long as the sum of its Scenarios.
 9. **All at once, each in its own goroutine** — one container per Scenario at once, and a run as long as its slowest Scenario.
+
+How long an Interactive run keeps its cluster, with option 7 in force:
+
+10. **Removed when its Steps end, as in a run** — nothing left to watch.
+11. **Held until the engineer stops the lab, one at a time** — the same handle, closed later.
 
 ## Decision
 
@@ -56,6 +63,8 @@ One Scenario's failure is its own. A cluster the engine cannot start, a Step lef
 
 The run bounds nothing: it holds as many clusters as Scenarios are shipped. A machine short of room for them is an Open Question of the PRD. The lab's own tests bound how many run at once per package through the gate's `-parallel` flag.
 
+Option 11, since 2026-10-21. An Interactive run carries out one Scenario on a cluster of its own, through the same provisioning, recording and Steps as a run. It stops the recording and files the Timeline when its Steps end, then holds the cluster. The handle closes when the engineer stops the lab, the Steps stopped first if still running. A run is unchanged: it removes each cluster when its Scenario ends.
+
 ## Consequences
 
 NG-1 is enforced by absence: no cluster address to supply, no credential to use, and no code path that reads either. `DOCKER_HOST` selects which engine on this machine starts the container, and the Kubernetes client is built from that container's published port alone. The lab holds no secret, so none can leak into a log, an error, or a process argument.
@@ -78,7 +87,7 @@ A missing image is pulled once per run, before the fan-out, within the pull time
 
 ## Implementation
 
-**Requirements:** REQ-SIM-001, REQ-SIM-014
+**Requirements:** REQ-SIM-001, REQ-SIM-014, REQ-SIM-022
 
 **Files:** `internal/cluster/runtime.go`, `internal/cluster/simulated_cluster.go`, `internal/lab/runner.go`, `cmd/lab/main.go`, `cmd/lab/main_test.go`, `Makefile`
 

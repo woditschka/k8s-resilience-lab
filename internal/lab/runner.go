@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -200,9 +202,46 @@ func recoverInto(carried *Carried, name string) {
 	}
 }
 
-// Every Outcome runNamed returns names the Scenario, including one returned
+// Observer is handed a Placement board of a held run's cluster once every
+// interval, or the cause none was observed.
+type Observer struct {
+	Every    time.Duration
+	Observed func(scenario.PlacementBoard, error)
+}
+
+// Hold carries out the Scenario up to its first When, or every Step where it
+// has none, and hands its Outcome to reported. It then holds the cluster as the
+// Steps left it until ctx ends, and removes it. From provisioning until removal
+// observer is handed the cluster's board.
+func (r *Runner) Hold(ctx context.Context, steps func(*Scenario), observer Observer, reported func(Outcome)) (Outcome, error) {
+	name, err := scenarioNameOfFunction(steps)
+	if err != nil {
+		return Outcome{}, err
+	}
+
+	return r.holdNamed(ctx, name, steps, observer, reported)
+}
+
+func (r *Runner) holdNamed(ctx context.Context, name string, steps func(*Scenario), observer Observer,
+	reported func(Outcome),
+) (Outcome, error) {
+	return r.carryOut(ctx, name, steps, &holding{observer: observer, reported: reported})
+}
+
+// holding is what sets a held run apart from a run: the halt at the first
+// When, the observer and the wait for the lab to stop.
+type holding struct {
+	observer Observer
+	reported func(Outcome)
+}
+
+func (r *Runner) runNamed(ctx context.Context, name string, steps func(*Scenario)) (Outcome, error) {
+	return r.carryOut(ctx, name, steps, nil)
+}
+
+// Every Outcome carryOut returns names the Scenario, including one returned
 // with the lab's own error before the Scenario reported.
-func (r *Runner) runNamed(ctx context.Context, name string, steps func(*Scenario)) (reported Outcome, err error) {
+func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario), held *holding) (reported Outcome, err error) {
 	provisioned, err := cluster.Provision(ctx, r.engine, r.version, name)
 	if err != nil {
 		return Outcome{Name: name}, fmt.Errorf("the Scenario %s: %w", name, err)
@@ -231,6 +270,12 @@ func (r *Runner) runNamed(ctx context.Context, name string, steps func(*Scenario
 	}
 
 	running := newScenario(ctx, provisioned)
+	if held != nil {
+		running.haltsAtTheFirstWhen = true
+		// Deferred after the removal, so it runs before it: no observation
+		// reaches a removed cluster.
+		defer held.observer.observe(ctx, provisioned, &running.published)()
+	}
 	steps(running)
 
 	reported = running.finish()
@@ -239,7 +284,92 @@ func (r *Runner) runNamed(ctx context.Context, name string, steps func(*Scenario
 	reported.Name, reported.Cluster = name, provisioned.Name()
 	reported.FiledAt, reported.NotFiled = filed.Path(), filed.Err()
 
+	if held != nil {
+		held.reported(reported)
+		<-ctx.Done()
+	}
+
 	return reported, nil
+}
+
+// observe starts one goroutine observing the cluster at the observer's interval
+// and returns the function that stops it and waits for it to end. Before a
+// Topology is declared nothing is handed over, and each board marks its
+// newcomers against the one before.
+func (o Observer) observe(ctx context.Context, provisioned *cluster.SimulatedCluster,
+	declared *atomic.Pointer[scenario.Topology],
+) (stop func()) {
+	observing, stopObserving := context.WithCancel(ctx)
+	var ended sync.WaitGroup
+	ended.Go(func() {
+		ticks := time.NewTicker(o.Every)
+		defer ticks.Stop()
+
+		var previous scenario.PlacementBoard
+		for {
+			select {
+			case <-observing.Done():
+				return
+			case <-ticks.C:
+			}
+
+			topology := declared.Load()
+			if topology == nil {
+				continue
+			}
+			placed, err := observeOnce(observing, provisioned)
+			if observing.Err() != nil {
+				return
+			}
+			if err != nil {
+				o.Observed(scenario.PlacementBoard{}, err)
+
+				continue
+			}
+			previous = scenario.NewPlacementBoard(*topology, placed.Pods(), previous)
+			o.Observed(previous, nil)
+		}
+	})
+
+	return func() {
+		stopObserving()
+		ended.Wait()
+	}
+}
+
+// Each observation is held to the lab's waiting time, as a Wait's board is.
+func observeOnce(ctx context.Context, provisioned *cluster.SimulatedCluster) (scenario.Placement, error) {
+	observing, cancel := context.WithTimeout(ctx, scenario.WaitingTime)
+	defer cancel()
+
+	placed, err := provisioned.ObserveEveryWorkload(observing)
+	if err != nil {
+		return scenario.Placement{}, fmt.Errorf("observe the Placement board: %w", err)
+	}
+
+	return placed, nil
+}
+
+// ScenarioNamed refuses a name matching no Scenario with every Scenario name
+// in the order given, so the engineer reads what can be asked for.
+func ScenarioNamed(scenarios []func(*Scenario), name string) (func(*Scenario), error) {
+	names, err := ScenarioNames(scenarios)
+	if err != nil {
+		return nil, err
+	}
+
+	at := slices.Index(names, name)
+	if at < 0 {
+		return nil, fmt.Errorf("no Scenario is named %q; the Scenarios are: %s", name, strings.Join(names, ", "))
+	}
+
+	return scenarios[at], nil
+}
+
+// ScenarioNames refuses an underivable or duplicate name as a run of every
+// Scenario does.
+func ScenarioNames(scenarios []func(*Scenario)) ([]string, error) {
+	return scenarioNamesOfEach(scenarios)
 }
 
 func scenarioNamesOfEach(scenarios []func(*Scenario)) ([]string, error) {

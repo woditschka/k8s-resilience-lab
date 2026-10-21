@@ -1,6 +1,7 @@
 // Command lab runs the k8s-resilience-lab Scenarios, each on a Simulated
 // Cluster of its own that is removed when the Scenario ends, and reports where
-// each Workload's Pods landed.
+// each Workload's Pods landed. With --interactive it holds one Scenario's
+// cluster and serves its Live view until the lab is stopped.
 package main
 
 import (
@@ -11,11 +12,14 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab"
+	"github.com/woditschka/k8s-resilience-lab/internal/live"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
 	"github.com/woditschka/k8s-resilience-lab/scenarios"
@@ -43,6 +47,13 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	if err != nil {
 		return err
 	}
+	if asked.held != nil {
+		// Stopping the lab is how an Interactive run ends, so the signal cancels
+		// the run and the held cluster is removed rather than left behind.
+		var stopListening context.CancelFunc
+		ctx, stopListening = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stopListening()
+	}
 
 	engine, err := cluster.DetectEngine(ctx, slog.New(slog.NewTextHandler(warnings, nil)))
 	if err != nil {
@@ -52,6 +63,30 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	defer engine.Close()
 
 	reported := &runReport{to: report}
+	runner := lab.NewRunner(engine, asked.version, timeline.NewFolder(timelinesRoot))
+	if asked.held != nil {
+		return runHeld(ctx, engine, runner, reported, asked)
+	}
+
+	// The opening lines print before any Scenario runs, so a reader sees the
+	// settings while the run is under way.
+	reported.printPart(openingOf(engine, asked))
+
+	// The command names no Scenario, so adding one touches the Scenarios' place
+	// alone.
+	//
+	// The Scenarios run at once and one Scenario's result stops no other. The
+	// report is written after all have ended, from this goroutine alone, so it
+	// needs no locking.
+	carried, err := runner.RunAtOnce(ctx, scenarios.All())
+	if err != nil {
+		return errors.Join(err, reported.err)
+	}
+
+	return errors.Join(writeRun(reported, carried, asked), reported.err)
+}
+
+func openingOf(engine cluster.Endpoint, asked runSetting) reportPart {
 	var opening reportPart
 	opening.addf("engine socket:      %s", engine.Socket())
 	opening.addf("engine version:     %s", engine.EngineVersion())
@@ -67,28 +102,47 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 		cluster.NodeEvictionRate, cluster.DefaultNodeEvictionRate)
 	opening.addf("lab waiting time:   at most %s for a state of the cluster, and the most a Wait may state",
 		scenario.WaitingTime)
-	// The opening lines print before any Scenario runs, so a reader sees the
-	// settings while the run is under way.
-	reported.printPart(opening)
 
-	// The command names no Scenario, so adding one touches the Scenarios' place
-	// alone.
-	//
-	// The Scenarios run at once and one Scenario's result stops no other. The
-	// report is written after all have ended, from this goroutine alone, so it
-	// needs no locking.
-	runner := lab.NewRunner(engine, asked.version, timeline.NewFolder(timelinesRoot))
-	carried, err := runner.RunAtOnce(ctx, scenarios.All())
-	if err != nil {
-		return errors.Join(err, reported.err)
+	return opening
+}
+
+// runHeld listens before it provisions, so the address is on the terminal
+// while the Steps run. A Finding, a Step left undone or an unwritten Timeline
+// fails the lab once it stops, as in a run.
+func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, reported *runReport, asked runSetting) error {
+	if err := cluster.ObtainVersion(ctx, engine, asked.version); err != nil {
+		return err
 	}
 
-	return errors.Join(writeRun(reported, carried, asked), reported.err)
+	var view live.View
+	server, err := live.Listen(ctx, &view)
+	if err != nil {
+		return err
+	}
+	opening := openingOf(engine, asked)
+	opening.addf("Live view:          %s", server.Address())
+	reported.printPart(opening)
+
+	held, err := runner.Hold(ctx, asked.held, lab.Observer{Every: live.RefreshInterval, Observed: view.Observed},
+		func(outcome lab.Outcome) {
+			var part reportPart
+			writeOutcome(&part, outcome, asked)
+			reported.printBelowAHeavierSeparator(part)
+		})
+	closed := server.Close()
+	if err != nil {
+		return errors.Join(err, closed, reported.err)
+	}
+
+	return errors.Join(notFiled(held), didNotHold(held), closed, reported.err)
 }
 
 type runSetting struct {
 	version       cluster.KubernetesVersion
 	wholeTimeline bool
+	// held is the Scenario an Interactive run holds; a run of every Scenario
+	// has none.
+	held func(*lab.Scenario)
 }
 
 func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) {
@@ -96,8 +150,15 @@ func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) 
 	flags.SetOutput(warnings)
 	named := flags.String("k8s-version", "", "the Kubernetes version each Simulated Cluster mirrors; the lab's pinned default when absent")
 	whole := flags.Bool("whole-timeline", false, "print every entry of each Scenario's Timeline under its filing line")
+	interactive := flags.Bool("interactive", false,
+		"carry out the one Scenario named up to its first When, hold its Simulated Cluster and serve its Live view")
 	if err := flags.Parse(arguments); err != nil {
 		return runSetting{}, fmt.Errorf("read the lab's arguments: %w", err)
+	}
+
+	held, err := resolveHeldScenario(*interactive, flags.Args())
+	if err != nil {
+		return runSetting{}, err
 	}
 
 	version, err := resolveVersion(*named)
@@ -105,7 +166,31 @@ func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) 
 		return runSetting{}, err
 	}
 
-	return runSetting{version: version, wholeTimeline: *whole}, nil
+	return runSetting{version: version, wholeTimeline: *whole, held: held}, nil
+}
+
+// A refusal names every Scenario, so the engineer reads what can be asked for.
+func resolveHeldScenario(interactive bool, named []string) (func(*lab.Scenario), error) {
+	every := scenarios.All()
+	switch {
+	case !interactive && len(named) == 0:
+		return nil, nil
+	case !interactive:
+		return nil, refusedNamingEvery(every, "a Scenario name is taken with --interactive alone")
+	case len(named) != 1:
+		return nil, refusedNamingEvery(every, fmt.Sprintf("--interactive takes one Scenario name, not %d", len(named)))
+	}
+
+	return lab.ScenarioNamed(every, named[0])
+}
+
+func refusedNamingEvery(every []func(*lab.Scenario), why string) error {
+	names, err := lab.ScenarioNames(every)
+	if err != nil {
+		return err
+	}
+
+	return fmt.Errorf("%s; the Scenarios are: %s", why, strings.Join(names, ", "))
 }
 
 // resolveVersion falls back to the lab's pinned default when no version is

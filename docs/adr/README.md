@@ -64,7 +64,7 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-03 | [Non-goal — application-level recovery](2026-10-03-non-goal-application-level-recovery.md) | Accepted |
 | 2026-10-03 | [The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md) | Accepted, amended 2026-10-04 |
 | 2026-10-03 | [Kubernetes version pin for the Simulated Cluster](2026-10-03-kubernetes-version-pin.md) | Accepted |
-| 2026-10-03 | [The lab provisions the Simulated Cluster it drives](2026-10-03-lab-provisioned-simulated-cluster.md) | Accepted, amended 2026-10-04 and 2026-10-09 |
+| 2026-10-03 | [The lab provisions the Simulated Cluster it drives](2026-10-03-lab-provisioned-simulated-cluster.md) | Accepted, amended 2026-10-04, 2026-10-09 and 2026-10-21 |
 | 2026-10-03 | [Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md) | Accepted, amended 2026-10-07, 2026-10-09 and 2026-10-19 |
 | 2026-10-04 | [Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md) | Accepted |
 | 2026-10-04 | [The gate runs the tests under the race detector](2026-10-04-race-detector-in-the-gate.md) | Accepted |
@@ -77,3 +77,4 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-08 | [A Topology declares the NodePools every Zone holds](2026-10-08-a-topology-declares-the-nodepools-every-zone-holds.md) | Accepted, amended 2026-10-09 (twice) and 2026-10-18 (twice) |
 | 2026-10-18 | [Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md) | Accepted, amended 2026-10-18 and 2026-10-19 |
 | 2026-10-19 | [A NodePool states NoSchedule taints, and a later Workload deploys beside the earlier, judged alone](2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md) | Accepted, amended 2026-10-20 |
+| 2026-10-21 | [The Live view is served on loopback from one shared observation](2026-10-21-the-live-view-is-served-on-loopback-from-one-shared-observation.md) | Accepted |

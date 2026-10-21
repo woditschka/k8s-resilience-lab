@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
@@ -212,6 +213,16 @@ type Scenario struct {
 
 	endedAt Step
 	cause   error
+
+	// haltsAtTheFirstWhen is set by a held run alone. A halt is not an end: no
+	// cause is recorded, and the When and every Step after it are neither
+	// carried out nor reported.
+	haltsAtTheFirstWhen bool
+	halted              bool
+
+	// published is the declared Topology, the one field a held run's observer
+	// reads while the Steps run on another goroutine.
+	published atomic.Pointer[scenario.Topology]
 }
 
 type declaredDeployment struct {
@@ -240,11 +251,15 @@ func (s *Scenario) Then() Then {
 	return Then{scenario: s}
 }
 
-// record reports false once the Scenario has ended, recording nothing. A When
-// is noted at once, before it stops its first Node, and a Wait as it ends.
+// record reports false once the Scenario has ended or halted, recording
+// nothing. A When is noted at once, before it stops its first Node, and a Wait
+// as it ends.
 func (s *Scenario) record(kind StepKind, name string) (Step, bool) {
 	s.noteTheOpenLine()
-	if s.cause != nil {
+	if kind == WhenStep && s.haltsAtTheFirstWhen {
+		s.halted = true
+	}
+	if s.cause != nil || s.halted {
 		return Step{}, false
 	}
 
@@ -631,6 +646,7 @@ func (d DeclaredTopology) declare(step Step, topology scenario.Topology, refused
 		return d
 	}
 	d.scenario.topology, d.scenario.topologyDeclaredAs = topology, step.Name
+	d.scenario.published.Store(&topology)
 
 	return d
 }

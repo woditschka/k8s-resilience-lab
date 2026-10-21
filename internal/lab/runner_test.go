@@ -312,3 +312,72 @@ func TestEachWaitStep_ShouldBeGivenTheNarrativeEndingAtItsOwnNoteInOrder(t *test
 
 	expect.Expect(t, narrated).To(expect.Equal([]Step{given, firstWait, when, secondWait, wait}))
 }
+
+func aScenarioHaltingAtItsFirstWhen() *Scenario {
+	return &Scenario{haltsAtTheFirstWhen: true}
+}
+
+func theKindsOf(steps []Step) []StepKind {
+	kinds := make([]StepKind, 0, len(steps))
+	for _, step := range steps {
+		kinds = append(kinds, step.Kind)
+	}
+
+	return kinds
+}
+
+// Without the halt, this When would be recorded and end the Scenario, since no
+// Wait reached a Placement before it.
+func TestAHeldRunsScenarioReachingItsFirstWhen_ShouldCarryOutNeitherItNorALaterStepAndNotEnd(t *testing.T) {
+	halting := aScenarioHaltingAtItsFirstWhen()
+
+	halting.Given().Topology(Zones(twoZones), theGeneralNodePool())
+	halting.When().NodesFail(Nodes(oneNodeFailing))
+	halting.Then().PodsPerZone(podsPerZoneWhenEven)
+
+	expect.Expect(t, theKindsOf(halting.outcome().Steps)).To(expect.Equal([]StepKind{GivenStep}))
+	expect.Expect(t, halting.outcome().Ended()).To(expect.Equal(false))
+}
+
+func TestAnInteractiveRunOfAScenarioWithNoWhen_ShouldRunEveryStep(t *testing.T) {
+	halting := aScenarioOver(onePodPerNodeOf(aTopologyOf(t, twoZones, twoNodesPerZone)))
+	halting.haltsAtTheFirstWhen = true
+
+	halting.Given().Topology(Zones(twoZones), theGeneralNodePool())
+	halting.Then().PodsPerNode(podsPerNodeWhenEven)
+
+	expect.Expect(t, theKindsOf(halting.outcome().Steps)).To(expect.Equal([]StepKind{GivenStep, ThenStep}))
+	expect.Expect(t, halting.outcome().Ended()).To(expect.Equal(false))
+}
+
+func AFirstCondition_ShouldBeFoundByItsName(*Scenario) {}
+
+func ASecondCondition_ShouldBeFoundByItsName(*Scenario) {}
+
+const (
+	theFirstConditionsName  = "a-first-condition"
+	theSecondConditionsName = "a-second-condition"
+	aNameNoScenarioCarries  = "a-condition-no-scenario-states"
+)
+
+func twoScenariosOfTheirOwnNames() []func(*Scenario) {
+	return []func(*Scenario){AFirstCondition_ShouldBeFoundByItsName, ASecondCondition_ShouldBeFoundByItsName}
+}
+
+func TestAScenarioNameAmongSeveral_ShouldFindTheScenarioWhoseConditionItIs(t *testing.T) {
+	found, err := ScenarioNamed(twoScenariosOfTheirOwnNames(), theSecondConditionsName)
+	if err != nil {
+		t.Fatalf("find the Scenario named %s: %v", theSecondConditionsName, err)
+	}
+
+	expect.Expect(t, functionNameOf(found)).To(expect.Equal(functionNameOf(ASecondCondition_ShouldBeFoundByItsName)))
+}
+
+func TestAScenarioNameMatchingNone_ShouldBeRefusedNamingEveryScenarioInOrder(t *testing.T) {
+	_, err := ScenarioNamed(twoScenariosOfTheirOwnNames(), aNameNoScenarioCarries)
+
+	if err == nil || !strings.Contains(err.Error(), theFirstConditionsName+", "+theSecondConditionsName) {
+		t.Errorf("a name matching no Scenario is refused naming %s and %s in order, but the lookup returned %v",
+			theFirstConditionsName, theSecondConditionsName, err)
+	}
+}

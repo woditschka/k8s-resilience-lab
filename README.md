@@ -92,10 +92,13 @@ cd k8s-resilience-lab
 make run                                 # every Scenario, each on a Simulated Cluster of its own
 make run ARGS="--whole-timeline"         # print every Timeline entry under each filing line
 make run ARGS="--k8s-version <version>"  # mirror another Kubernetes version
+make run ARGS="--interactive a-node-that-stops-responding"  # hold one Scenario's cluster and watch it live
 make ci                                  # the full quality gate, the Scenarios included
 ```
 
 All Scenarios run at once, so a run lasts about as long as its slowest Scenario, and each reports as the section What It Looks Like in Practice shows.
+
+An Interactive run, `--interactive` with one Scenario name, carries out that Scenario's Steps up to its first When and reports them as a run does. The terminal names the Live view's address on `127.0.0.1`. Open it in a browser to watch every Zone, Node and Pod as the Placement changes. The Simulated Cluster stays as the Steps left it until you stop the lab with Ctrl-C, which removes it. A name matching no Scenario stops the lab and lists the Scenario names.
 
 The command suite runs every Scenario and fails when one reports a Finding or ends at a Step. The Scenarios are therefore the lab's own acceptance tests.
 

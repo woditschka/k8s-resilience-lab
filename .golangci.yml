@@ -58,6 +58,29 @@ linters:
             - pkg: k8s.io
               desc: a Scenario names a Kubernetes type only through the full access it writes, which is the Pod settings package allowed above; every other Kubernetes type stays inside internal/cluster
 
+        # The Live view rule: the Live view shows the lab's own Placement board,
+        # so it reaches nothing that drives a Simulated Cluster, and the command
+        # alone composes it.
+        live-view-shows-the-board-alone:
+          files:
+            - "**/internal/live/**"
+          deny:
+            - pkg: k8s.io
+              desc: internal/live imports internal/scenario and the standard library alone; Kubernetes types stay inside internal/cluster
+            - pkg: github.com/woditschka/k8s-resilience-lab/internal/cluster
+              desc: the Live view is handed its board by the observer and reaches no Simulated Cluster itself
+            - pkg: github.com/woditschka/k8s-resilience-lab/internal/lab
+              desc: the command composes the held run and the Live view; neither imports the other
+            - pkg: github.com/woditschka/k8s-resilience-lab/internal/timeline
+              desc: the Live view shows the Placement board alone
+        live-view-composed-by-the-command-alone:
+          files:
+            - "**/internal/**"
+            - "**/scenarios/**"
+          deny:
+            - pkg: github.com/woditschka/k8s-resilience-lab/internal/live
+              desc: cmd/lab alone composes the Live view
+
         # The credential rule, module-wide: the lab drives only the Simulated
         # Cluster it provisioned itself, so no package may reach a kubeconfig, a
         # home directory holding one, or a credential plugin.
