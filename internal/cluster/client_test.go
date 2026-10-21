@@ -21,3 +21,12 @@ func TestTheControlPlaneClient_ShouldTargetTheProvisionedAddressUnderADeadlineAn
 		Timeout: controlPlaneTimeout,
 	}))
 }
+
+// A watch's stream runs as long as its recording, so its configuration carries
+// no deadline; the whole configuration is compared for the same reason as the
+// request client's.
+func TestTheWatchClient_ShouldTargetTheProvisionedAddressWithNoDeadlineAndCarryNoCredential(t *testing.T) {
+	configured := watchConfig(provisionedAddress)
+
+	expect.Expect(t, configured).To(expect.Equal(&rest.Config{Host: provisionedAddress}))
+}

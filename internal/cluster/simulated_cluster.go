@@ -55,6 +55,9 @@ func clusterImage(version KubernetesVersion) string {
 type SimulatedCluster struct {
 	container *ClusterContainer
 	client    *kubernetes.Clientset
+	// watches is the Timeline's streams' alone; every other call goes through
+	// client and its deadline.
+	watches *kubernetes.Clientset
 	// The runner starts and stops recording on one goroutine, so the field is
 	// never shared.
 	recording *recording
@@ -101,9 +104,9 @@ func awaitControlPlane(ctx context.Context, container *ClusterContainer) (*Simul
 
 	var unreached error
 	for {
-		client, err := reachControlPlane(starting, container)
+		client, watches, err := reachControlPlane(starting, container)
 		if err == nil {
-			return &SimulatedCluster{container: container, client: client}, nil
+			return &SimulatedCluster{container: container, client: client, watches: watches}, nil
 		}
 		unreached = err
 
@@ -115,23 +118,23 @@ func awaitControlPlane(ctx context.Context, container *ClusterContainer) (*Simul
 	}
 }
 
-// One request is made through the client, so it is returned only once the
-// control plane is actually serving.
-func reachControlPlane(ctx context.Context, container *ClusterContainer) (*kubernetes.Clientset, error) {
+// One request is made through the request client, so the clients are returned
+// only once the control plane is actually serving.
+func reachControlPlane(ctx context.Context, container *ClusterContainer) (requests, watches *kubernetes.Clientset, err error) {
 	address, err := container.APIAddress(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	client, err := newControlPlaneClient(address)
+	requests, watches, err = controlPlaneClients(address)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if _, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 1}); err != nil {
-		return nil, fmt.Errorf("ask the control plane at %s for its Nodes: %w", address, err)
+	if _, err := requests.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 1}); err != nil {
+		return nil, nil, fmt.Errorf("ask the control plane at %s for its Nodes: %w", address, err)
 	}
 
-	return client, nil
+	return requests, watches, nil
 }
 
 func (c *SimulatedCluster) Name() string {

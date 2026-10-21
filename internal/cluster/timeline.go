@@ -110,19 +110,19 @@ type stream struct {
 func (c *SimulatedCluster) openStreams(ctx context.Context) ([]*stream, error) {
 	recorded := []*stream{
 		{named: "Node", watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			return c.client.CoreV1().Nodes().Watch(ctx, options)
+			return c.watches.CoreV1().Nodes().Watch(ctx, options)
 		}},
 		{named: "Pod", watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			return c.client.CoreV1().Pods(workloadNamespace).Watch(ctx, options)
+			return c.watches.CoreV1().Pods(workloadNamespace).Watch(ctx, options)
 		}},
 		{named: "Deployment", watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			return c.client.AppsV1().Deployments(workloadNamespace).Watch(ctx, options)
+			return c.watches.AppsV1().Deployments(workloadNamespace).Watch(ctx, options)
 		}},
 		{named: "ReplicaSet", watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			return c.client.AppsV1().ReplicaSets(workloadNamespace).Watch(ctx, options)
+			return c.watches.AppsV1().ReplicaSets(workloadNamespace).Watch(ctx, options)
 		}},
 		{named: "Event", watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			return c.client.CoreV1().Events(workloadNamespace).Watch(ctx, options)
+			return c.watches.CoreV1().Events(workloadNamespace).Watch(ctx, options)
 		}},
 	}
 
@@ -197,10 +197,25 @@ func (s *stream) drain(to chan<- watched) {
 	}
 }
 
+// open holds the opening to controlPlaneTimeout and leaves the stream to run
+// until the recording's context ends. Watch returns once the response headers
+// arrive, so a deadline on its context would end the stream as well; the timer
+// is stopped instead. An opening the timer cut is a failed open.
 func (s *stream) open(ctx context.Context) error {
-	opened, err := s.watch(ctx, metav1.ListOptions{ResourceVersion: s.version})
+	opening, cancel := context.WithCancel(ctx)
+	deadline := time.AfterFunc(controlPlaneTimeout, cancel)
+
+	opened, err := s.watch(opening, metav1.ListOptions{ResourceVersion: s.version})
+	inTime := deadline.Stop()
 	if err != nil {
+		cancel()
+
 		return err
+	}
+	if !inTime {
+		opened.Stop()
+
+		return fmt.Errorf("the %s stream did not open within %s", s.named, controlPlaneTimeout)
 	}
 	s.opened = opened
 
