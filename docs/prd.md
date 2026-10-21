@@ -39,7 +39,7 @@ The lab serves two uses from one body of behavior. Unattended, it runs each Scen
 ### Simulated cluster lab
 
 <a id="req-sim-001"></a>
-Every Scenario runs in a Simulated Cluster of its own, provisioned with its Topology before any Workload and removed when the Scenario ends `[REQ-SIM-001]`. The lab reports the Placement a Scenario asserts, its Pods Running and Pending per Zone and per Node, each named by its declared position `[REQ-SIM-001]`. A run reports the Kubernetes version it mirrors and touches nothing in the container runtime but its own Simulated Cluster `[REQ-SIM-001]`.
+Every Scenario runs in a Simulated Cluster of its own, provisioned with its Topology before any Workload and removed when the Scenario ends `[REQ-SIM-001]`. The lab reports the Placement a Scenario reaches, each Zone and Node named by its declared position `[REQ-SIM-001]`. A run reports the Kubernetes version it mirrors and touches nothing in the container runtime but its own Simulated Cluster `[REQ-SIM-001]`.
 
 <a id="req-sim-002"></a>
 One invocation with no arguments checks the lab's own rules, then runs every Scenario needing a Simulated Cluster and reports each outcome afresh `[REQ-SIM-002]`.
@@ -316,12 +316,11 @@ A Workload declares its Required Capacity, the fewest Pods that must stay Runnin
 ### Explaining a Placement after the run
 
 <a id="req-sim-005"></a>
-A reported Placement says where Pods landed, and a Timeline says how they got there `[REQ-SIM-005]`. The lab records in order every change to the Nodes, the Pods and the Workload's own objects, with the control plane's reason for each Placement `[REQ-SIM-005]`. When a Scenario ends, failed or not, the run prints a Timeline summary of each Workload's Pods, or every entry on request `[REQ-SIM-005]`. Every Scenario files its Timeline in one place under the working directory, and the lab removes none `[REQ-SIM-005]`.
+A reported Placement says where Pods landed, and a Timeline says how they got there `[REQ-SIM-005]`. The lab records in order every change to the Nodes, the Pods and the Workload's own objects, with the control plane's reason for each Placement `[REQ-SIM-005]`. When a Scenario ends, failed or not, the run names its Timeline's entry count and file, and prints every Entry on request `[REQ-SIM-005]`. Every Scenario files its Timeline in one place under the working directory, and the lab removes none `[REQ-SIM-005]`.
 
 **Done when:**
 
-- `[REQ-SIM-005]` given a Scenario that has run, when it ends, then its summary names the Timeline's entry count and file. It gives the lab's own setup as one line, while the file keeps every entry.
-- `[REQ-SIM-005]` given its Pods, when the summary is read, then a Pod that reached Running shows its path from Pending and its Node. A Pod left Pending shows the control plane's reason, and a summary with none Pending says so.
+- `[REQ-SIM-005]` given a Scenario that has run, when it ends, then one line names the Timeline's entry count and file, while the file keeps every Entry.
 - `[REQ-SIM-005]` given an engineer asks for the whole Timeline, when a Scenario ends, then every entry is printed in the order it happened.
 - `[REQ-SIM-005]` given a Scenario's Topology and Workload in place, when its Timeline is read, then it holds every change to the Nodes, Pods and Workload's own objects. It carries the control plane's reason for each Pod placed or left Pending.
 - `[REQ-SIM-005]` given a run of two Scenarios, or two runs at once on one machine, when they end, then each Scenario left its own Timeline file, none replacing another.
@@ -329,12 +328,50 @@ A reported Placement says where Pods landed, and a Timeline says how they got th
 
 **Edge cases:**
 
-1. A Scenario fails part-way. The run prints its summary and files its Timeline anyway.
+1. A Scenario fails part-way. The run prints its Timeline's line and files its Timeline anyway.
 2. The place the Timeline files collect in does not exist when a run starts. The run creates it.
 3. A Timeline cannot be written. The run reports the Scenario's outcome and names the Timeline it could not write.
-4. A Scenario ends before any Workload is deployed. The summary gives the Topology and names no Workload.
-5. A Pod is placed, lost to a Failure, and placed again. Its line gives the whole path.
-6. A Scenario deploys more than one Workload. Each gets its own counting line and its own Pod lines.
+
+**Design:** [system-design.md](system-design.md)
+
+### Reading the Placement under every Wait
+
+<a id="req-sim-021"></a>
+Under every Wait, a run shows how the Placement changed and where every Pod stands `[REQ-SIM-021]`. A Wait narrative first gives, in order, the moments that changed the Placement since the previous Wait `[REQ-SIM-021]`. It names Nodes turning Ready or NotReady, Pods scheduled with their Node and when they reached Running, Pods evicted, and Pods left Pending with the scheduler's reason `[REQ-SIM-021]`. It states the order of an eviction and the replacement after it, never a link between them `[REQ-SIM-021]`.
+
+A separator line follows, then a Placement board of the whole Simulated Cluster across every Workload `[REQ-SIM-021]`. The board gives one Node per line, grouped by Zone with its NodePool, listing every Pod on it by Workload name and the Pod's own suffix `[REQ-SIM-021]`. It marks the Pods new since the previous board and lists the Pending Pods beneath `[REQ-SIM-021]`. A second separator line closes every board, so the Thens judging that Wait's Placement print after it `[REQ-SIM-021]`. A Wait with nothing to narrate prints no narrative above its first separator `[REQ-SIM-021]`. No separator stands between a Then and the When after it `[REQ-SIM-021]`.
+
+The Timeline records each Step at its moment `[REQ-SIM-021]`. After the last board, one Skew line for the judged Workload follows, then a separator line and the Timeline's line close the Scenario's report `[REQ-SIM-021]`. The Timeline's line ends at the file it names, with no colon after it `[REQ-SIM-021]`. No table of Pods per Zone or per Node remains, nor a summary of each Workload's Pods `[REQ-SIM-021]`.
+
+A heavier separator line, drawn in a different character, divides a run's parts across their full width `[REQ-SIM-021]`. It stands between the run's opening lines and the first Scenario, and between each Scenario and the next `[REQ-SIM-021]`.
+
+**Done when:**
+
+- `[REQ-SIM-021]` given any Wait of a Scenario, reached or not, when its line is printed, then a separator line and a Placement board follow it. The separator is at least as long as the board's widest line.
+- `[REQ-SIM-021]` given any Wait of a Scenario, when its board is printed, then a second separator line closes it before any Then or the next Step. Every Then judging that Wait's Placement prints after it.
+- `[REQ-SIM-021]` given a Then followed by a When, when the report is read, then no separator line stands between them.
+- `[REQ-SIM-021]` given a Scenario of two Workloads, when a board is read, then every Node of the Topology has one line under its Zone, naming its NodePool. Each line lists every Pod of either Workload on that Node by Workload name and own suffix.
+- `[REQ-SIM-021]` given a board after an earlier one, when read, then exactly the Pods new on each Node since the earlier board are marked. Pods left Pending are listed beneath the Nodes.
+- `[REQ-SIM-021]` given Pods placed since the previous Wait, when that Wait's narrative is read, then it names each Pod's Node and when it reached Running, in the order these happened.
+- `[REQ-SIM-021]` given a Failure before a Wait, when that Wait's narrative is read, then it names each Node turning NotReady, each Pod evicted and each replacement scheduled, in order. It claims no link between an eviction and a replacement.
+- `[REQ-SIM-021]` given Pods left Pending when a Wait ends, when its narrative is read, then it names each with the scheduler's reason.
+- `[REQ-SIM-021]` given a Wait after which nothing changed the Placement, when printed, then its line is followed directly by the separator and the board, with no narrative.
+- `[REQ-SIM-021]` given a Scenario's Timeline, when its file or the whole Timeline is read, then each Step stands at its moment among the Entries.
+- `[REQ-SIM-021]` given a Scenario that has run, when its report ends, then one Skew line for the judged Workload follows the last board, then a separator line and the Timeline's line. No table of Pods per Zone or per Node and no summary of each Workload's Pods appear.
+- `[REQ-SIM-021]` given a Scenario whose Timeline was filed, when its Timeline's line is read, then the line ends at the file's name with no colon. The separator above it is at least as long as that line.
+- `[REQ-SIM-021]` given a run of two Scenarios, when its report is read, then a heavier separator line stands between the run's opening lines and the first Scenario, and between the two Scenarios. It uses a character the separator line does not, and is at least as long as the widest line of the parts it divides.
+- `[REQ-SIM-021]` given every Scenario of the lab, when it runs, then it reaches the outcome it asserted before.
+
+**Edge cases:**
+
+1. The board under the Wait for every Node Ready holds no Pod. Every Node still has its line, empty.
+2. The first board holding a Workload's Pods marks every one of them new.
+3. A Pod is evicted by a Failure and a replacement is placed. The narrative names both in order, and the board shows the replacement alone, marked new.
+4. A Scenario ends at a Wait it does not reach. That Wait still prints its narrative, both separators and its board, up to the moment the Scenario ended.
+5. A Scenario ends before any Workload is deployed. Its boards list the Nodes with no Pod, and no Skew line is given.
+6. The Pods the lab places on its own while provisioning the Topology appear in neither a narrative nor a board.
+7. A Wait has no Then judging its Placement, such as one before a When. Its board still closes with a second separator, and the next Step follows it.
+8. A run holds one Scenario. One heavier separator line stands between the run's opening lines and that Scenario, and none follows it.
 
 **Design:** [system-design.md](system-design.md)
 
