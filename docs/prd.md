@@ -39,26 +39,26 @@ The lab serves two uses from one body of behavior. Unattended, it runs each Scen
 ### Simulated cluster lab
 
 <a id="req-sim-001"></a>
-Every Scenario runs in a Simulated Cluster of its own, provisioned with its Topology before any Workload and removed when the Scenario ends `[REQ-SIM-001]`. The lab reports the Placement a Scenario reaches, each Zone and Node named by its declared position `[REQ-SIM-001]`. A run reports the Kubernetes version it mirrors and touches nothing in the container runtime but its own Simulated Cluster `[REQ-SIM-001]`.
+Every Scenario runs in a Simulated Cluster of its own, provisioned with its Topology and removed when the Scenario ends `[REQ-SIM-001]`.
 
 <a id="req-sim-002"></a>
-One invocation with no arguments checks the lab's own rules, then runs every Scenario needing a Simulated Cluster and reports each outcome afresh `[REQ-SIM-002]`.
+One invocation with no arguments checks the lab's own rules, then runs every Scenario needing a Simulated Cluster `[REQ-SIM-002]`.
 
 <a id="req-sim-014"></a>
-A run carries out its Scenarios at once, so it lasts about as long as its longest Scenario, yet reports them in declared order `[REQ-SIM-014]`. A failing Scenario ends alone, and the lab's own tests needing a Simulated Cluster also run at once `[REQ-SIM-014]`.
+A run carries out its Scenarios at once yet reports them in declared order, and a failing Scenario ends alone `[REQ-SIM-014]`.
 
 <a id="req-sim-003"></a>
 An engineer names one Scenario to re-run it alone `[REQ-SIM-003]`.
 
 <a id="req-sim-004"></a>
-One command decides whether the lab itself is sound: its rules, its tests, its build, and that no part can reach a cluster the lab did not provision `[REQ-SIM-004]`. The repository holds exactly one implementation of the lab `[REQ-SIM-004]`.
+One command decides whether the lab itself is sound, and the repository holds exactly one implementation of the lab `[REQ-SIM-004]`.
 
 <a id="req-sim-007"></a>
-The same command holds the lab to its declared dependencies, free of known vulnerabilities, and every connection the lab opens to a Simulated Cluster closes when its work ends `[REQ-SIM-007]`.
+The same command holds the lab to its declared dependencies, free of known vulnerabilities, and to closing every connection it opens `[REQ-SIM-007]`.
 
 **Done when:**
 
-- `[REQ-SIM-001]` given no Simulated Cluster is up, when the Scenario a-workload-placed-for-resilience runs, then three Zones each hold the NodePool general of three Ready Nodes. Its Placement Settles at nine Running Pods, one on every Node.
+- `[REQ-SIM-001]` given no Simulated Cluster is up, when the Scenario a-workload-placed-for-resilience runs, then three Zones each hold three Ready Nodes of the NodePool general. The Placement Settles at nine Running Pods, one on every Node.
 - `[REQ-SIM-001]` given an earlier run created Nodes and Pods, when a run reports its Placement, then it names only its own, each Zone and Node by its position counted from one.
 - `[REQ-SIM-001]` given a run naming a Kubernetes version or none, when it starts, then its Simulated Cluster mirrors that version or the lab's pinned default, and the run reports which.
 - `[REQ-SIM-001]` given other containers and a second run on the machine, when a Scenario ends, then its own Simulated Cluster is gone and no other container was touched.
@@ -88,7 +88,7 @@ The same command holds the lab to its declared dependencies, free of known vulne
 ### Declaring a Workload's Pods
 
 <a id="req-sim-009"></a>
-A Scenario states the intent behind its Workload, not the settings carrying it out `[REQ-SIM-009]`. Its Workload declares one of the predefined Pod specifications the Scenarios define, one per intent `[REQ-SIM-009]`. Its definition names every setting deciding where Pods land and when they leave a Node, each under its Kubernetes name or through a Named setting `[REQ-SIM-009]`. Resilient placement spreads Pods evenly over Zones and Nodes, and Default placement, its deliberately weak counterpart, leaves the scheduler to decide `[REQ-SIM-009]`. Customizations change a copy of the specification before deployment, in the order written, through the lab's own vocabulary or through full access to every other Kubernetes Pod setting `[REQ-SIM-009]`. Either way the Pods count as the Workload's, and the lab's waiting time before Pods leave an unresponsive Node holds `[REQ-SIM-009]`. No Scenario uses full access yet `[REQ-SIM-009]`.
+A Scenario's Workload declares one of the predefined Pod specifications the Scenarios define, one per intent `[REQ-SIM-009]`. Resilient placement spreads Pods evenly over Zones and Nodes; Default placement, its deliberately weak counterpart, leaves the scheduler to decide. Customizations change a copy before deployment, through the lab's vocabulary or full access to any other Pod setting, which no Scenario uses yet.
 
 **Done when:**
 
@@ -113,7 +113,7 @@ A Scenario states the intent behind its Workload, not the settings carrying it o
 ### Stating what decides a Placement
 
 <a id="req-sim-015"></a>
-Every value that decides a Placement stands on a Scenario's own lines, stated there or named there, and the lab gives none of its own `[REQ-SIM-015]`. A name stands for values the Scenarios define once, beside the Scenarios using it, and the lab only carries out the definition `[REQ-SIM-015]`. So a NodePool states or names its Node capacity, and a predefined Pod specification names its own Request, if any, and its own Startup time `[REQ-SIM-015]`. Standard is the one Named Node capacity so far, and each further name arrives with its first Scenario `[REQ-SIM-015]`. The lab keeps two waiting times of its own, reported when a run starts: a Wait's when it states none, and the one before Pods leave an unresponsive Node `[REQ-SIM-015]`.
+Every value deciding a Placement stands on a Scenario's own lines, stated or named there, and the lab gives none `[REQ-SIM-015]`. A name stands for values the Scenarios define once beside them, and each further Named Node capacity arrives with its first Scenario. The lab keeps two waiting times of its own, reported when a run starts.
 
 **Done when:**
 
@@ -135,16 +135,16 @@ Every value that decides a Placement stands on a Scenario's own lines, stated th
 ### Fitting a Workload's Pods onto the Nodes
 
 <a id="req-sim-011"></a>
-A Node has room for only so much, and a Pod asks for a share of it `[REQ-SIM-011]`. A Pod specification may hold a Request, and one stating none, as in every lab Scenario, asks for nothing `[REQ-SIM-011]`. A Pod no Node has room for stays Pending, so a Failure leaves a Workload only the room on the Nodes still responding `[REQ-SIM-011]`. The Scenario no-room-after-a-zone-stops-responding shows a lost Zone costing the spare Pods, not the Required Capacity `[REQ-SIM-011]`.
+A Node has room for only so much, and a Pod may Request a share of it `[REQ-SIM-011]`. A Pod no Node has room for stays Pending, so a Failure leaves only the room on responding Nodes. The Scenario no-room-after-a-zone-stops-responding shows a lost Zone costing the spare Pods, not the Required Capacity.
 
 **Done when:**
 
 - `[REQ-SIM-011]` given a NodePool stating its Nodes' cpu, memory and Pod count, when it is provisioned, then every Node has that capacity and the run reports it in that order.
 - `[REQ-SIM-011]` given a NodePool stating the cpu and memory alone, when it is declared, then it is refused where it is stated.
-- `[REQ-SIM-011]` given a specification stating a Request, or none, when its Pods are placed, then that Request stands under its Kubernetes name. Without one they ask for no cpu and no memory, and the spread alone decides.
+- `[REQ-SIM-011]` given a specification stating a Request, or none, when its Pods are placed, then a stated Request stands under its Kubernetes name. Without one they ask for no cpu and no memory, and the spread alone decides.
 - `[REQ-SIM-011]` given a Workload requesting more cpu than its Topology has room for, when the Placement settles, then the Pods that fit are Running and the rest stay Pending.
 - `[REQ-SIM-011]` given Nodes with room for one Pod each and a nine-Pod Workload, when the Placement settles, then nine Pods are Running, one on every Node.
-- `[REQ-SIM-011]` given that Placement, when one Zone stops responding, then it settles at six Pods Running and three Pending. The Required Capacity judgement counts six at the moment of the Failure and six once Settled.
+- `[REQ-SIM-011]` given that Placement, when one Zone stops responding, then it settles at six Pods Running and three Pending, and the Required Capacity judgement counts six at both moments.
 
 **Edge cases:**
 
@@ -157,7 +157,7 @@ A Node has room for only so much, and a Pod asks for a share of it `[REQ-SIM-011
 ### Holding Nodes of different kinds in a Zone
 
 <a id="req-sim-013"></a>
-A real cluster seldom runs one kind of machine, so a Zone holds NodePools of identical Nodes, the same NodePools in every Zone `[REQ-SIM-013]`. A Topology states its Zone count and its NodePools alone, and each NodePool its name, Node count and Node capacity `[REQ-SIM-013]`. Every Node belongs to one NodePool, carries its name as a label, and keeps its positional name `[REQ-SIM-013]`. NodePools of different capacity decide where Pods land `[REQ-SIM-013]`.
+A real cluster seldom runs one kind of machine, so a Zone holds NodePools of identical Nodes, the same in every Zone `[REQ-SIM-013]`. Every Node carries its NodePool's name as a label and keeps its positional name.
 
 **Done when:**
 
@@ -180,7 +180,7 @@ A real cluster seldom runs one kind of machine, so a Zone holds NodePools of ide
 ### Marking a NodePool's Nodes with labels
 
 <a id="req-sim-017"></a>
-A NodePool may state labels its Nodes carry, each under its Kubernetes key and value, beside the labels the lab sets: a Node's Zone, hostname and NodePool name `[REQ-SIM-017]`. A NodePool stating no label stays valid, so every Scenario keeps its asserted outcome `[REQ-SIM-017]`. A Then counts a Workload's Pods per value of a stated label, as another counts them per Zone, and the Even spread spreads over such a label too `[REQ-SIM-017]`. The Scenario a-workload-spread-over-on-demand-and-spot demonstrates it `[REQ-SIM-017]`.
+A NodePool may state Kubernetes labels for its Nodes, beside the lab's own Zone, hostname and NodePool labels `[REQ-SIM-017]`. A Then counts a Workload's Pods per value of a stated label, and the Even spread spreads over one. The Scenario a-workload-spread-over-on-demand-and-spot demonstrates it.
 
 **Done when:**
 
@@ -205,7 +205,7 @@ A NodePool may state labels its Nodes carry, each under its Kubernetes key and v
 ### Starting a Workload's Pods
 
 <a id="req-sim-012"></a>
-A real Pod takes time to become Ready, so a Workload replacing Pods after a Failure stays short of them meanwhile `[REQ-SIM-012]`. Every placed Pod counts Pending on its Node for its Startup time, a replacement counting from its own placement `[REQ-SIM-012]`. Every predefined Pod specification names a shortest and a longest Startup time, both above zero, so each Pod takes its own and none is Ready at placement `[REQ-SIM-012]`. A Customization may state one time, or a shortest and a longest, in whole seconds or milliseconds `[REQ-SIM-012]`. It is the one Customization that is no Kubernetes setting `[REQ-SIM-012]`.
+A real Pod takes time to become Ready, so a Workload replacing Pods after a Failure runs short meanwhile `[REQ-SIM-012]`. Each placed Pod counts Pending on its Node for its own Startup time, between the shortest and longest its specification names, both above zero. A Customization may state one time or both bounds, the one Customization that is no Kubernetes setting.
 
 **Done when:**
 
@@ -226,7 +226,7 @@ A real Pod takes time to become Ready, so a Workload replacing Pods after a Fail
 ### Surviving a Node or Zone Failure
 
 <a id="req-sim-008"></a>
-A Scenario injects a Failure and judges the Placement on both sides of it `[REQ-SIM-008]`. The Scenario a-node-that-stops-responding stops one Node holding a Workload that declares Resilient placement, as a hung or disconnected machine does `[REQ-SIM-008]`. The Scenario a-zone-that-stops-responding stops every Node of one Zone in one Step `[REQ-SIM-008]`. A stopped Node stays in the cluster, and the control plane moves its Pods away after a waiting time the lab shortens to a few seconds `[REQ-SIM-008]`. Every run reports that shortening `[REQ-SIM-008]`. A Scenario says how many Nodes or Zones fail, and the lab picks the same ones on every run `[REQ-SIM-008]`. A Failure costs the spread, which the lab accepts while the Pod count holds `[REQ-SIM-008]`. So neither Scenario asserts a count per Node after it, and a-zone-that-stops-responding asserts none per Zone `[REQ-SIM-008]`.
+A Scenario injects a Failure and judges the Placement on both sides of it `[REQ-SIM-008]`. A stopped Node stays in the cluster, as a hung machine does, and the control plane moves its Pods away after a waiting time the lab shortens and reports. A Failure costs the spread, accepted while the Pod count holds, so neither Failure Scenario asserts a count per Node after it, nor a-zone-that-stops-responding one per Zone.
 
 **Done when:**
 
@@ -245,7 +245,7 @@ A Scenario injects a Failure and judges the Placement on both sides of it `[REQ-
 ### Failing every Node of one label value
 
 <a id="req-sim-018"></a>
-A Failure may stop every Node carrying one value of a label a NodePool states `[REQ-SIM-018]`. Its When names that label and value, and those Nodes stop responding in one Step, as in a Node Failure `[REQ-SIM-018]`. The Scenario spot-nodes-that-stop-responding demonstrates it and judges the Required Capacity at both moments `[REQ-SIM-018]`.
+A Failure may stop, in one Step, every Node carrying one value of a label a NodePool states `[REQ-SIM-018]`. The Scenario spot-nodes-that-stop-responding demonstrates it.
 
 **Done when:**
 
@@ -267,7 +267,7 @@ A Failure may stop every Node carrying one value of a label a NodePool states `[
 ### Keeping Pods off a dedicated NodePool
 
 <a id="req-sim-019"></a>
-A NodePool may state taints its Nodes carry, each under its Kubernetes key, value and effect, apart from its labels `[REQ-SIM-019]`. The one effect so far, NoSchedule, keeps every Pod not tolerating the taint off those Nodes `[REQ-SIM-019]`. A Pod specification may tolerate a taint, naming its key, the Equal operator, its value and effect, and no waiting time `[REQ-SIM-019]`. A toleration permits a Pod onto a tainted Node without drawing it there, so a dedicated NodePool's Pods reach it by a Request only its Nodes have room for `[REQ-SIM-019]`. A Then counts the Pods on one NodePool's Nodes, as another counts them per Zone `[REQ-SIM-019]`. A Scenario may declare a later Workload, which the next Wait deploys beside the earlier, and every Then after it judges that Workload alone `[REQ-SIM-019]`. A NodePool stating no taint stays valid, so every Scenario keeps its asserted outcome `[REQ-SIM-019]`. The Scenario general-pods-beside-tainted-gpu-nodes demonstrates it `[REQ-SIM-019]`.
+A NodePool may state taints its Nodes carry; the one effect so far, NoSchedule, keeps every Pod not tolerating them off `[REQ-SIM-019]`. A toleration permits a Pod onto a tainted Node without drawing it there, so a dedicated NodePool's Pods reach it by a Request only its Nodes have room for. A Scenario may declare a later Workload, which the next Wait deploys beside the earlier; every Then after it judges that Workload alone. The Scenario general-pods-beside-tainted-gpu-nodes demonstrates it.
 
 **Done when:**
 
@@ -275,8 +275,8 @@ A NodePool may state taints its Nodes carry, each under its Kubernetes key, valu
 - `[REQ-SIM-019]` given a NodePool stating a taint of another effect, when it is declared, then it is refused where it is stated.
 - `[REQ-SIM-019]` given a Pod specification tolerating a taint, when its Workload's Given line is read, then the lines beneath report the toleration's key, operator, value and effect, and no waiting time.
 - `[REQ-SIM-019]` given a Then stating a NodePool and a Pod count, when it judges the Placement, then it records a Finding unless that NodePool's Nodes hold that count.
-- `[REQ-SIM-019]` given three Zones, each holding two general Nodes and one larger gpu Node tainted NoSchedule, when six Pods declaring Resilient placement are placed, then all six are Running on general Nodes, and none is on a gpu Node.
-- `[REQ-SIM-019]` given that Placement, when three Pods tolerating the taint, whose Request only gpu Nodes have room for, are placed, then all three are Running on gpu Nodes, and none of them is on a general Node.
+- `[REQ-SIM-019]` given three Zones, each holding two general Nodes and one larger gpu Node tainted NoSchedule, when six Pods declaring Resilient placement are placed, then all six are Running on general Nodes.
+- `[REQ-SIM-019]` given that Placement, when three Pods tolerating the taint, whose Request only gpu Nodes have room for, are placed, then all three are Running on gpu Nodes.
 - `[REQ-SIM-019]` given every earlier Scenario, whose NodePools state no taint, when it runs, then it reaches the outcome it asserted before.
 
 **Edge cases:**
@@ -294,7 +294,7 @@ A NodePool may state taints its Nodes carry, each under its Kubernetes key, valu
 ### Judging a Workload's Failure tolerance
 
 <a id="req-sim-010"></a>
-A Workload declares its Required Capacity, the fewest Pods that must stay Running, so it runs spare Pods to survive a lost Zone `[REQ-SIM-010]`. One Step after a Failure judges that minimum at the moment of the Failure, for what it cost, and at the Settled Placement, for what the cluster restored `[REQ-SIM-010]`. A minimum missed at either moment is a Finding naming that moment `[REQ-SIM-010]`.
+A Workload declares its Required Capacity, the fewest Pods that must stay Running, so it runs spare Pods to survive a lost Zone `[REQ-SIM-010]`. One Step after a Failure judges that minimum at the moment of the Failure and at the Settled Placement, and a miss at either is a Finding naming that moment.
 
 **Done when:**
 
@@ -316,7 +316,7 @@ A Workload declares its Required Capacity, the fewest Pods that must stay Runnin
 ### Explaining a Placement after the run
 
 <a id="req-sim-005"></a>
-A reported Placement says where Pods landed, and a Timeline says how they got there `[REQ-SIM-005]`. The lab records in order every change to the Nodes, the Pods and the Workload's own objects, with the control plane's reason for each Placement `[REQ-SIM-005]`. When a Scenario ends, failed or not, the run names its Timeline's entry count and file, and prints every Entry on request `[REQ-SIM-005]`. Every Scenario files its Timeline in one place under the working directory, and the lab removes none `[REQ-SIM-005]`.
+A reported Placement says where Pods landed, and a Timeline says how they got there `[REQ-SIM-005]`. Every Scenario, failed or not, files its Timeline in one place under the working directory, and the lab removes none.
 
 **Done when:**
 
@@ -337,18 +337,12 @@ A reported Placement says where Pods landed, and a Timeline says how they got th
 ### Reading the Placement under every Wait
 
 <a id="req-sim-021"></a>
-Under every Wait, a run shows how the Placement changed and where every Pod stands `[REQ-SIM-021]`. A Wait narrative first gives, in order, the moments that changed the Placement since the previous Wait `[REQ-SIM-021]`. It names Nodes turning Ready or NotReady, Pods scheduled with their Node and when they reached Running, Pods evicted, and Pods left Pending with the scheduler's reason `[REQ-SIM-021]`. It states the order of an eviction and the replacement after it, never a link between them `[REQ-SIM-021]`.
-
-A separator line follows, then a Placement board of the whole Simulated Cluster across every Workload `[REQ-SIM-021]`. The board gives one Node per line, grouped by Zone with its NodePool, listing every Pod on it by Workload name and the Pod's own suffix `[REQ-SIM-021]`. It marks the Pods new since the previous board and lists the Pending Pods beneath `[REQ-SIM-021]`. A second separator line closes every board, so the Thens judging that Wait's Placement print after it `[REQ-SIM-021]`. A Wait with nothing to narrate prints no narrative above its first separator `[REQ-SIM-021]`. No separator stands between a Then and the When after it `[REQ-SIM-021]`.
-
-The Timeline records each Step at its moment `[REQ-SIM-021]`. After the last board, one Skew line for the judged Workload follows, then a separator line and the Timeline's line close the Scenario's report `[REQ-SIM-021]`. The Timeline's line ends at the file it names, with no colon after it `[REQ-SIM-021]`. No table of Pods per Zone or per Node remains, nor a summary of each Workload's Pods `[REQ-SIM-021]`.
-
-A heavier separator line, drawn in a different character, divides a run's parts across their full width `[REQ-SIM-021]`. It stands between the run's opening lines and the first Scenario, and between each Scenario and the next `[REQ-SIM-021]`.
+Under every Wait, a run shows how the Placement changed and where every Pod stands `[REQ-SIM-021]`. A Wait narrative gives the moments that changed the Placement in order, and a Placement board between two separator lines shows every Node with its Pods.
 
 **Done when:**
 
 - `[REQ-SIM-021]` given any Wait of a Scenario, reached or not, when its line is printed, then a separator line and a Placement board follow it. The separator is at least as long as the board's widest line.
-- `[REQ-SIM-021]` given any Wait of a Scenario, when its board is printed, then a second separator line closes it before any Then or the next Step. Every Then judging that Wait's Placement prints after it.
+- `[REQ-SIM-021]` given any Wait of a Scenario, when its board is printed, then a second separator line closes it before any Then or the next Step.
 - `[REQ-SIM-021]` given a Then followed by a When, when the report is read, then no separator line stands between them.
 - `[REQ-SIM-021]` given a Scenario of two Workloads, when a board is read, then every Node of the Topology has one line under its Zone, naming its NodePool. Each line lists every Pod of either Workload on that Node by Workload name and own suffix.
 - `[REQ-SIM-021]` given a board after an earlier one, when read, then exactly the Pods new on each Node since the earlier board are marked. Pods left Pending are listed beneath the Nodes.
@@ -378,10 +372,10 @@ A heavier separator line, drawn in a different character, divides a run's parts 
 ### Writing and finding a Scenario
 
 <a id="req-sim-006"></a>
-An engineer writes a Scenario as Steps, one per line `[REQ-SIM-006]`. A Given declares, a When changes the cluster, a Wait waits for a cluster state, and a Then asserts the Placement `[REQ-SIM-006]`. A Scenario handles no error: a failing Step ends it, and a missed Then is a Finding `[REQ-SIM-006]`. A Wait applies what the Givens before it declared, so no Step waits silently, and every Then and Failure judges the Settled Placement it reached `[REQ-SIM-006]`. A Wait's line names the time it took, so after a Failure it shows how long recovery took `[REQ-SIM-006]`. A Wait may state a time of its own within the lab's waiting time `[REQ-SIM-006]`. A Scenario uses only names the lab offers, save Kubernetes' settings under full access, and every Scenario sits in one place beside a README naming each `[REQ-SIM-006]`.
+An engineer writes a Scenario as Steps, one per line: Given declares, When changes the cluster, Wait waits for a cluster state, Then asserts the Placement `[REQ-SIM-006]`. A failing Step ends the Scenario, and a missed Then is a Finding. A Wait names the time it took, and every Scenario sits in one place beside a README.
 
 <a id="req-sim-020"></a>
-An engineer reads every Scenario of the lab in one source, one after another `[REQ-SIM-020]`. Each Scenario runs under its Scenario name, the condition its function names, so it carries one name alone `[REQ-SIM-020]`. A run reports each Scenario by that name `[REQ-SIM-020]`.
+An engineer reads every Scenario of the lab in one source, each run and reported under its Scenario name, the condition its function names `[REQ-SIM-020]`.
 
 **Done when:**
 
@@ -415,7 +409,7 @@ An engineer reads every Scenario of the lab in one source, one after another `[R
 ### Reading a Scenario by subject
 
 <a id="req-sim-016"></a>
-Each name a Scenario writes shows the subject it belongs to, a Pod, a Node, or the Scenario with its Steps and Topology, unless the Scenarios define it themselves `[REQ-SIM-016]`. A setting of several values stands under its Kubernetes name with each value under its own `[REQ-SIM-016]`. A Scenario stays idiomatic Go, every name defined outside the Scenarios showing where it is defined `[REQ-SIM-016]`. The lab offers only the means to group settings under a name, and its waiting time holds whatever a group states `[REQ-SIM-016]`. The Scenarios define two Named settings `[REQ-SIM-016]`. Every predefined Pod specification names the one for leaving an unresponsive Node `[REQ-SIM-016]`. The Even spread keeps the Skew at one at most over the subject it is given `[REQ-SIM-016]`. Resilient placement names the Even spread over Zones and over Nodes, and a Scenario wanting another spread states it itself `[REQ-SIM-016]`. A Workload's Given line names its intent, and the lines beneath it report every setting its Pods carry, so what a Named setting stands for stays visible `[REQ-SIM-016]`. Every Scenario keeps its asserted outcome `[REQ-SIM-016]`.
+Each name a Scenario writes shows its subject, a Pod, a Node, or the Scenario with its Steps and Topology, unless the Scenarios define it `[REQ-SIM-016]`. Scenario code stays idiomatic Go, and a setting of several values names each value under its Kubernetes name. The Scenarios define two Named settings; Resilient placement names one, the Even spread, over Zones and Nodes, and a Scenario states any other spread itself.
 
 **Done when:**
 
@@ -447,27 +441,27 @@ Each name a Scenario writes shows the subject it belongs to, a Pod, a Node, or t
 
 <!-- Unresolved product questions. Each resolves into a requirement, a non-goal, or an ADR. -->
 
-- Does a Failure stay instantaneous, or does the lab also script one over time, such as a Pod dying after a delay? The timed form is closer to a real outage and costs a second injection surface.
+- Whether the lab also scripts a Failure over time, such as a Pod dying after a delay. That is closer to a real outage and costs a second injection surface.
 - Is the live view of G-2 a read-only Placement view, or one with Failure injection and Scenario controls? Does either show the Timeline as it grows?
 - How long a Timeline file is kept, and whether the lab ever removes one.
 - How an engineer reaches a recorded Timeline beyond its file, and whether a Scenario may assert on its own Timeline.
-- Does the lab promise anything about a team's own production manifests? That needs the Topology and admission behavior to mirror a named environment, not only a Kubernetes version.
-- How a Workload declares the Failures its capacity must survive, whether a run names those the Scenario injected, and whether they mean at once or in sequence. A tolerance no Step exercises promises more than the run proves.
-- Whether the lab judges the Placement after a Failure against the best achievable spread. Kubernetes applies spread rules only when placing a Pod, so such a Finding is one the cluster cannot avoid.
+- Whether the lab promises anything about a team's own production manifests, which needs the Topology and admission behavior to mirror a named environment.
+- How a Workload declares the Failures its capacity must survive, at once or in sequence, and whether a run names those the Scenario injected.
+- Whether the lab judges the Placement after a Failure against the best achievable spread, a Finding the cluster cannot avoid since spread rules apply only when placing a Pod.
 - Whether a Required Capacity judgement states a time of its own, beside its Wait's.
-- Whether a Zone's Nodes also sit on racks, a failure domain between Zone and Node identified by a Node label. A label a NodePool states holds one value in every Zone, so racks wait for Zones that differ.
-- Which Scenario first fails a Node by its position rather than by a count, and what a position the Topology lacks yields. Also open: whether a Failure says if its Nodes share a Zone.
+- Whether Nodes also sit on racks, a failure domain between Zone and Node. A NodePool's label holds one value in every Zone, so racks wait for Zones that differ.
+- Which Scenario first fails a Node by position rather than count, what a position the Topology lacks yields, and whether a Failure says if its Nodes share a Zone.
 - What a Scenario asserts when every Zone fails, or every Node carries the label value a Failure names, leaving no Node to place a Pod on.
 - Whether a Failure by label names several values at once, or stops the Nodes of one NodePool by its name.
-- Whether a NodePool's taints also take the PreferNoSchedule effect, which Pods avoid while other Nodes have room, or NoExecute, which moves placed Pods away and meets the Failures' tolerations.
+- Whether taints also take PreferNoSchedule, avoided while other Nodes have room, or NoExecute, which moves placed Pods away and meets the Failures' tolerations.
 - Whether a Workload is drawn onto a NodePool by selecting it, beside a Request only that NodePool's Nodes have room for.
 - What limits a Topology's Zone count, beyond the lab's own refusal above a limit, since numbered Zone names set no bound.
-- Which Failure the Scenario after a-zone-that-stops-responding injects: a Pod, or a Node removed from the cluster rather than left unresponsive.
+- Which Failure follows a-zone-that-stops-responding: a Pod, or a Node removed from the cluster rather than left unresponsive.
 - Whether a Scenario demonstrates a Customization or full access, and which intent it shows.
-- Whether a Scenario changes a Workload's specification after deployment, a rollout, where a Customization applies before deployment only.
+- Whether a Scenario rolls out a change to a deployed Workload's specification, where a Customization applies before deployment only.
 - Whether the lab says anything when full access leaves out a setting the lab depends on, which today holds silently.
 - Whether a Then asserts which Pods stay Pending, or their count alone, as no-room-after-a-zone-stops-responding does.
-- Whether the lab's vocabulary names a Pod's limits beside its Request, and what a Scenario would assert with them. A limit decides no Placement, and full access reaches one today.
+- Whether the lab's vocabulary names a Pod's limits, which decide no Placement and full access already reaches, and what a Scenario would assert with them.
 - Whether a run also names one Startup time for every Pod, beside the one a Scenario states for its Workload.
 - Whether an engineer can ask a run to carry out its Scenarios one at a time, for a machine without room for every Simulated Cluster at once.
 - Whether the lab also gives a removed Pod a time to stop, as it gives one to start.
