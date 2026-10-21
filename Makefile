@@ -23,7 +23,7 @@ PROHIBITED_IMPORTS := \
 	sigs.k8s.io/controller-runtime \
 	k8s.io/kubectl
 
-.PHONY: ci run tidy-check fmt fmt-check vet lint lint-fix deps-check test test-race build
+.PHONY: ci run interactive tidy-check fmt fmt-check vet lint lint-fix deps-check test test-race build
 
 ci: tidy-check fmt-check vet lint deps-check test build
 
@@ -31,6 +31,15 @@ ci: tidy-check fmt-check vet lint deps-check test build
 # The lab's flags pass through ARGS, as in `make run ARGS="--whole-timeline"`.
 run:
 	go run ./cmd/lab $(ARGS)
+
+# interactive holds one Scenario's Simulated Cluster and serves the Live view,
+# as in `make interactive SCENARIO=a-node-that-stops-responding`.
+interactive:
+	@if [ -z "$(SCENARIO)" ]; then \
+		echo "interactive: name the Scenario to hold, as in: make interactive SCENARIO=a-node-that-stops-responding"; \
+		exit 2; \
+	fi
+	go run ./cmd/lab --interactive $(SCENARIO) $(ARGS)
 
 tidy-check:
 	go mod tidy -diff
