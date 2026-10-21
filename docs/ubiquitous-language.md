@@ -106,6 +106,10 @@
 
 **Placement board**: The state of the whole Simulated Cluster that a run prints under a Wait, beneath its Wait narrative and a separator line. Relationships: one per Wait, across every Workload, giving one line per Node grouped by Zone with its NodePool. Each Node's line lists every Pod on it by Workload name and the Pod's own suffix, marking newcomers since the previous board. Pending Pods are listed beneath. A second separator line closes it, before the Thens judging that Wait's Placement and the next Step. Avoid: status, snapshot, Pods per Zone, Pods per Node, map, grid.
 
+**Interactive run**: One invocation of the lab that holds the Simulated Cluster of one named Scenario for an engineer to watch in the Live view. Relationships: it carries out the Scenario's Steps up to its first When and reports them to the terminal as a run does. It removes the Simulated Cluster it holds when the engineer stops the lab. Avoid: session, demo, playground; run alone, which removes each Simulated Cluster when its Scenario ends.
+
+**Live view**: The page a browser shows of an Interactive run's Simulated Cluster, following its Placement as it changes. Relationships: one per Interactive run, showing every Zone, each Zone's Nodes with their NodePool, the Pods on each Node by Workload name and own suffix, and the Pending Pods. Avoid: dashboard, UI, visualisation, web board; Placement board, which a run prints under a Wait.
+
 **Finding**: An outcome a Then asserts that the Placement does not meet. Relationships: a Finding is a result of the Scenario, unlike a Step that cannot be carried out, which ends it. Avoid: failure (that word is the injected loss), error, bug, violation.
 
 ## Example Dialogue

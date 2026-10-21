@@ -431,6 +431,38 @@ Each name a Scenario writes shows its subject, a Pod, a Node, or the Scenario wi
 
 **ADR:** [ADR: A Workload declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md) · [ADR: Scenario code stays idiomatic Go, read by subject](adr/2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)  ·  **Design:** [system-design.md](system-design.md)
 
+### Watching a Scenario live
+
+<a id="req-sim-022"></a>
+An engineer starts the lab in an Interactive run naming one Scenario, and opens its Live view in a browser `[REQ-SIM-022]`. The Live view follows the Placement as it changes: every Zone, each Zone's Nodes with their NodePool, the Pods on each Node, and the Pending Pods `[REQ-SIM-022]`. The named Scenario is provisioned at once and runs its Steps up to its first When `[REQ-SIM-022]`. Its Steps report to the terminal as in a run, and the Simulated Cluster is then held for the engineer to watch `[REQ-SIM-022]`. A run removes each Simulated Cluster when its Scenario ends, while an Interactive run holds its one Simulated Cluster until the engineer stops the lab `[REQ-SIM-022]`. The Live view shows the Simulated Cluster alone and changes nothing in it `[REQ-SIM-022]`.
+
+**Done when:**
+
+- `[REQ-SIM-022]` given an Interactive run naming a Scenario, when it starts, then that Scenario's Simulated Cluster is provisioned and its Steps up to its first When run. They report to the terminal as in a run, and the terminal names where the Live view is reached.
+- `[REQ-SIM-022]` given the Live view open while the Steps run, when the Placement changes, then the Live view shows the change without a reload. It shows every Zone, each Node under its Zone with its NodePool, and each Pod on its Node by Workload name and own suffix. The Pending Pods stand apart.
+- `[REQ-SIM-022]` given those Steps have run, when the engineer watches, then the Simulated Cluster stays as they left it until the engineer stops the lab, which removes it.
+- `[REQ-SIM-022]` given every Scenario of the lab, when a run carries it out, then it reaches the outcome it asserted before.
+
+**Not yet in force.** A second slice of REQ-SIM-022 adds the following; until it ships, an Interactive run naming no Scenario is refused as edge case 1 states.
+
+- `[REQ-SIM-022]` given an Interactive run naming no Scenario, when the Live view opens, then it offers every Scenario by its Scenario name. No Simulated Cluster is provisioned until the engineer picks one.
+- `[REQ-SIM-022]` given a Simulated Cluster held, when the engineer picks another Scenario or resets, then the held cluster is removed before a fresh one is provisioned. The terminal reports each provisioning, and no two clusters of the Interactive run are up at once.
+- `[REQ-SIM-022]` given the engineer chooses every Step, when a Scenario is picked or reset, then every Step runs and reports to the terminal. The cluster is then held, so the Live view shows the Placement the last Step left.
+- `[REQ-SIM-022]` given Steps still running, when the engineer resets or picks another Scenario, then the Steps stop and the Simulated Cluster is removed.
+
+**Edge cases:**
+
+1. An Interactive run names a Scenario matching none, or names no Scenario or two. It stops before provisioning and names the Scenarios that exist, as a run does.
+2. A Scenario with no When. Running its Steps up to its first When runs every Step.
+3. A Step that cannot be carried out. The terminal names it as a run does, and the cluster is held as that Step left it.
+4. A Then records a Finding. The terminal reports it as a run does, and the later Steps still run.
+5. The Live view is opened only after the Steps have run, or in two browsers at once. Each shows the Placement as it stands.
+6. The Pods the lab places on its own while provisioning the Topology. They appear nowhere in the Live view.
+7. The engineer stops the lab while Steps still run. The Steps stop and the Simulated Cluster is removed.
+8. No container runtime is reachable. The Interactive run names why and stops before offering the Live view.
+
+**Design:** [system-design.md](system-design.md)
+
 ## Superseded
 
 <!-- Retired requirements: each ID maps to its successor (or to the reason it was withdrawn) so existing links still resolve. Keep this a list, so every retired ID stays in a list item. -->
@@ -442,7 +474,9 @@ Each name a Scenario writes shows its subject, a Pod, a Node, or the Scenario wi
 <!-- Unresolved product questions. Each resolves into a requirement, a non-goal, or an ADR. -->
 
 - Whether the lab also scripts a Failure over time, such as a Pod dying after a delay. That is closer to a real outage and costs a second injection surface.
-- Is the live view of G-2 a read-only Placement view, or one with Failure injection and Scenario controls? Does either show the Timeline as it grows?
+- What an engineer's action on a Node or a Pod in the Live view means, and whether a Failure injected there stands in the Timeline as a When does.
+- Whether the Live view shows a Scenario's Timeline and Wait narratives as they grow.
+- Whether the Live view is reachable from another machine than the one running the lab.
 - How long a Timeline file is kept, and whether the lab ever removes one.
 - How an engineer reaches a recorded Timeline beyond its file, and whether a Scenario may assert on its own Timeline.
 - Whether the lab promises anything about a team's own production manifests, which needs the Topology and admission behavior to mirror a named environment.
