@@ -1,0 +1,218 @@
+:root {
+  color-scheme: light dark;
+  --text: #1d2330;
+  --muted: #5b6475;
+  --page: #f4f6fa;
+  --zone: #e6eaf2;
+  --node: #ffffff;
+  --border: #c9d0dd;
+  --ready: #1f8a4c;
+  --not-ready: #c62f2f;
+  --pending: #a86b00;
+  --newcomer: #3b82f6;
+  font-family: system-ui, sans-serif;
+  color: var(--text);
+  background: var(--page);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #e3e7ef;
+    --muted: #9aa4b6;
+    --page: #11151c;
+    --zone: #1a202b;
+    --node: #232a37;
+    --border: #364052;
+    --ready: #4ccb7f;
+    --not-ready: #f06a6a;
+    --pending: #e0a43a;
+    --newcomer: #6ea8ff;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 1rem;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+h1 {
+  margin: 0 0 1rem;
+  font-size: 1.4rem;
+}
+
+.connection {
+  color: var(--muted);
+}
+
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.zone,
+.unplaced {
+  background: var(--zone);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+}
+
+.zone-name {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  gap: 0.75rem;
+}
+
+.node {
+  background: var(--node);
+  border: 1px solid var(--border);
+  border-left: 0.4rem solid var(--not-ready);
+  border-radius: 0.5rem;
+  padding: 0.6rem;
+}
+
+.node.ready {
+  border-left-color: var(--ready);
+}
+
+.node-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.node-name {
+  margin: 0;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.readiness {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.ready > .readiness,
+.ready > .node-header > .readiness {
+  color: var(--ready);
+}
+
+.not-ready > .readiness,
+.not-ready > .node-header > .readiness {
+  color: var(--not-ready);
+}
+
+.pending > .readiness {
+  color: var(--pending);
+}
+
+.node-pool {
+  margin: 0.25rem 0;
+  color: var(--muted);
+}
+
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.label {
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 0 0.5rem;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.room {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.room th,
+.room td {
+  padding: 0.1rem 0.25rem;
+  text-align: right;
+}
+
+.room .room-of {
+  text-align: left;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.pods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pod {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: baseline;
+  border: 1px solid var(--border);
+  border-left: 0.3rem solid var(--not-ready);
+  border-radius: 0.4rem;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.85rem;
+}
+
+.pod.ready {
+  border-left-color: var(--ready);
+}
+
+.pod.pending {
+  border-left-color: var(--pending);
+}
+
+.pod-requests {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.pod-name {
+  font-family: ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+
+/* One rule per step of the newcomer fade the lab counts, highest first. */
+.pod.newcomer[data-fade="3"] {
+  background: color-mix(in srgb, var(--newcomer) 45%, transparent);
+}
+
+.pod.newcomer[data-fade="2"] {
+  background: color-mix(in srgb, var(--newcomer) 28%, transparent);
+}
+
+.pod.newcomer[data-fade="1"] {
+  background: color-mix(in srgb, var(--newcomer) 12%, transparent);
+}
+
+.not-observed {
+  color: var(--not-ready);
+}

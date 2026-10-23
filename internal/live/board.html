@@ -1,0 +1,48 @@
+{{- if .NotObserved -}}
+<p class="not-observed">no Placement board: {{.NotObserved}}</p>
+{{- else -}}
+<div class="board">
+  {{- range .Zones -}}
+  <section class="zone" id="{{.ID}}">
+    <h2 class="zone-name">{{.Name}}</h2>
+    <div class="nodes">
+      {{- range .Nodes -}}
+      <article class="node {{.Readiness.Class}}" id="{{.ID}}">
+        <header class="node-header">
+          <h3 class="node-name">{{.Name}}</h3>
+          <span class="readiness">{{.Readiness.Word}}</span>
+        </header>
+        <p class="node-pool">{{.NodePool}}</p>
+        <ul class="labels">
+          {{- range .Labels}}<li class="label">{{.}}</li>{{end -}}
+        </ul>
+        <table class="room">
+          <thead><tr><th></th><th>capacity</th><th>requests</th><th>left</th></tr></thead>
+          <tbody>
+            {{- range .Room -}}
+            <tr class="room-row"><th class="room-of">{{.Of}}</th><td class="room-capacity">{{.Capacity}}</td><td class="room-requests">{{.Requests}}</td><td class="room-left">{{.Left}}</td></tr>
+            {{- end -}}
+          </tbody>
+        </table>
+        <ul class="pods">
+          {{- range .Pods}}{{template "pod" .}}{{end -}}
+        </ul>
+      </article>
+      {{- end -}}
+    </div>
+  </section>
+  {{- end -}}
+  {{- if .Unplaced -}}
+  <section class="unplaced" id="unplaced">
+    <h2 class="zone-name">Pending</h2>
+    <ul class="pods">
+      {{- range .Unplaced}}{{template "pod" .}}{{end -}}
+    </ul>
+  </section>
+  {{- end -}}
+</div>
+{{- end -}}
+
+{{- define "pod" -}}
+<li class="pod {{.Readiness.Class}}{{if .Fade}} newcomer{{end}}" id="{{.ID}}"{{if .Fade}} data-fade="{{.Fade}}"{{end}}><span class="pod-name">{{.Name}}</span> <span class="readiness">{{.Readiness.Word}}</span> <span class="pod-requests">requests cpu {{.CPU}} memory {{.Memory}}</span></li>
+{{- end -}}

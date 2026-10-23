@@ -118,9 +118,9 @@ func theBoardObservedOnceHeld(boards <-chan observed) observed {
 // A board marked against itself has no newcomer, as one observed twice of a
 // cluster that has stopped changing.
 func theBoardOfAClusterNoLongerChanging(topology scenario.Topology, placed scenario.Placement) observed {
-	once := scenario.NewPlacementBoard(topology, placed.Pods(), scenario.PlacementBoard{})
+	once := scenario.NewPlacementBoard(topology, placed, scenario.PlacementBoard{})
 
-	return observed{Lines: scenario.NewPlacementBoard(topology, placed.Pods(), once).Lines()}
+	return observed{Lines: scenario.NewPlacementBoard(topology, placed, once).Lines()}
 }
 
 // A specification naming nothing is refused by the Workload's constructor, so

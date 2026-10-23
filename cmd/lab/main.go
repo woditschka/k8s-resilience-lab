@@ -114,8 +114,8 @@ func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, r
 		return err
 	}
 
-	var view live.View
-	server, err := live.Listen(ctx, &view)
+	view := live.NewView()
+	server, err := live.Listen(ctx, view)
 	if err != nil {
 		return err
 	}

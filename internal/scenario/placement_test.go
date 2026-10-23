@@ -211,3 +211,14 @@ func TestAPlacement_ShouldCountPodsPerNodePoolOfTheirNodes(t *testing.T) {
 
 	expect.Expect(t, placed.PodsPerNodePool()).To(expect.Equal(map[string]int{theGeneralNodePool: 2, gpu: 0}))
 }
+
+func TestTwoObservationsThatDifferInTheNodesNotReadyAlone_ShouldNotAgreeUnlessTheyNameTheSameNodes(t *testing.T) {
+	allReady := scenario.NewPlacement(twoZonesOfTwoNodes(t), threePlacedPodsOverTwoZones())
+	oneNotReady := allReady.WithNodesNotReady([]string{fullestNode})
+	twoNotReady := allReady.WithNodesNotReady([]string{fullestNode, nextNode})
+	twoNotReadyInAnotherOrder := allReady.WithNodesNotReady([]string{nextNode, fullestNode})
+
+	expect.Expect(t, allReady.Equal(oneNotReady)).To(expect.Equal(false))
+	expect.Expect(t, oneNotReady.Equal(twoNotReady)).To(expect.Equal(false))
+	expect.Expect(t, twoNotReady.Equal(twoNotReadyInAnotherOrder)).To(expect.Equal(true))
+}

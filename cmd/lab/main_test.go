@@ -1043,7 +1043,8 @@ const (
 func aBoardOfOnePod(t *testing.T) scenario.PlacementBoard {
 	t.Helper()
 
-	return scenario.NewPlacementBoard(aTopologyOfOneNode(t), []scenario.Pod{thePodOnTheBoard()}, scenario.PlacementBoard{})
+	return scenario.NewPlacementBoard(aTopologyOfOneNode(t),
+		scenario.NewPlacement(aTopologyOfOneNode(t).Nodes(), []scenario.Pod{thePodOnTheBoard()}), scenario.PlacementBoard{})
 }
 
 func thePodOnTheBoard() scenario.Pod {

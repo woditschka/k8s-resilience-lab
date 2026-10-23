@@ -27,6 +27,8 @@ const (
 	pendingWebSuffix    = "t6r9d"
 	firstBatchSuffix    = "h3l5v"
 	theNewcomerMark     = "+"
+	markedNew           = true
+	notMarkedNew        = false
 	theBoardsNodeIndent = "  "
 )
 
@@ -54,7 +56,104 @@ func readAsNew(workload, suffix string) string {
 // A board after one holding the same Pods marks none of them new, so only the
 // grouping is left to read.
 func aBoardAfterOneHoldingTheSame(topology scenario.Topology, pods []scenario.Pod) scenario.PlacementBoard {
-	return scenario.NewPlacementBoard(topology, pods, scenario.NewPlacementBoard(topology, pods, scenario.PlacementBoard{}))
+	observed := observedOn(topology, pods)
+
+	return scenario.NewPlacementBoard(topology, observed, scenario.NewPlacementBoard(topology, observed, scenario.PlacementBoard{}))
+}
+
+// observedOn reads every Node of the Topology Ready, as an observation of a
+// cluster no Failure has touched does.
+func observedOn(topology scenario.Topology, pods []scenario.Pod) scenario.Placement {
+	return scenario.NewPlacement(topology.Nodes(), pods)
+}
+
+func requesting(pod scenario.Pod, request scenario.Request) scenario.Pod {
+	pod.Request = request
+
+	return pod
+}
+
+func readied(pod scenario.Pod) scenario.Pod {
+	pod.Ready = true
+
+	return pod
+}
+
+func shownAs(pod scenario.Pod, newcomer bool) scenario.BoardPod {
+	return scenario.BoardPod{Name: pod.Name, Workload: pod.Workload, Ready: pod.Ready, Request: pod.Request, Newcomer: newcomer}
+}
+
+// A Node left out of the observation is one the control plane does not hold,
+// so the board reads it NotReady beside the one the observation names NotReady.
+func TestAPlacementBoard_ShouldGiveEachNodeItsNodePoolLabelsReadinessAndRoomCapacityRequestsAndLeft(t *testing.T) {
+	declared := aTopologyOfOnDemandAndSpotNodes(t)
+	capacity := aCapacity(t)
+	const halfACore, aCore, aGibibyte, twoGibibytes = scenario.CPU(500), scenario.CPU(1000), scenario.Memory(1024), scenario.Memory(2048)
+	const theTwoPodsOnIt, theOnePodOnIt = 2, 1
+	webRequest := scenario.NewRequest(halfACore, aGibibyte)
+	batchRequest := scenario.NewRequest(aCore, twoGibibytes)
+	keptWeb := readied(requesting(aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode), webRequest))
+	startingBatch := requesting(aPodOf(batchWorkload, firstBatchSuffix, firstOnDemandNode), batchRequest)
+	movedWeb := readied(requesting(aPodOf(webWorkload, secondWebSuffix, secondSpotNode), webRequest))
+	pendingWeb := requesting(anUnplacedPodOf(webWorkload, pendingWebSuffix), webRequest)
+	everyNodeButTheSecondOnDemand := slices.DeleteFunc(declared.Nodes(),
+		func(node scenario.Node) bool { return node.Name == secondOnDemandNode })
+	observed := scenario.NewPlacement(everyNodeButTheSecondOnDemand, []scenario.Pod{keptWeb, startingBatch, movedWeb, pendingWeb}).
+		WithNodesNotReady([]string{firstSpotNode})
+	previous := scenario.NewPlacementBoard(declared, observedOn(declared, []scenario.Pod{keptWeb}), scenario.PlacementBoard{})
+
+	board := scenario.NewPlacementBoard(declared, observed, previous)
+
+	onDemandLabels := labelsOf(t, map[string]string{capacityType: onDemand})
+	spotLabels := labelsOf(t, map[string]string{capacityType: spot})
+	untouched := scenario.RoomLeft{Pods: capacity.Pods(), CPU: capacity.CPU(), Memory: capacity.Memory()}
+	expect.Expect(t, board.Zones()).To(expect.Equal([]scenario.BoardZone{
+		{Name: firstZone, Nodes: []scenario.BoardNode{
+			{
+				Name: firstOnDemandNode, NodePool: onDemand, Labels: onDemandLabels, Readiness: scenario.NodeReady,
+				Capacity: capacity,
+				Requests: scenario.RoomTaken{
+					Pods:   theTwoPodsOnIt,
+					CPU:    webRequest.CPU() + batchRequest.CPU(),
+					Memory: webRequest.Memory() + batchRequest.Memory(),
+				},
+				Left: scenario.RoomLeft{
+					Pods:   capacity.Pods() - theTwoPodsOnIt,
+					CPU:    capacity.CPU() - webRequest.CPU() - batchRequest.CPU(),
+					Memory: capacity.Memory() - webRequest.Memory() - batchRequest.Memory(),
+				},
+				Pods: []scenario.BoardPod{shownAs(startingBatch, markedNew), shownAs(keptWeb, notMarkedNew)},
+			},
+			{
+				Name: firstSpotNode, NodePool: spot, Labels: spotLabels, Readiness: scenario.NodeNotReady,
+				Capacity: capacity, Left: untouched,
+			},
+		}},
+		{Name: secondZone, Nodes: []scenario.BoardNode{
+			{
+				Name: secondOnDemandNode, NodePool: onDemand, Labels: onDemandLabels, Readiness: scenario.NodeNotReady,
+				Capacity: capacity, Left: untouched,
+			},
+			{
+				Name: secondSpotNode, NodePool: spot, Labels: spotLabels, Readiness: scenario.NodeReady,
+				Capacity: capacity,
+				Requests: scenario.RoomTaken{Pods: theOnePodOnIt, CPU: webRequest.CPU(), Memory: webRequest.Memory()},
+				Left: scenario.RoomLeft{
+					Pods:   capacity.Pods() - theOnePodOnIt,
+					CPU:    capacity.CPU() - webRequest.CPU(),
+					Memory: capacity.Memory() - webRequest.Memory(),
+				},
+				Pods: []scenario.BoardPod{shownAs(movedWeb, markedNew)},
+			},
+		}},
+	}))
+	expect.Expect(t, board.Unplaced()).To(expect.Equal([]scenario.BoardPod{shownAs(pendingWeb, markedNew)}))
+}
+
+func TestAPodOnAPlacementBoard_ShouldBeNamedByItsWorkloadAndOwnSuffix(t *testing.T) {
+	pod := shownAs(aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode), notMarkedNew)
+
+	expect.Expect(t, pod.BoardName()).To(expect.Equal(read(webWorkload, firstWebSuffix)))
 }
 
 func TestAPlacementBoardOfTwoWorkloads_ShouldListEveryPodOnItsNodeGroupedByZoneAndNodePool(t *testing.T) {
@@ -110,7 +209,8 @@ func TestAPlacementBoard_ShouldBeAsWideAsItsWidestLine(t *testing.T) {
 
 	for widest, board := range boards {
 		t.Run(widest, func(t *testing.T) {
-			drawn := scenario.NewPlacementBoard(aTopologyOfOnDemandAndSpotNodes(t), board.observed, scenario.PlacementBoard{})
+			declared := aTopologyOfOnDemandAndSpotNodes(t)
+			drawn := scenario.NewPlacementBoard(declared, observedOn(declared, board.observed), scenario.PlacementBoard{})
 
 			expect.Expect(t, slices.Contains(drawn.Lines(), board.theWidestLine)).To(expect.Equal(true))
 			expect.Expect(t, drawn.Width()).To(expect.Equal(utf8.RuneCountInString(board.theWidestLine)))
@@ -126,7 +226,7 @@ func TestTheFirstBoardHoldingAWorkload_ShouldMarkEveryOneOfItsPodsNew(t *testing
 		anUnplacedPodOf(webWorkload, pendingWebSuffix),
 	}
 
-	board := scenario.NewPlacementBoard(declared, observed, scenario.PlacementBoard{})
+	board := scenario.NewPlacementBoard(declared, observedOn(declared, observed), scenario.PlacementBoard{})
 
 	expect.Expect(t, board.Lines()).To(expect.Equal([]string{
 		firstZone,
@@ -146,7 +246,7 @@ func TestAPlacementBoard_ShouldMarkThePodsNewSinceThePreviousBoardAndListPending
 	declared := aTopologyOfOnDemandAndSpotNodes(t)
 	kept := aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode)
 	evicted := aPodOf(webWorkload, secondWebSuffix, secondOnDemandNode)
-	previous := scenario.NewPlacementBoard(declared, []scenario.Pod{kept, evicted}, scenario.PlacementBoard{})
+	previous := scenario.NewPlacementBoard(declared, observedOn(declared, []scenario.Pod{kept, evicted}), scenario.PlacementBoard{})
 	observed := []scenario.Pod{
 		kept,
 		aPodOf(webWorkload, replacementSuffix, firstSpotNode),
@@ -154,7 +254,7 @@ func TestAPlacementBoard_ShouldMarkThePodsNewSinceThePreviousBoardAndListPending
 		anUnplacedPodOf(webWorkload, pendingWebSuffix),
 	}
 
-	board := scenario.NewPlacementBoard(declared, observed, previous)
+	board := scenario.NewPlacementBoard(declared, observedOn(declared, observed), previous)
 
 	expect.Expect(t, board.Lines()).To(expect.Equal([]string{
 		firstZone,
@@ -170,7 +270,7 @@ func TestAPlacementBoard_ShouldMarkThePodsNewSinceThePreviousBoardAndListPending
 func TestAPlacementBoardWithNoPodPlaced_ShouldStillGiveEveryNodeItsLine(t *testing.T) {
 	declared := aTopologyOfOnDemandAndSpotNodes(t)
 
-	board := scenario.NewPlacementBoard(declared, nil, scenario.PlacementBoard{})
+	board := scenario.NewPlacementBoard(declared, scenario.Placement{}, scenario.PlacementBoard{})
 
 	expect.Expect(t, board.Lines()).To(expect.Equal([]string{
 		firstZone,

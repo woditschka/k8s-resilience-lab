@@ -508,10 +508,34 @@ func fromPods(observed []corev1.Pod) []scenario.Pod {
 			Node:     pod.Spec.NodeName,
 			Phase:    observedPhaseOf(pod),
 			Ready:    isPodReady(pod),
+			Request:  requestedOverContainers(pod.Spec.Containers),
 		})
 	}
 
 	return pods
+}
+
+// The scheduler places a Pod by the sum of its containers' Requests, so the
+// lab reads the same sum.
+func requestedOverContainers(containers []corev1.Container) scenario.Request {
+	var cpu, memory resource.Quantity
+	for _, container := range containers {
+		cpu.Add(*container.Resources.Requests.Cpu())
+		memory.Add(*container.Resources.Requests.Memory())
+	}
+
+	return scenario.NewRequest(scenario.CPU(cpu.MilliValue()), scenario.Memory(memory.Value()/bytesPerMebibyte))
+}
+
+func notReadyNodeNamesIn(observed []corev1.Node) []string {
+	var notReady []string
+	for _, node := range observed {
+		if !isReady(node) {
+			notReady = append(notReady, node.Name)
+		}
+	}
+
+	return notReady
 }
 
 // A Pod on a stopped Node stays marked for deletion, since no simulator

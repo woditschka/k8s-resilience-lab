@@ -1209,25 +1209,33 @@ func TestAWorkloadNotToleratingATaint_ShouldKeepItsPodsOffTheTaintedNodes(t *tes
 
 // A probe Pod is created here beside the Workloads, since provisioning removes
 // its own before it returns and an observation would otherwise find none to
-// leave out.
-func TestAPlacementBoard_ShouldLeaveOutThePodsTheLabPlacesWhileProvisioning(t *testing.T) {
+// leave out. A Node is failed after both settle, and the observation follows
+// before any Pod could move off it.
+func TestAnObservationOfEveryWorkload_ShouldReadEachNodesReadinessAndEachPodsRequestButNoProbePod(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology := anEvenSpreadTopology(t)
 	spreadEvenly := aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
-	spreadNowhere := aSecondWorkloadDeclaring(t, threePods, defaultPlacement(t))
-	deployBoth(t, provisioned, topology, spreadEvenly, spreadNowhere)
-	bothSettled(t, provisioned, spreadEvenly, spreadNowhere)
+	declaredRequest := scenario.NewRequest(halfTheNodesCPU, someRequestedMemory)
+	requestingHalfANode := aSecondWorkloadDeclaring(t, threePods, requestingCPUOf(t, halfTheNodesCPU))
+	deployBoth(t, provisioned, topology, spreadEvenly, requestingHalfANode)
+	bothSettled(t, provisioned, spreadEvenly, requestingHalfANode)
 	aProbePodBeside(t, provisioned, topology.Nodes()[0])
+	failed := theFirstNodeOf(topology)
+	if err := provisioned.FailNode(t.Context(), failed); err != nil {
+		t.Fatalf("fail the Node %s: %v", failed, err)
+	}
 
 	observed, err := provisioned.ObserveEveryWorkload(t.Context())
 
 	expect.Expect(t, err).To(expect.Equal[error](nil))
 	expect.Expect(t, podsPerWorkloadIn(observed)).To(expect.Equal(map[string]int{
-		spreadEvenly.Name():  ninePods,
-		spreadNowhere.Name(): threePods,
+		spreadEvenly.Name():        ninePods,
+		requestingHalfANode.Name(): threePods,
 	}))
 	expect.Expect(t, observed.Nodes()).To(expect.HaveLen[scenario.Node](threeZones * threeNodesPerZone))
+	expect.Expect(t, observed.NodesNotReady()).To(expect.Equal([]string{failed}))
+	expect.Expect(t, requestsOf(observed, requestingHalfANode)).To(expect.Equal(map[scenario.Request]int{declaredRequest: threePods}))
 }
 
 func aProbePodBeside(t *testing.T, provisioned *SimulatedCluster, on scenario.Node) {
@@ -1236,6 +1244,17 @@ func aProbePodBeside(t *testing.T, provisioned *SimulatedCluster, on scenario.No
 	if _, err := provisioned.client.CoreV1().Pods(workloadNamespace).Create(t.Context(), toProbePod(on), metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create a probe Pod on Node %s: %v", on.Name, err)
 	}
+}
+
+func requestsOf(observed scenario.Placement, workload scenario.Workload) map[scenario.Request]int {
+	counted := make(map[scenario.Request]int)
+	for _, pod := range observed.Pods() {
+		if pod.Workload == workload.Name() {
+			counted[pod.Request]++
+		}
+	}
+
+	return counted
 }
 
 func podsPerWorkloadIn(observed scenario.Placement) map[string]int {

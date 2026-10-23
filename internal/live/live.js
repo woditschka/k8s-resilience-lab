@@ -2,20 +2,21 @@
 
 // The board arrives rendered and escaped by the lab, so it is placed as markup.
 const board = document.getElementById("board");
-const refreshMs = Number(board.dataset.refreshMs);
+const connection = document.getElementById("connection");
+const stream = new EventSource("/board");
 
-async function refresh() {
-  try {
-    const answered = await fetch("/board", { cache: "no-store" });
-    if (!answered.ok) {
-      board.textContent = "the lab answered " + answered.status;
-      return;
-    }
-    board.innerHTML = await answered.text();
-  } catch (stopped) {
-    board.textContent = "the lab no longer answers: " + stopped;
-  }
-}
+stream.onopen = () => {
+  connection.textContent = "";
+};
 
-refresh();
-setInterval(refresh, refreshMs);
+stream.onmessage = (event) => {
+  board.innerHTML = event.data;
+};
+
+// The browser reconnects on its own while the lab runs, so a closed stream is
+// the only one that will not come back.
+stream.onerror = () => {
+  connection.textContent = stream.readyState === EventSource.CLOSED
+    ? "the lab no longer answers"
+    : "reconnecting to the lab";
+};

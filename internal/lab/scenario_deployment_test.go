@@ -450,7 +450,7 @@ func TestAWaitTheScenarioDoesNotReach_ShouldStillPrintItsPlacementBoard(t *testi
 		WaitFor().AllPodsReadyWithinSeconds(noSecondsAtAll)
 
 	ended := ending.outcome()
-	everyNodeAndNoPod := scenario.NewPlacementBoard(declared, nil, scenario.PlacementBoard{}).Lines()
+	everyNodeAndNoPod := scenario.NewPlacementBoard(declared, scenario.Placement{}, scenario.PlacementBoard{}).Lines()
 	expect.Expect(t, boardsOf(ended.Steps)).To(expect.Equal([][]string{everyNodeAndNoPod, everyNodeAndNoPod}))
 	causeNames(t, ended, strconv.Itoa(noSecondsAtAll))
 }

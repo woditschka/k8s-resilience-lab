@@ -416,8 +416,8 @@ func (c *SimulatedCluster) Observe(ctx context.Context, workload scenario.Worklo
 }
 
 // ObserveEveryWorkload reads every Node, Ready or not, so a Node that stopped
-// responding keeps its place on a Placement board. It selects Pods by the
-// Workload label being present, which a probe Pod never carries.
+// responding keeps its place on a Placement board, marked NotReady. It selects
+// Pods by the Workload label being present, which a probe Pod never carries.
 func (c *SimulatedCluster) ObserveEveryWorkload(ctx context.Context) (scenario.Placement, error) {
 	listedNodes, err := c.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -435,7 +435,7 @@ func (c *SimulatedCluster) ObserveEveryWorkload(ctx context.Context) (scenario.P
 		return scenario.Placement{}, fmt.Errorf("list the Pods of every Workload of %s: %w", c.Name(), err)
 	}
 
-	return scenario.NewPlacement(nodes, fromPods(listedPods.Items)), nil
+	return scenario.NewPlacement(nodes, fromPods(listedPods.Items)).WithNodesNotReady(notReadyNodeNamesIn(listedNodes.Items)), nil
 }
 
 // AwaitSettled reports a Placement from a wait rather than from a single

@@ -2,11 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>k8s-resilience-lab: Live view</title>
+<link rel="stylesheet" href="/live.css">
 <script src="/live.js" defer></script>
 </head>
 <body>
+<header class="page-header">
 <h1>Live view</h1>
-<div id="board" data-refresh-ms="{{.}}"></div>
+<p id="connection" class="connection"></p>
+</header>
+<main id="board"></main>
 </body>
 </html>

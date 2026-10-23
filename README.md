@@ -98,7 +98,7 @@ make ci                                  # the full quality gate, the Scenarios 
 
 All Scenarios run at once, so a run lasts about as long as its slowest Scenario, and each reports as the section What It Looks Like in Practice shows.
 
-An Interactive run, `make interactive` with one Scenario name, or `--interactive` with the name on the lab itself, carries out that Scenario's Steps up to its first When and reports them as a run does. The terminal names the Live view's address on `127.0.0.1`. Open it in a browser to watch every Zone, Node and Pod as the Placement changes. The Simulated Cluster stays as the Steps left it until you stop the lab with Ctrl-C, which removes it. A name matching no Scenario stops the lab and lists the Scenario names.
+An Interactive run, `make interactive` with one Scenario name, or `--interactive` with the name on the lab itself, carries out that Scenario's Steps up to its first When and reports them as a run does. The terminal names the Live view's address on `127.0.0.1`. Open it in a browser to watch each Zone as a box of Nodes and each Node as a box of Pods, with its NodePool, labels, capacity, requests and room left, as the Placement changes. The Simulated Cluster stays as the Steps left it until you stop the lab with Ctrl-C, which removes it. A name matching no Scenario stops the lab and lists the Scenario names.
 
 The command suite runs every Scenario and fails when one reports a Finding or ends at a Step. The Scenarios are therefore the lab's own acceptance tests.
 

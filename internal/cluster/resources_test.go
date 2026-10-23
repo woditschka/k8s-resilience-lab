@@ -561,6 +561,29 @@ func TestAnObservedPodsReadyCondition_ShouldBeReadAsThatPodBeingReady(t *testing
 	}
 }
 
+// Full access may give a Pod a second container, so the Request is read over
+// every container the observed Pod holds, never from its specification.
+func TestAnObservedPodsRequest_ShouldBeWhatAllItsContainersAskFor(t *testing.T) {
+	const somePodName = "web-abc"
+	const oneContainersCPU, anotherContainersCPU = scenario.CPU(250), scenario.CPU(750)
+	const oneContainersMemory, anotherContainersMemory = scenario.Memory(512), scenario.Memory(1536)
+
+	observed := fromPods([]corev1.Pod{{
+		Name: somePodName,
+		Spec: corev1.PodSpec{Containers: []corev1.Container{
+			{Resources: corev1.ResourceRequirements{Requests: toRequestedResources(scenario.NewRequest(oneContainersCPU, oneContainersMemory))}},
+			{Resources: corev1.ResourceRequirements{Requests: toRequestedResources(scenario.NewRequest(anotherContainersCPU, anotherContainersMemory))}},
+			{},
+		}},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}})
+
+	expect.Expect(t, observed).To(expect.Equal([]scenario.Pod{{
+		Name: somePodName, Phase: scenario.PodRunning,
+		Request: scenario.NewRequest(oneContainersCPU+anotherContainersCPU, oneContainersMemory+anotherContainersMemory),
+	}}))
+}
+
 func TestAPhaseTheLabDoesNotName_ShouldBeReadAsUnknown(t *testing.T) {
 	const somePodName = "web-abc"
 

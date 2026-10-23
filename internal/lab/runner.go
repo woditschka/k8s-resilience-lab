@@ -326,7 +326,7 @@ func (o Observer) observe(ctx context.Context, provisioned *cluster.SimulatedClu
 
 				continue
 			}
-			previous = scenario.NewPlacementBoard(*topology, placed.Pods(), previous)
+			previous = scenario.NewPlacementBoard(*topology, placed, previous)
 			o.Observed(previous, nil)
 		}
 	})

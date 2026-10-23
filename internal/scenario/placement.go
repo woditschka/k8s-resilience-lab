@@ -41,6 +41,9 @@ type Pod struct {
 	Node  string
 	Phase PodPhase
 	Ready bool
+	// Request is what the observed Pod asks for over all its containers, which
+	// full access may have changed from what its specification declared.
+	Request Request
 }
 
 func (p Pod) Placed() bool {
@@ -50,16 +53,47 @@ func (p Pod) Placed() bool {
 // Placement counts a Node or a Zone holding no Pod as zero, so an empty domain
 // is visible in the report rather than missing from it.
 type Placement struct {
-	nodes []Node
-	pods  []Pod
+	nodes    []Node
+	pods     []Pod
+	notReady []string
 }
 
+// NewPlacement reads every Node it holds Ready, as an observation of the Ready
+// Nodes alone does.
 func NewPlacement(nodes []Node, pods []Pod) Placement {
 	return Placement{nodes: slices.Clone(nodes), pods: slices.Clone(pods)}
 }
 
+// WithNodesNotReady is how an observation of every Node, Ready or not, keeps
+// the readiness beside the Node rather than on it, since a Failure compares
+// Nodes by their equality.
+func (p Placement) WithNodesNotReady(names []string) Placement {
+	marked := NewPlacement(p.nodes, p.pods)
+	marked.notReady = slices.Compact(slices.Sorted(slices.Values(names)))
+
+	return marked
+}
+
+// readiness leaves out a Node this Placement does not hold, which no Ready Node
+// of the control plane answers to.
+func (p Placement) readiness() map[string]NodeReadiness {
+	readiness := make(map[string]NodeReadiness, len(p.nodes))
+	for _, node := range p.nodes {
+		readiness[node.Name] = NodeReady
+	}
+	for _, name := range p.notReady {
+		readiness[name] = NodeNotReady
+	}
+
+	return readiness
+}
+
 func (p Placement) Nodes() []Node {
 	return slices.Clone(p.nodes)
+}
+
+func (p Placement) NodesNotReady() []string {
+	return slices.Clone(p.notReady)
 }
 
 func (p Placement) Pods() []Pod {
@@ -232,5 +266,6 @@ func (p Placement) countsOver(domain SpreadDomain) map[string]int {
 // Equal is what AwaitSettled compares consecutive observations through, and
 // go-cmp too, since the fields are unexported.
 func (p Placement) Equal(other Placement) bool {
-	return slices.EqualFunc(p.nodes, other.nodes, Node.Equal) && slices.Equal(p.pods, other.pods)
+	return slices.EqualFunc(p.nodes, other.nodes, Node.Equal) && slices.Equal(p.pods, other.pods) &&
+		slices.Equal(p.notReady, other.notReady)
 }

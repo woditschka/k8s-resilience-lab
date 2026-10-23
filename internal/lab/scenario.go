@@ -393,7 +393,7 @@ func (s *Scenario) endWait() {
 // declared Nodes alone are the board and nothing is observed.
 func (s *Scenario) drawBoard() {
 	last := len(s.steps) - 1
-	var observed []scenario.Pod
+	var observed scenario.Placement
 	if s.changedTheCluster {
 		placed, err := s.observeEveryWorkload()
 		if err != nil {
@@ -402,7 +402,7 @@ func (s *Scenario) drawBoard() {
 
 			return
 		}
-		observed = placed.Pods()
+		observed = placed
 	}
 
 	s.board = scenario.NewPlacementBoard(s.topology, observed, s.board)

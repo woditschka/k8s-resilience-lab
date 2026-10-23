@@ -616,7 +616,7 @@ func TestAWaitNotReachedInTheTimeItStates_ShouldEndTheScenarioNamingThatTimeAlon
 // The refusal stands before the Wait applies anything, so these Scenarios reach
 // no cluster, and each board lists the declared Nodes with no Pod on them.
 func TestAWaitStatingATimeWithItsGivenAndOneOnItsOwn_ShouldEachBeHeldToTheTimeItStates(t *testing.T) {
-	everyDeclaredNodeAndNoPod := scenario.NewPlacementBoard(aTopologyOf(t, twoZones, twoNodesPerZone), nil, scenario.PlacementBoard{}).Lines()
+	everyDeclaredNodeAndNoPod := scenario.NewPlacementBoard(aTopologyOf(t, twoZones, twoNodesPerZone), scenario.Placement{}, scenario.PlacementBoard{}).Lines()
 	var noNodeLine []string
 	waits := map[string]struct {
 		write func(*Scenario)
