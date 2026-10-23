@@ -1,6 +1,6 @@
 # The lab owns the simulator's Stages to give a Pod its Startup time
 
-**Status:** Accepted 2026-10-08, option 4; amended 2026-10-09: the lab's own Startup time is a range, and a Startup time is stated in seconds or milliseconds, option 6; amended 2026-10-18: the lab's own Startup time is retired, per [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
+**Status:** Accepted
 
 ## Context
 
@@ -8,11 +8,9 @@ REQ-SIM-012 gives every placed Pod a Startup time before it is Ready. The owner 
 
 In a KWOK Simulated Cluster no kubelet runs, so a Pod becomes Ready when the KWOK controller applies its pod-ready Stage. The image runs KWOK's fast Stage set, whose pod-ready Stage fires at once and reads no delay. KWOK's general pod-ready Stage reads two per-Pod annotations instead: a delay, and a jitter delay bounding a time drawn at random above it.
 
-The image serves no `kwok.x-k8s.io` API group, and its controller reads its Stages from a configuration file inside the container. [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md) held the Stage CRD in reserve: with it enabled, the controller applies the Stages served through the API. On 2026-10-08 it was unmeasured whether kwokctl then also seeds its own Stages there.
+The image serves no `kwok.x-k8s.io` API group, and its controller reads its Stages from a configuration file inside the container. [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md) weighed the Stage CRD: with it enabled, the controller applies the Stages served through the API.
 
-On 2026-10-08 the lab held a Startup time of its own, a fixed two seconds, for a Pod whose Scenario stated none. On 2026-10-09 the owner found it slow and asked for "0.5 to 1 s", stated through "a second one ...Millis" beside the seconds forms. Whole seconds cannot state a time under one second. The lab's own Startup time became a range, a shortest and a longest both above zero, held as two constants in `internal/scenario`. Every run printed both bounds beside the other times the lab sets. A shortest of zero was declined: some Pods would then be Ready at placement, hiding the Pending-on-Node state REQ-SIM-012 exists to show.
-
-On 2026-10-18 every predefined Pod specification came to name its own Startup time, defined by the Scenarios, per [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md). The lab's two constants and the run-start line were retired.
+Every predefined Pod specification names its own Startup time, per [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md). The owner asked for times under a second, "0.5 to 1 s", through "a second one ...Millis" beside the seconds forms.
 
 ## Options Considered
 
