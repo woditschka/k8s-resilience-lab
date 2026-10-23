@@ -82,7 +82,7 @@
 
 **Placement**: The mapping from each Pod of a Deployment to the Node and Zone it occupies at one moment. Avoid: scheduling result, assignment, distribution.
 
-**Settled**: The state a Placement reaches when it stops changing, so a later observation of the same Deployment reports the same Pods on the same Nodes. Relationships: the lab observes it beneath a Scenario's Wait, so the Thens after that Wait judge a Settled Placement, and a Scenario may also Wait for it by name. A Placement holding Pods that stay Pending is Settled once it stops changing. A Failure tolerance is judged once immediately after a Failure and again once the Placement is Settled. Avoid: stable, converged, quiesced, final.
+**Settled**: The state a Placement reaches when it stops changing, so a later observation of the same Deployment reports the same Pods on the same Nodes. Relationships: the lab observes it beneath a Scenario's Wait, so the Thens after that Wait judge a Settled Placement, and a Scenario may also Wait for it by name. A Placement holding Pods that stay Pending is Settled once it stops changing. Avoid: stable, converged, quiesced, final.
 
 **Ready**: The condition Kubernetes reports for a Pod able to serve, and for a Node able to take Pods. Relationships: a Scenario Waits for every Pod of a Deployment it declared, or for every Node of its Topology, to be Ready. Avoid: live, healthy, up, started, available.
 
@@ -92,7 +92,9 @@
 
 **Failure**: A loss injected into the Simulated Cluster on purpose, scoped to one Pod, one Node, one whole Zone, or every Node carrying one value of a Node label. Relationships: a Scenario injects zero or more Failures. A Node Failure leaves the Node in the cluster and unresponsive, so the control plane moves its Pods away after a waiting time. A Zone Failure stops every Node of one Zone responding at once, because a Zone holds the Nodes that are lost together. A Failure by label stops every Node carrying the value it names, in every Zone at once, as a cloud reclaims its spot Nodes. A Scenario states how many Nodes or how many Zones fail, names a Node label and one of its values, or points at a Node by its position in the Topology. Avoid: chaos, fault, outage, incident.
 
-**Failure tolerance**: The most Pods a Deployment survives losing to a Failure. Relationships: a Deployment declares it beside its replicas. A Then after the Failure judges it twice, at the moment of the Failure and once the Placement is Settled, stating the Pods lost at each. A Pod counts as lost while it is not Running, on a Node that stopped responding or Pending for want of room. Declaring it scales nothing: the Deployment keeps all its replicas. Losing a Zone or a Node costs the spread, and the Failure tolerance holds while the losses stay within it. Avoid: Required Capacity, capacity, quorum, minimum availability, headroom, resilience, redundancy, high availability, SLO.
+**Failure tolerance**: The count of Zones or of Nodes a Deployment survives losing to a Failure while enough of its Pods stay Ready. Relationships: a Deployment declares it beside its replicas, and it sets that Deployment's Floor. One Then judges every Deployment declaring one, at every moment from the first Failure to that Then. A Pod counts while Ready, and one on a Node that stopped responding counts as lost from that moment. Declaring it scales nothing: the Deployment keeps all its replicas. Avoid: Required Capacity, capacity, quorum, minimum availability, headroom, resilience, redundancy, high availability, SLO; a count of Pods lost, the earlier form.
+
+**Floor**: The fewest Ready Pods a Deployment's Failure tolerance lets it keep: its replicas less the most Pods the declared Zones or Nodes hold under an even spread. Relationships: one per Deployment declaring a Failure tolerance, derived from its replicas and the Topology rather than from where its Pods landed. A Deployment whose Ready Pods fall below it at any moment after a Failure records a Finding. Avoid: minimum, threshold, quorum, Required Capacity.
 
 **Scenario**: A named sequence of Steps run against a Simulated Cluster, ending in an asserted Placement outcome. Relationships: a Scenario provisions one Simulated Cluster with one Topology, deploys one or more Deployments, and injects zero or more Failures. Avoid: test case, experiment, simulation.
 
@@ -126,4 +128,4 @@
 
 **Developer:** So the Failure tolerance is what tells us whether that outcome is acceptable.
 
-**Domain expert:** Yes. Judge it right after the Failure and again once Placement has settled.
+**Domain expert:** Yes. The Deployment declares it survives losing one Zone, so its Floor is six Ready Pods. The Then checks every moment from the Failure on, and six or more must stay Ready throughout.

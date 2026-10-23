@@ -19,7 +19,7 @@ The lab serves two uses from one body of behavior. Unattended, it runs each Scen
 |----|------|----------------|
 | G-1 | Placement under a declared Topology is verified automatically, with no real cluster involved. | Every Scenario runs unattended on a developer machine and in a build, needing only a container runtime. |
 | G-2 | The behavior each Scenario asserts is also demonstrable live. | An engineer starts the lab, watches the Placement of a running Deployment, and injects a Failure without editing code. |
-| G-3 | A Deployment's survival is judged through a Failure, not only once the cluster has recovered. | Each Failure Scenario declares its Deployment's Failure tolerance and judges it at the Failure and again once Settled. |
+| G-3 | A Deployment's survival is judged through a Failure, not only once the cluster has recovered. | Each Failure Scenario declares the Zones or Nodes its Deployment survives losing, and judges every moment from the Failure to its Then. |
 | G-4 | A Scenario is written and read in one vocabulary. | Every name in a Scenario is one the lab offers Scenarios, each line is a Step, and every Scenario sits in one place. |
 | G-5 | What happened inside a Scenario's Simulated Cluster is explainable after the run. | Every Scenario leaves a Timeline naming each Node, Pod and Deployment change and the control plane's reason for each Placement. |
 
@@ -149,7 +149,7 @@ A Deployment line names Standard Pod, a quarter of the Standard capacity, or GPU
 - `[REQ-SIM-011]` given a specification stating a Request, or none, when its Pods are placed, then a stated Request stands under its Kubernetes name. Without one they ask for no cpu and no memory, and the spread alone decides.
 - `[REQ-SIM-011]` given a Deployment requesting more cpu than its Topology has room for, when the Placement settles, then the Pods that fit are Running and the rest stay Pending.
 - `[REQ-SIM-011]` given Nodes with room for one Pod each and a nine-Pod Deployment, when the Placement settles, then nine Pods are Running, one on every Node.
-- `[REQ-SIM-011]` given that Placement, when one Zone stops responding, then it settles at six Pods Running and three Pending, and the Deployment survives losing three at both moments.
+- `[REQ-SIM-011]` given that Placement, when one Zone stops responding, then it settles at six Pods Running and three Pending, and the Deployment never falls below its Floor of six.
 - `[REQ-SIM-024]` given every Scenario's Deployment line, when read, then it names Standard Pod or GPU Pod or states its own Request, only one.
 - `[REQ-SIM-024]` given every predefined Pod specification, when read, then it holds no Request, so a Deployment naming Tolerating GPU Nodes alone asks for nothing.
 - `[REQ-SIM-024]` given a Deployment naming Standard Pod or GPU Pod, when it runs, then the lines beneath its Given line report that Request.
@@ -260,7 +260,7 @@ A Failure may stop, in one Step, every Node carrying one value of a label a Node
 - `[REQ-SIM-018]` given NodePools stating a label, when a When names that label and one of its values, then every Node carrying it stops responding in one Step. The run reports which, and their Pods are moved away within a few seconds.
 - `[REQ-SIM-018]` given the Scenario spot-nodes-that-stop-responding, when read, then its When names the label and value alone, no Node, Zone, count or waiting time.
 - `[REQ-SIM-018]` given three Zones, each holding two Nodes labelled on-demand and one labelled spot, when a Deployment declaring Resilient placement Settles at nine Pods, then every Node holds one.
-- `[REQ-SIM-018]` given that Placement, when every spot Node stops responding, then the judgement counts three Pods lost at that moment and none once Settled, both within the Failure tolerance.
+- `[REQ-SIM-018]` given that Placement, when every spot Node stops responding, then the Deployment surviving the loss of three Nodes never falls below its Floor of six Ready Pods.
 - `[REQ-SIM-018]` given that Failure, when the Placement settles again, then no Pod is on a stopped Node and every Zone still holds three.
 
 **Edge cases:** each ends the Scenario at that When, naming what it named.
@@ -275,7 +275,7 @@ A Failure may stop, in one Step, every Node carrying one value of a label a Node
 ### Keeping Pods off a dedicated NodePool
 
 <a id="req-sim-019"></a>
-A NodePool may state NoSchedule taints, keeping off its Nodes every Pod not tolerating them `[REQ-SIM-019]`. A toleration only permits a Pod onto a tainted Node, so a dedicated NodePool's Pods reach it by a Request only its Nodes have room for. A Scenario may declare a later Deployment, which the next Wait deploys beside the earlier; every Then after it judges that Deployment alone. The Scenario general-pods-beside-tainted-gpu-nodes demonstrates it.
+A NodePool may state NoSchedule taints, keeping off its Nodes every Pod not tolerating them `[REQ-SIM-019]`. A toleration only permits a Pod onto a tainted Node, so a dedicated NodePool's Pods reach it by a Request only its Nodes have room for. A Scenario may declare a later Deployment, which the next Wait deploys beside the earlier; every Then counting Pods after it judges that Deployment alone. The Scenario general-pods-beside-tainted-gpu-nodes demonstrates it.
 
 **Done when:**
 
@@ -301,23 +301,30 @@ A NodePool may state NoSchedule taints, keeping off its Nodes every Pod not tole
 
 ### Judging a Deployment's Failure tolerance
 
-<a id="req-sim-010"></a>
-A Deployment declares its Failure tolerance, the most Pods it survives losing to a Failure, so it runs spare Pods for a lost Zone `[REQ-SIM-010]`. One Step judges it at the moment of a Failure and once Settled.
+<a id="req-sim-027"></a>
+A Deployment declares the Zones or Nodes it survives losing `[REQ-SIM-027]`. Its Floor is its replicas less the most Pods those hold evenly spread. One Then judges that every declaring Deployment kept its Floor of Ready Pods since the first Failure.
 
 **Done when:**
 
-- `[REQ-SIM-010]` given a Deployment declaring a Failure tolerance, when its Given line is read, then it names the most Pods it survives losing.
-- `[REQ-SIM-010]` given nine replicas with a Failure tolerance of three, when one Node or Zone fails, then the judgement counts one or three Pods lost at that moment, none once Settled. Both are within it.
-- `[REQ-SIM-010]` given Pods on the Nodes a Failure stopped, or left Pending for want of room, when judged, then they count as lost.
-- `[REQ-SIM-010]` given a Failure tolerance exceeded at one moment, when the Scenario runs, then the run reports a Finding naming that moment and the later Steps still run.
-- `[REQ-SIM-010]` given any judgement, when the run reports it, then it states the Pods lost at each moment and the Failure tolerance, kept or not.
-- `[REQ-SIM-010]` given every Failure Scenario, when read, then it declares three of nine Pods as its Deployment's Failure tolerance and judges it.
+- `[REQ-SIM-027]` given any Deployment line, when read, then it declares Zones or Nodes it survives losing, never Pods.
+- `[REQ-SIM-027]` given nine replicas over three Zones of three Nodes, when surviving one Zone or one Node, then the Floor is six or eight. Ten replicas surviving one Zone keep six.
+- `[REQ-SIM-027]` given a Pod on a stopped Node or Pending, when judged, then it is lost, though the control plane may still report it Ready.
+- `[REQ-SIM-027]` given any declaring Deployment below its Floor at any moment from the first Failure to the Then, when judged, then a Finding names it.
+- `[REQ-SIM-027]` given a judgement, when reported, then each Deployment's line states kept or fell, its Floor, declared loss, and lowest Ready count with when and how long.
+- `[REQ-SIM-027]` given a fall, when its Finding is read, then it states how low, when, how long, the Pods lost against the most declared, and their Nodes. An unended fall lasts 'for the rest of the Scenario'.
+- `[REQ-SIM-027]` given every Failure Scenario, when run, then it declares what its When fails, every Floor holds, and its Placement outcome stands.
+
+**Not yet in force:**
+
+- `[REQ-SIM-027]` given a Then naming one Deployment, when it judges, then that Floor alone decides it.
+- `[REQ-SIM-027]` given a Then asserting a Floor fell, when none fell, then it records a Finding. A Scenario pinning a Deployment to one lost Zone proves it.
+- `[REQ-SIM-027]` given a Floor crossed, when the next Wait narrative is read, then it names each fall and return.
 
 **Edge cases:**
 
-1. A Deployment declares a Failure tolerance below zero. It is refused, ending the Scenario at that Given Step, which names it.
-2. A Deployment declares a Failure tolerance of all its replicas or more. It is refused at that same Step.
-3. A Scenario judges a Failure tolerance with no Failure injected before it, or of a Deployment declaring none. The Scenario ends at that Then Step, which names it.
+1. A count below zero, or reaching the Topology's own. The Scenario ends at that Given, naming it.
+2. A count of none. The Floor is every replica.
+3. A Then with no Failure before it, or no declaring Deployment. The Scenario ends at that Then, naming it.
 
 **Design:** [system-design.md](system-design.md)
 
@@ -485,36 +492,37 @@ The Live view draws each Zone as a box of its Nodes and each Node as a box of it
 
 <!-- Retired requirements: each ID maps to its successor (or to the reason it was withdrawn) so existing links still resolve. Keep this a list, so every retired ID stays in a list item. -->
 
-- (none yet)
+- <a id="req-sim-010"></a>`REQ-SIM-010`, a count of Pods lost judged at two moments. Superseded by `REQ-SIM-027`.
 
 ## Open Questions
 
 <!-- Unresolved product questions. Each resolves into a requirement, a non-goal, or an ADR. -->
 
-- Whether the lab also scripts a Failure over time, such as a Pod dying after a delay. That is closer to a real outage and costs a second injection surface.
-- What an engineer's action on a Node or a Pod in the Live view means, and whether a Failure injected there stands in the Timeline as a When does.
-- Whether the Live view's Timeline sets the moments a Wait narrative names apart from its other Entries.
-- Whether the Live view is reachable from another machine than the one running the lab.
+- Whether the lab scripts a Failure over time, such as a Pod dying after a delay, at the cost of a second injection surface.
+- What an engineer's action on a Node or Pod in the Live view means, and whether a Failure injected there joins the Timeline as a When does.
+- Whether the Live view's Timeline sets a Wait narrative's moments apart from other Entries.
+- Whether the Live view is reachable from another machine.
 - How long a Timeline file is kept, and whether the lab ever removes one.
-- How an engineer reaches a recorded Timeline beyond its file, and whether a Scenario may assert on its own Timeline.
-- Whether the lab promises anything about a team's own production manifests, which needs Topology and admission behavior mirroring a named environment.
-- How a Deployment declares the Failures it must survive, at once or in sequence, and whether a run names those the Scenario injected.
+- How an engineer reaches a recorded Timeline beyond its file, and whether a Scenario may assert on it.
+- Whether the lab promises anything about a team's production manifests, which needs Topology and admission behavior mirroring a named environment.
+- Whether a Deployment declares Failures it survives in sequence, and whether a run names those the Scenario injected.
+- How another kind, such as a DaemonSet, declares its Failure tolerance.
+- Which Nodes count towards the Floor of a Deployment confined to one NodePool.
 - Whether the lab judges the Placement after a Failure against the best achievable spread, a Finding the cluster cannot avoid since spread rules apply only when placing a Pod.
-- Whether a Failure tolerance judgement states a time of its own, beside its Wait's.
-- Whether Nodes also sit on racks, a failure domain between Zone and Node, which waits for Zones that differ.
-- Which Scenario first fails a Node by position rather than count, what a position the Topology lacks yields, and whether a Failure says if its Nodes share a Zone.
-- What a Scenario asserts when every Zone fails, or every Node carries the label value a Failure names, leaving no Node to place a Pod on.
-- Whether a Failure by label names several values at once, or stops the Nodes of one NodePool by its name.
-- Whether taints also take PreferNoSchedule, avoided while other Nodes have room, or NoExecute, which moves placed Pods away and meets the Failures' tolerations.
-- Whether a Deployment is drawn onto a NodePool by selecting it, beside a Request only that NodePool's Nodes have room for.
-- What limits a Topology's Zone count beyond the lab's own refusal, since numbered Zone names set no bound.
-- Which Failure follows a-zone-that-stops-responding: a Pod, or a Node removed from the cluster rather than left unresponsive.
-- Whether a Scenario demonstrates a Customization or full access, and which intent it shows.
-- Whether a Scenario rolls out a change to a deployed Deployment's specification, where a Customization applies before deployment only.
-- Whether the lab says anything when full access leaves out a setting it depends on, which today holds silently.
-- Whether a Then asserts which Pods stay Pending, or their count alone, as no-room-after-a-zone-stops-responding does.
-- Whether the lab's vocabulary names a Pod's limits, which decide no Placement and full access already reaches, and what a Scenario would assert with them.
-- Whether a run also names one Startup time for every Pod, beside each Deployment's own.
-- Whether a run can carry out its Scenarios one at a time, for a machine without room for every Simulated Cluster at once.
-- Whether the lab also gives a removed Pod a time to stop, as it gives one to start.
+- Whether Nodes also sit on racks, a failure domain between Zone and Node.
+- Which Scenario first fails a Node by position, what a missing position yields, and whether a Failure says if its Nodes share a Zone.
+- What a Scenario asserts when every Zone, or every Node of the value a Failure names, fails.
+- Whether a Failure by label names several values, or stops one NodePool by name.
+- Whether taints take PreferNoSchedule or NoExecute, the latter meeting the Failures' tolerations.
+- Whether a Deployment selects a NodePool, beside a Request only its Nodes have room for.
+- What limits a Topology's Zone count beyond the lab's own refusal.
+- Which Failure follows a-zone-that-stops-responding: a Pod, or a Node removed rather than unresponsive.
+- Whether a Scenario demonstrates a Customization or full access, and which intent.
+- Whether a Scenario rolls out a change to a deployed Deployment's specification.
+- Whether the lab says anything when full access leaves out a setting it depends on.
+- Whether a Then asserts which Pods stay Pending, or their count alone.
+- Whether the lab's vocabulary names a Pod's limits, which decide no Placement, and what a Scenario would assert with them.
+- Whether a run names one Startup time for every Pod, beside each Deployment's own.
+- Whether a run can carry out its Scenarios one at a time, for a machine without room for all at once.
+- Whether the lab gives a removed Pod a time to stop, as it gives one to start.
 - Which further specifications and settings the Scenarios define, and which a Customization may name. Zone spread only, Soft spread and affinity between a Deployment's Pods each arrive with their first Scenario. Also open: what a Scenario asserts demonstrating a weak specification.
