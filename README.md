@@ -16,9 +16,9 @@ Every Scenario is a Go function in [scenarios/scenarios.go](scenarios/scenarios.
 // Capacity comes back after one Node stops responding, on the Nodes still
 // responding.
 func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()))
+	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
+	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)

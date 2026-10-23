@@ -155,13 +155,13 @@ func TestAWaitWrittenWithItsGivenAndOneWrittenOnItsOwn_ShouldReportTheSameWaitLi
 	forms := map[string]func(*Scenario){
 		"with the Given that declared it": func(waiting *Scenario) {
 			waiting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
-			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement()).
+			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), resilientPlacement()).
 				WaitFor().AllPodsReady()
 		},
 		"as a Step of its own": func(waiting *Scenario) {
 			waiting.Given().Topology(Zones(twoZones), theGeneralNodePool())
 			waiting.WaitFor().AllNodesReady()
-			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement())
+			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), resilientPlacement())
 			waiting.WaitFor().AllPodsReady()
 		},
 	}
@@ -224,7 +224,7 @@ func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testin
 	waiting.Given().Topology(Zones(twoZones), node.Pool(generalNodePool, node.PerZone(twoNodesPerZone),
 		node.Capacity{CPU: someCoresPerNode, Memory: someGibibytesPerNode * node.Gi, Pods: roomForOnePodPerNode}))
 	waiting.WaitFor().AllNodesReady()
-	waiting.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), resilientPlacement())
+	waiting.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), askingForNothing(), resilientPlacement())
 	waiting.WaitFor().PlacementSettled()
 
 	settled := waiting.outcome()
@@ -280,7 +280,7 @@ func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTh
 	ending := aScenarioOnAClusterFor(t, theRefusedSettingScenario)
 
 	ending.Given().Topology(Zones(twoZones), theGeneralNodePool())
-	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode),
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(),
 		resilientPlacement().Customize(aFullAccessTheControlPlaneRefuses()))
 	ending.WaitFor().AllPodsReady()
 	ending.Then().PodsPerZone(podsPerZoneWhenEven)
@@ -320,7 +320,7 @@ func TestARequestOnlyOneNodePoolHasRoomFor_ShouldPlacePodsOnThatNodePoolAlone(t 
 	placing := aScenarioOnAClusterFor(t, theGpuRequestScenario)
 
 	placing.Given().Topology(Zones(twoZones), theGeneralNodePool(), theGpuNodePool())
-	placing.Given().Workload(someWorkloadName, Pods(podsTheGpuNodesHold), defaultPlacement().Customize(aboveRoomy))
+	placing.Given().Workload(someWorkloadName, Pods(podsTheGpuNodesHold), askingForNothing(), defaultPlacement().Customize(aboveRoomy))
 	placing.WaitFor().PlacementSettled()
 
 	settled := placing.outcome()
@@ -356,7 +356,7 @@ func TestAFailureByLabel_ShouldStopEveryNodeCarryingThatValueInOneStep(t *testin
 			Labels(node.Labels{capacityTypeLabel: onDemandCapacity}),
 		theSpotNodePool())
 	stopping.WaitFor().AllNodesReady()
-	stopping.Given().Workload(someWorkloadName, Pods(ninePods), resilientPlacement())
+	stopping.Given().Workload(someWorkloadName, Pods(ninePods), askingForNothing(), resilientPlacement())
 	stopping.WaitFor().AllPodsReady()
 	spotNodes := namesOf(nodesOfNodePool(stopping.topology, spotCapacity))
 
@@ -415,11 +415,11 @@ func TestALaterWorkload_ShouldBeDeployedBesideTheEarlierAndJudgedAlone(t *testin
 	deploying := aScenarioOnAClusterFor(t, theNextWorkloadScenario)
 	deploying.Given().Topology(Zones(twoZones), theGeneralNodePool(), theTaintedGpuNodePool())
 	deploying.WaitFor().AllNodesReady()
-	deploying.Given().Workload(someWorkloadName, Pods(generalPods), resilientPlacement())
+	deploying.Given().Workload(someWorkloadName, Pods(generalPods), askingForNothing(), resilientPlacement())
 	deploying.WaitFor().AllPodsReady()
 	earlier := deploying.workload
 
-	deploying.Given().Workload(anotherWorkloadName, Pods(gpuNodes),
+	deploying.Given().Workload(anotherWorkloadName, Pods(gpuNodes), askingForNothing(),
 		defaultPlacement().Customize(aboveRoomyRequest(), toleratingTheGpuTaint()))
 	deploying.WaitFor().AllPodsReady()
 	deploying.Then().AllPodsRunning()
@@ -446,7 +446,7 @@ func TestAWaitTheScenarioDoesNotReach_ShouldStillPrintItsPlacementBoard(t *testi
 	ending := aScenarioOnAClusterFor(t, theUnreachedWaitScenario)
 
 	ending.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
-	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement()).
+	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), resilientPlacement()).
 		WaitFor().AllPodsReadyWithinSeconds(noSecondsAtAll)
 
 	ended := ending.outcome()
@@ -501,7 +501,7 @@ func TestAWaitTheScenarioDoesNotReach_ShouldStillPrintItsNarrativeUpToTheEnd(t *
 	ending.Given().Topology(Zones(twoZones), node.Pool(generalNodePool, node.PerZone(twoNodesPerZone),
 		node.Capacity{CPU: someCoresPerNode, Memory: someGibibytesPerNode * node.Gi, Pods: roomForOnePodPerNode}))
 	ending.WaitFor().AllNodesReady()
-	ending.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), resilientPlacement()).
+	ending.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), askingForNothing(), resilientPlacement()).
 		WaitFor().AllPodsReadyWithinSeconds(aTimeThePodWithNoRoomNeverMeets)
 
 	ended := ending.finish()

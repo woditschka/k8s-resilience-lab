@@ -87,7 +87,13 @@ func theLabsTolerationCarried(taint string) string {
 		strconv.FormatInt(int64(scenario.UnresponsiveNodeWait/time.Second), 10) + "}"
 }
 
-const theRequestCarried = aSettingCarried + "resources.requests: {cpu: 3, memory: 12Gi}"
+// A Workload line's Request reports after the settings its specification
+// holds.
+const (
+	theRequestCarried     = aSettingCarried + "resources.requests: {cpu: 3, memory: 12Gi}"
+	theStandardPodCarried = aSettingCarried + "resources.requests: {cpu: 4, memory: 16Gi}"
+	theGPUPodCarried      = aSettingCarried + "resources.requests: {cpu: 24, memory: 96Gi}"
+)
 
 // theNodePickedToFail is the first Node the Topology derives, the pick a run
 // has to repeat on every run.
@@ -179,8 +185,7 @@ const (
 func toleratingGpuNodesCarries() string {
 	return theLabsTolerationCarried("node.kubernetes.io/not-ready") +
 		theLabsTolerationCarried("node.kubernetes.io/unreachable") +
-		aSettingCarried + "tolerations: {key: nvidia.com/gpu, operator: Equal, value: present, effect: NoSchedule}" +
-		aSettingCarried + "resources.requests: {cpu: 24, memory: 96Gi}"
+		aSettingCarried + "tolerations: {key: nvidia.com/gpu, operator: Equal, value: present, effect: NoSchedule}"
 }
 
 const theNodeCapacityDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Nodes holding " +
@@ -189,7 +194,7 @@ const theNodeCapacityDeclared = "Given a Topology of 3 Zones of a NodePool gener
 // aStandardNodeSetting is the run-start line the lab reported Standard on while
 // it defined Standard itself.
 const (
-	theStandardNodesDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Standard Nodes holding " +
+	theStandardNodeDeclared = "Given a Topology of 3 Zones of a NodePool general of 3 Standard Nodes holding " +
 		"16 cpu, 64Gi memory and 10 Pods each"
 	aStandardNodeSetting = "Standard Node:"
 )
@@ -355,6 +360,13 @@ func TestAWorkloadDeclaringResilientPlacement_ShouldReportBothSpreadsInFullBenea
 	reportShows(t, reported, resilientPlacementDeclared+resilientPlacementCarries())
 }
 
+func TestAWorkloadNamingStandardPod_ShouldReportTheRequestBeneathItsGivenLine(t *testing.T) {
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
+
+	reportShows(t, reported, resilientPlacementDeclared+resilientPlacementCarries()+theStandardPodCarried)
+}
+
 // A Scenario has no test of its own, so the command's suite is what fails when
 // one reports a Finding or ends at a Step.
 func TestResilientPlacementWrittenAsSteps_ShouldPlaceThreePodsPerZoneAndOnePerNode(t *testing.T) {
@@ -376,7 +388,7 @@ func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFai
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, nodeStopsRespondingReported)
-	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries())
+	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneNodeFailsReported)
@@ -394,7 +406,7 @@ func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *tes
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, zoneStopsRespondingReported)
-	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries())
+	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneZoneFailsReported)
@@ -426,7 +438,7 @@ func TestSpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNine
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), spotNodesStopRespondingReported)
 
 	reportShows(t, reported, theOnDemandAndSpotNodesDeclared)
-	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries())
+	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, onePodPerNodeJudged)
 	reportShows(t, reported, theSpotNodesFailReported)
 	reportShows(t, reported, theStatedRestoreTimeAwaited)
@@ -441,7 +453,7 @@ func TestSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerLabelValu
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), spreadOverOnDemandAndSpotReported)
 
 	reportShows(t, reported, theLabelledNodePoolsDeclared)
-	reportShows(t, reported, spreadOverOnDemandAndSpotDeclared+spreadOverOnDemandAndSpotCarries())
+	reportShows(t, reported, spreadOverOnDemandAndSpotDeclared+spreadOverOnDemandAndSpotCarries()+theStandardPodCarried)
 	reportShows(t, reported, everyPodRunningJudged)
 	reportShows(t, reported, twoPodsPerZoneJudged)
 	reportShows(t, reported, threePodsPerCapacityTypeJudged)
@@ -453,10 +465,10 @@ func TestGeneralPodsStayOffGpuNodes_ShouldPlaceTheGeneralPodsOnGeneralNodesAndTh
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), generalPodsStayOffGpuNodesReported)
 
 	reportShows(t, reported, theTaintedGpuNodePoolDeclared)
-	reportShows(t, reported, sixGeneralPodsDeclared+resilientPlacementCarries())
+	reportShows(t, reported, sixGeneralPodsDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, sixPodsOnTheGeneralNodePoolJudged)
 	reportShows(t, reported, noPodOnTheGpuNodePoolJudged)
-	reportShows(t, reported, toleratingGpuNodesDeclared+toleratingGpuNodesCarries())
+	reportShows(t, reported, toleratingGpuNodesDeclared+toleratingGpuNodesCarries()+theGPUPodCarried)
 	reportShows(t, reported, threePodsOnTheGpuNodePoolJudged)
 	reportShows(t, reported, noPodOnTheGeneralNodePoolJudged)
 	reportLacks(t, reported, aFindingReported)
@@ -506,7 +518,7 @@ func TestARunOfANodePoolNamingStandard_ShouldReportWhatStandardStandsForOnItsGiv
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
 
-	reportShows(t, reported, theStandardNodesDeclared)
+	reportShows(t, reported, theStandardNodeDeclared)
 }
 
 func TestARunAskedForTheWholeTimeline_ShouldPrintEveryEntryInTheOrderItHappened(t *testing.T) {

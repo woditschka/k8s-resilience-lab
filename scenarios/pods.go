@@ -39,14 +39,12 @@ func SpreadOverOnDemandAndSpot() pod.Specification {
 	)
 }
 
-// ToleratingGPUNodes tolerates the GPU taint and asks for more than a Standard
-// Node holds: the toleration permits its Pods on a GPU Node, and the request is
-// what draws them there.
+// ToleratingGPUNodes tolerates the GPU taint, which permits its Pods on a GPU
+// Node and draws them to none.
 func ToleratingGPUNodes() pod.Specification {
 	return pod.Predefined("Tolerating GPU Nodes", pod.StartupMillisBetween(500, 1000),
 		LeaveUnresponsiveNodes(),
 		pod.Toleration{Key: GPU, Operator: pod.Equal, Value: GPUPresent, Effect: pod.NoSchedule},
-		pod.Request{CPU: 24, Memory: 96 * pod.Gi},
 	)
 }
 
@@ -58,6 +56,19 @@ func LeaveUnresponsiveNodes() pod.Customization {
 		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
 		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
 	)
+}
+
+// StandardPod makes each Pod ask for a quarter of a Standard Node's cpu and
+// memory. It stands for exactly one Request of 4 cpu and 16Gi.
+func StandardPod() pod.Customization {
+	return pod.Settings(pod.Request{CPU: 4, Memory: 16 * pod.Gi})
+}
+
+// GPUPod makes each Pod ask for more than a Standard Node holds, which is what
+// draws a Pod tolerating the GPU taint onto a GPU Node. It stands for exactly
+// one Request of 24 cpu and 96Gi.
+func GPUPod() pod.Customization {
+	return pod.Settings(pod.Request{CPU: 24, Memory: 96 * pod.Gi})
 }
 
 // EvenSpreadOver spreads Pods over the domains of the label given with a skew

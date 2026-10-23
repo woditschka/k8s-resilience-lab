@@ -69,7 +69,17 @@ func aZoneSpreadAt(maxSkew int) pod.Setting {
 const (
 	oneCorePerPod      = 1
 	twoGibibytesPerPod = 2
+
+	// A Request the Workload line's own stands over.
+	overriddenCoresPerPod     = 3
+	overriddenGibibytesPerPod = 6
 )
+
+// askingForNothing is the Workload line's Request where the test asserts none,
+// so its Pods ask for no cpu and no memory.
+func askingForNothing() pod.Customization {
+	return pod.Settings()
+}
 
 func aRequestOf(cores, gibibytes int) pod.Setting {
 	return pod.Request{CPU: cores, Memory: scenario.Memory(gibibytes) * pod.Gi}

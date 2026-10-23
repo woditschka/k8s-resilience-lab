@@ -543,9 +543,12 @@ func (g Given) Topology(zones Zones, pools ...node.DeclaredPool) DeclaredTopolog
 // after another is deployed beside it by the next Wait, every Step after it
 // reads it alone, and a name already declared ends the Scenario.
 //
-// The full accesses are kept beside the Workload, because the domain holds a
-// specification's settings alone.
-func (g Given) Workload(name WorkloadName, pods Pods, declares pod.Specification) DeclaredWorkload {
+// The Pods ask for what the line asks, applied after the specification, so it
+// stands over a Request the specification holds; the empty pod.Settings asks for
+// nothing. The full accesses are kept beside the Workload, because the domain
+// holds a specification's settings alone.
+func (g Given) Workload(name WorkloadName, pods Pods, asks pod.Customization, declares pod.Specification) DeclaredWorkload {
+	declares = declares.Customize(asks)
 	declared := DeclaredWorkload{scenario: g.scenario, name: name, pods: pods, declares: declares}
 	step, open := g.scenario.record(GivenStep, declared.named())
 	if !open {

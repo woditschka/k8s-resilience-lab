@@ -164,7 +164,7 @@ func TestAnInteractiveRunNamingAScenario_ShouldHoldItsClusterAsTheStepsBeforeIts
 		provisioned = steps.provisioned
 		steps.Given().Topology(Zones(twoZones), theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
-		steps.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), resilientPlacement())
+		steps.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), resilientPlacement())
 		steps.WaitFor().AllPodsReady()
 		declared = steps.topology
 
@@ -215,7 +215,7 @@ func TestAnInteractiveRunWhoseStepCannotBeCarriedOut_ShouldHoldTheClusterAsThatS
 		provisioned = steps.provisioned
 		steps.Given().Topology(Zones(twoZones), theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
-		steps.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), aSpecificationTheConstructorRefuses())
+		steps.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), aSpecificationTheConstructorRefuses())
 	}, anObserverDiscardingEachBoard(), func(Outcome) {
 		readyWhileHeld = theReadyNodesOf(t, provisioned)
 		stopTheLab()

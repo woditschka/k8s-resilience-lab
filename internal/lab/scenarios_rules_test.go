@@ -76,6 +76,13 @@ const (
 	theStartupTimeArgument        = 1
 	theFirstSettingArgument       = 2
 	theNamedSetting               = "LeaveUnresponsiveNodes"
+	theStandardPod                = "StandardPod"
+	theGPUPod                     = "GPUPod"
+	theRequestSetting             = "Request"
+	theStandardCPU                = "4"
+	theStandardMemory             = "16"
+	theGPUCPU                     = "24"
+	theGPUMemory                  = "96"
 	theGroupingMeans              = "Settings"
 	theTolerationSetting          = "Toleration"
 	theTolerationsKey             = "Key"
@@ -95,7 +102,8 @@ const (
 // theLabsTaints are the two taints the Named setting tolerates at the lab's
 // waiting time, and that no definition writes a toleration of itself.
 var (
-	theNamedSettings  = []string{theNamedSetting, theEvenSpread}
+	theNamedSettings  = []string{theNamedSetting, theStandardPod, theGPUPod, theEvenSpread}
+	theNamedRequests  = []string{theStandardPod, theGPUPod}
 	theSpreadSubjects = []string{theSpreadSubjectOfZone, theSpreadSubjectOfNode}
 	theLabsTaints     = []string{"NotReady", "Unreachable"}
 	theStartupForms   = []string{"StartupSeconds", "StartupSecondsBetween", "StartupMillis", "StartupMillisBetween"}
@@ -178,7 +186,7 @@ import (
 
 %s
 `
-	theStandardNodesDefinition = `func StandardNodes() node.Capacity {
+	theStandardNodeDefinition = `func StandardNode() node.Capacity {
 	return node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
 }`
 )
@@ -201,6 +209,12 @@ const (
 		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
 	)
 }`
+	theStandardPodDefinition = `func StandardPod() pod.Customization {
+	return pod.Settings(pod.Request{CPU: 4, Memory: 16 * pod.Gi})
+}`
+	theGPUPodDefinition = `func GPUPod() pod.Customization {
+	return pod.Settings(pod.Request{CPU: 24, Memory: 96 * pod.Gi})
+}`
 	theEvenSpreadDefinition = `func EvenSpreadOver(topologyKey string) pod.TopologySpreadConstraint {
 	return pod.TopologySpreadConstraint{
 		TopologyKey: topologyKey, MaxSkew: 1, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor,
@@ -217,9 +231,12 @@ const (
 
 var theStepKinds = []StepKind{GivenStep, WhenStep, WaitStep, ThenStep}
 
-// A Workload line takes the Workload name, the Pod count and one predefined Pod
-// specification, customized at most once. A setting of the Scenario's own would
-// be a further argument or call, and neither is admitted.
+// A Workload line takes the Workload name, the Pod count, the Request its Pods
+// ask for and one predefined Pod specification, customized at most once. The
+// Request is a Named setting of one Request or a pod.Request of the line's own,
+// and the Customize states none, so the line names one Request alone. A setting
+// of the Scenario's own would be a further argument or call, and neither is
+// admitted.
 //
 // The shape is read off the syntax tree rather than the text, because a
 // Customization wraps over several lines once gofmt has had it.
@@ -227,9 +244,14 @@ const (
 	theWorkloadStep = "Workload"
 	theCustomize    = "Customize"
 
-	theWorkloadLineArguments = 3
-	theSpecificationArgument = 2
+	theWorkloadLineArguments = 4
+	theRequestArgument       = 2
+	theSpecificationArgument = 3
 )
+
+// A Named setting stands for one Pod's Request and a Named Node capacity for
+// one Node's room, so no source of the Scenarios defines or names these plurals.
+var thePluralNames = []string{"StandardPods", "GPUPods", "StandardNodes", "GPUNodes"}
 
 // A second call of theWorkloadsOwnCalls, or any other call written there, stays
 // refused.
@@ -261,15 +283,17 @@ func TestEveryScenarioSource_ShouldHoldOnlyGivenWhenWaitAndThenSteps(t *testing.
 	}
 }
 
-func TestEveryScenarioOfTheLab_ShouldDeclareOnePredefinedPodSpecificationPerWorkload(t *testing.T) {
+func TestEveryScenarioWorkloadLine_ShouldNameStandardPodOrGPUPodOrItsOwnRequestAndOnlyOne(t *testing.T) {
 	place := theScenariosPlace(t)
 
-	offenders := workloadLinesDeclaringNoPredefinedSpecification(filesOfThePlace(t, place))
+	files := filesOfThePlace(t, place)
+
+	offenders := slices.Concat(workloadLinesNotOfTheAdmittedShape(files), namesLeftInThePlural(files))
 
 	if len(offenders) > 0 {
-		t.Errorf("every Workload line of a Scenario declares one predefined Pod specification of %s and no setting of its own, but:\n%s",
-			thePodSpecifications,
-			strings.Join(offenders, "\n"))
+		t.Errorf("every Workload line of a Scenario names %s(), %s() or a pod.%s of its own, then one predefined Pod specification of %s stating no Request of its own in Customize, and no source of the Scenarios names %s, but:\n%s",
+			theStandardPod, theGPUPod, theRequestSetting, thePodSpecifications,
+			strings.Join(thePluralNames, ", "), strings.Join(offenders, "\n"))
 	}
 }
 
@@ -336,16 +360,16 @@ func TestTheNodePoolNameRule_ShouldAdmitSeveralNodePoolsOrOneNamedGeneralAndRepo
 			admitted: true,
 		},
 		"a NodePool named otherwise": {
-			line:     `s.Given().Topology(lab.Zones(3), node.Pool("gpu", node.PerZone(3), StandardNodes()))`,
+			line:     `s.Given().Topology(lab.Zones(3), node.Pool("gpu", node.PerZone(3), StandardNode()))`,
 			admitted: false,
 		},
 		"two NodePools, each named after what it holds": {
-			line: `s.Given().Topology(lab.Zones(3), node.Pool("on-demand", node.PerZone(1), StandardNodes()), ` +
-				`node.Pool("spot", node.PerZone(1), StandardNodes()))`,
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("on-demand", node.PerZone(1), StandardNode()), ` +
+				`node.Pool("spot", node.PerZone(1), StandardNode()))`,
 			admitted: true,
 		},
 		"a labelled NodePool named general": {
-			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()).` +
+			line: `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()).` +
 				`Labels(node.Labels{"capacity-type": "spot"}))`,
 			admitted: true,
 		},
@@ -444,7 +468,7 @@ func TestTheNodeCapacityRule_ShouldAdmitAStatedOrNamedCapacityAndReportAnythingE
 			admitted: false,
 		},
 		"a NodePool naming a capacity of the lab's own": {
-			line:     `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), node.StandardNodes()))`,
+			line:     `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), node.StandardNode()))`,
 			admitted: false,
 		},
 		"a NodePool naming a capacity the place does not define": {
@@ -543,17 +567,17 @@ func TestEveryNamedNodeCapacityOfTheScenarios_ShouldBeDefinedOnceBesideThem(t *t
 
 func TestTheNamedNodeCapacitiesRule_ShouldAdmitOneDefinitionPerNameAndReportAnythingElse(t *testing.T) {
 	const (
-		theStandardDefinition       = theStandardNodesDefinition
-		aSecondDefinitionOfStandard = `func MoreStandardNodes() node.Capacity {
+		theStandardDefinition       = theStandardNodeDefinition
+		aSecondDefinitionOfStandard = `func LargerStandardNode() node.Capacity {
 	return node.Named("Standard", node.Capacity{CPU: 32, Memory: 128 * node.Gi, Pods: 20})
 }`
-		aDefinitionTakingItsValues = `func SizedNodes(pods int) node.Capacity {
+		aDefinitionTakingItsValues = `func SizedNode(pods int) node.Capacity {
 	return node.Named("Sized", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: pods})
 }`
-		aDefinitionReturningAStatedCapacity = `func StatedNodes() node.Capacity {
+		aDefinitionReturningAStatedCapacity = `func StatedNode() node.Capacity {
 	return node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10}
 }`
-		aDefinitionUnderAComputedName = `func ComputedNodes() node.Capacity {
+		aDefinitionUnderAComputedName = `func ComputedNode() node.Capacity {
 	return node.Named(node.CapacityName("Comp"+"uted"), node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
 }`
 		aVariableOfACapacity = `var LargeNodes = node.Named("Large", node.Capacity{CPU: 32, Memory: 128 * node.Gi, Pods: 10})`
@@ -630,7 +654,7 @@ func (c Capacity) declared() (scenario.NodeCapacity, error) {
 		"the node package defining a capacity of its own": {
 			source: `package node
 
-func StandardNodes() Capacity {
+func StandardNode() Capacity {
 	return Named("Standard", Capacity{CPU: 16, Memory: 64 * Gi, Pods: 10})
 }
 `,
@@ -638,7 +662,7 @@ func StandardNodes() Capacity {
 		"the node package reaching the domain's constructor elsewhere": {
 			source: `package node
 
-func StandardNodes() scenario.NamedNodeCapacity {
+func StandardNode() scenario.NamedNodeCapacity {
 	named, _ := scenario.NewNamedNodeCapacity("Standard", scenario.NodeCapacity{})
 	return named
 }
@@ -656,7 +680,7 @@ func StandardNodeCapacity() NamedNodeCapacity {
 		"the Step surface defining a capacity of its own": {
 			source: `package lab
 
-func standardNodes() node.Capacity {
+func standardNode() node.Capacity {
 	return node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
 }
 `,
@@ -664,7 +688,7 @@ func standardNodes() node.Capacity {
 		"the command defining a capacity of its own": {
 			source: `package main
 
-func standardNodes() node.Capacity {
+func standardNode() node.Capacity {
 	return node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
 }
 `,
@@ -868,6 +892,181 @@ func TestEveryPredefinedPodSpecification_ShouldNameTheSettingForLeavingAnUnrespo
 	}
 }
 
+// A Request stands on the Workload line, so a reader of the Scenario sees what
+// its Pods ask for without opening a definition.
+func TestEveryPredefinedPodSpecification_ShouldHoldNoRequest(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := podSpecificationsHoldingARequest(filesOfThePlace(t, place))
+
+	if len(offenders) > 0 {
+		t.Errorf("no definition of %s writes a pod.%s or names %s() or %s(), but:\n%s",
+			thePodSpecifications, theRequestSetting, theStandardPod, theGPUPod, strings.Join(offenders, "\n"))
+	}
+}
+
+func TestThePredefinedSpecificationRequestRule_ShouldAdmitADefinitionWithoutARequestAndReportOneHoldingAny(t *testing.T) {
+	const (
+		aDefinitionNamingStandardPod = `func SteadyPlacement() pod.Specification {
+	return pod.Predefined("Steady placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		StandardPod(),
+	)
+}`
+		aDefinitionNamingGPUPod = `func HungryPlacement() pod.Specification {
+	return pod.Predefined("Hungry placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		GPUPod(),
+	)
+}`
+		aDefinitionStatingARequest = `func TightPlacement() pod.Specification {
+	return pod.Predefined("Tight placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		pod.Request{CPU: 3, Memory: 12 * pod.Gi},
+	)
+}`
+		aDefinitionGroupingARequest = `func GroupedPlacement() pod.Specification {
+	return pod.Predefined("Grouped placement", pod.StartupMillisBetween(500, 1000),
+		` + theNamedSettingWritten + `,
+		pod.Settings(pod.Request{CPU: 3, Memory: 12 * pod.Gi}),
+	)
+}`
+	)
+
+	written := map[string]struct {
+		source   string
+		admitted bool
+	}{
+		"a definition holding no Request": {
+			source:   aPodSpecificationsSourceOf(theResilientPlacementDefinition),
+			admitted: true,
+		},
+		"a definition naming Standard Pods": {
+			source: aPodSpecificationsSourceOf(aDefinitionNamingStandardPod),
+		},
+		"a definition naming GPU Pods": {
+			source: aPodSpecificationsSourceOf(aDefinitionNamingGPUPod),
+		},
+		"a definition stating a Request": {
+			source: aPodSpecificationsSourceOf(aDefinitionStatingARequest),
+		},
+		"a definition grouping a Request": {
+			source: aPodSpecificationsSourceOf(aDefinitionGroupingARequest),
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			place := aPlaceHolding(t, map[string]string{thePodSpecifications: taken.source})
+
+			offenders := podSpecificationsHoldingARequest(place)
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+func TestStandardPod_ShouldHoldOneRequestOfFourCpuAndSixteenGiAndNothingElse(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := namedRequestsNotHolding(filesOfThePlace(t, place), theStandardPod, theStandardCPU, theStandardMemory)
+
+	if len(offenders) > 0 {
+		t.Errorf("%s holds one exported function %s taking nothing, whose body is one return of pod.%s of one pod.%s{CPU: %s, Memory: %s * pod.Gi}, but:\n%s",
+			thePodSpecifications, theStandardPod, theGroupingMeans, theRequestSetting,
+			theStandardCPU, theStandardMemory, strings.Join(offenders, "\n"))
+	}
+}
+
+func TestGPUPod_ShouldHoldOneRequestOfTwentyFourCpuAndNinetySixGiAndNothingElse(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := namedRequestsNotHolding(filesOfThePlace(t, place), theGPUPod, theGPUCPU, theGPUMemory)
+
+	if len(offenders) > 0 {
+		t.Errorf("%s holds one exported function %s taking nothing, whose body is one return of pod.%s of one pod.%s{CPU: %s, Memory: %s * pod.Gi}, but:\n%s",
+			thePodSpecifications, theGPUPod, theGroupingMeans, theRequestSetting,
+			theGPUCPU, theGPUMemory, strings.Join(offenders, "\n"))
+	}
+}
+
+// The shape of the group is the Named setting rule's to read; this reads the
+// one Request's values.
+func namedRequestsNotHolding(files []modulerules.GoFile, name, cpu, memory string) []string {
+	var offenders []string
+	held := 0
+	for _, file := range files {
+		if filepath.Base(file.Path) != thePodSpecifications {
+			continue
+		}
+		for _, declared := range file.Declarations {
+			if declared.Kind != modulerules.FuncDeclaration || declared.Name != name {
+				continue
+			}
+			held++
+			group, why := theGroupOf(declared)
+			if group == nil {
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s", file.Path, declared.Name, why))
+
+				continue
+			}
+			if len(group.Args) != onlyOnce || !isTheRequestOf(group.Args[0], cpu, memory) {
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: does not hold exactly pod.%s{CPU: %s, Memory: %s * pod.Gi}",
+					file.Path, declared.Name, theRequestSetting, cpu, memory))
+			}
+		}
+	}
+	if held != onlyOnce {
+		offenders = append(offenders, fmt.Sprintf("  %s defines %s %d times", thePodSpecifications, name, held))
+	}
+
+	return offenders
+}
+
+func podSpecificationsHoldingARequest(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, file := range files {
+		if filepath.Base(file.Path) != thePodSpecifications {
+			continue
+		}
+		for _, declared := range file.Declarations {
+			name, call, isADefinition := theNameDefinedBy(declared, thePodName, thePodSpecificationDefinition)
+			if isADefinition && slices.ContainsFunc(call.Args, holdsARequest) {
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: %q holds a Request",
+					file.Path, declared.Name, name))
+			}
+		}
+	}
+
+	return offenders
+}
+
+// A Request is held when it is written anywhere inside the setting, a group
+// included.
+func holdsARequest(setting ast.Expr) bool {
+	holds := false
+	ast.Inspect(setting, func(visited ast.Node) bool {
+		if written, isAnExpression := visited.(ast.Expr); isAnExpression &&
+			(isALiteralOf(written, thePodName, theRequestSetting) || namesANamedRequest(written)) {
+			holds = true
+		}
+
+		return !holds
+	})
+
+	return holds
+}
+
+func namesANamedRequest(setting ast.Expr) bool {
+	named, isACall := setting.(*ast.CallExpr)
+	if !isACall {
+		return false
+	}
+	function, isAName := named.Fun.(*ast.Ident)
+
+	return isAName && slices.Contains(theNamedRequests, function.Name) && len(named.Args) == 0
+}
+
 func TestThePodSpecificationsRule_ShouldAdmitOneDefinitionPerNameAndReportAnythingElse(t *testing.T) {
 	const (
 		aSecondDefinitionOfResilientPlacement = `func EvenPlacement() pod.Specification {
@@ -954,7 +1153,7 @@ func TestThePodSpecificationsRule_ShouldAdmitOneDefinitionPerNameAndReportAnythi
 		},
 		"a Scenario defining one on its own line": {
 			definitions: []string{theResilientPlacementDefinition},
-			line: `s.Given().Workload(Checkout, lab.Pods(9), pod.Predefined("Inline placement", ` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), pod.Predefined("Inline placement", ` +
 				`pod.StartupMillisBetween(500, 1000)))`,
 		},
 	}
@@ -1081,10 +1280,6 @@ func declarationsThatAreNotPodSpecifications(source modulerules.GoFile) []string
 
 // The shape of these declarations is the Named setting rule's and the Even
 // spread rule's to read.
-func isTheNamedSetting(declared modulerules.Declaration) bool {
-	return declared.Kind == modulerules.FuncDeclaration && declared.Name == theNamedSetting
-}
-
 func isANamedSetting(declared modulerules.Declaration) bool {
 	return declared.Kind == modulerules.FuncDeclaration && slices.Contains(theNamedSettings, declared.Name)
 }
@@ -1150,7 +1345,7 @@ func TestTheNamedSettingForLeavingAnUnresponsiveNode_ShouldHoldExactlyTheNotRead
 	}
 }
 
-func TestTheNamedSettingRule_ShouldAdmitTheOneGroupOfTheTwoTolerationsAndReportAnythingElse(t *testing.T) {
+func TestTheNamedSettingRule_ShouldAdmitTheGroupOfTheTwoTolerationsAndTheGroupOfOneRequestAndReportAnythingElse(t *testing.T) {
 	const (
 		aGroupWithAThirdSetting = `func LeaveUnresponsiveNodes() pod.Customization {
 	return pod.Settings(
@@ -1197,6 +1392,24 @@ func TestTheNamedSettingRule_ShouldAdmitTheOneGroupOfTheTwoTolerationsAndReportA
 		pod.Toleration{Key: node.Unreachable, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: wait},
 	)
 }`
+		aStandardPodLeavingOutTheMemory = `func StandardPod() pod.Customization {
+	return pod.Settings(pod.Request{CPU: 4})
+}`
+		aStandardPodWithAToleration = `func StandardPod() pod.Customization {
+	return pod.Settings(
+		pod.Request{CPU: 4, Memory: 16 * pod.Gi},
+		pod.Toleration{Key: node.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: node.UnresponsiveWait},
+	)
+}`
+		aStandardPodWrittenByPosition = `func StandardPod() pod.Customization {
+	return pod.Settings(pod.Request{4, 16 * pod.Gi})
+}`
+		aStandardPodNotGrouping = `func StandardPod() pod.Customization {
+	return pod.StartupSeconds(1)
+}`
+		aStandardPodTakingAValue = `func StandardPod(cpu int) pod.Customization {
+	return pod.Settings(pod.Request{CPU: cpu, Memory: 16 * pod.Gi})
+}`
 		aSecondGroup = `func SpreadEvenly() pod.Customization {
 	return pod.Settings(EvenSpreadOver(node.Zone))
 }`
@@ -1209,6 +1422,38 @@ func TestTheNamedSettingRule_ShouldAdmitTheOneGroupOfTheTwoTolerationsAndReportA
 		"the one group of the two tolerations": {
 			source:   aPodSpecificationsSourceOf(theNamedSettingDefinition, theResilientPlacementDefinition),
 			admitted: true,
+		},
+		"the group of one Request besides it": {
+			source:   aPodSpecificationsSourceOf(theNamedSettingDefinition, theStandardPodDefinition, theResilientPlacementDefinition),
+			admitted: true,
+		},
+		"both groups of one Request besides it": {
+			source: aPodSpecificationsSourceOf(
+				theNamedSettingDefinition, theStandardPodDefinition, theGPUPodDefinition, theResilientPlacementDefinition),
+			admitted: true,
+		},
+		"a group of one Request leaving out the memory": {
+			source: aPodSpecificationsSourceOf(theNamedSettingDefinition, aStandardPodLeavingOutTheMemory, theResilientPlacementDefinition),
+		},
+		"a group of the Request with a toleration": {
+			source: aPodSpecificationsSourceOf(theNamedSettingDefinition, aStandardPodWithAToleration, theResilientPlacementDefinition),
+		},
+		"a group of a Request written by position": {
+			source: aPodSpecificationsSourceOf(theNamedSettingDefinition, aStandardPodWrittenByPosition, theResilientPlacementDefinition),
+		},
+		"a Standard Pods setting that groups nothing": {
+			source: aPodSpecificationsSourceOf(theNamedSettingDefinition, aStandardPodNotGrouping, theResilientPlacementDefinition),
+		},
+		"a Standard Pods setting taking a value": {
+			source: aPodSpecificationsSourceOf(theNamedSettingDefinition, aStandardPodTakingAValue, theResilientPlacementDefinition),
+		},
+		"Standard Pods defined twice": {
+			source: aPodSpecificationsSourceOf(
+				theNamedSettingDefinition, theStandardPodDefinition, theStandardPodDefinition, theResilientPlacementDefinition),
+		},
+		"GPU Pods defined twice": {
+			source: aPodSpecificationsSourceOf(
+				theNamedSettingDefinition, theGPUPodDefinition, theGPUPodDefinition, theResilientPlacementDefinition),
 		},
 		"no Named setting at all": {
 			source: aPodSpecificationsSourceOf(theResilientPlacementDefinition),
@@ -1319,45 +1564,68 @@ func leaving() pod.Customization {
 
 func namedSettingsNotAsDefined(files []modulerules.GoFile) []string {
 	var offenders []string
-	held := 0
+	held := make(map[string]int)
 	for _, file := range files {
 		for _, declared := range file.Declarations {
-			if filepath.Base(file.Path) == thePodSpecifications && isTheNamedSetting(declared) {
-				held++
-				if why := whyNotTheNamedSetting(declared); why != "" {
-					offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s", file.Path, declared.Name, why))
+			if why, isGrouped := theGroupedSettings[declared.Name]; isGrouped &&
+				filepath.Base(file.Path) == thePodSpecifications && declared.Kind == modulerules.FuncDeclaration {
+				held[declared.Name]++
+				if reason := why(declared); reason != "" {
+					offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s", file.Path, declared.Name, reason))
 				}
 
 				continue
 			}
 			if slices.Contains(declared.Names, theNameOf(thePodName, theGroupingMeans)) {
-				offenders = append(offenders, fmt.Sprintf("  %s, in %s: calls pod.%s besides %s",
-					file.Path, declared.Name, theGroupingMeans, theNamedSetting))
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: calls pod.%s besides %s, %s and %s",
+					file.Path, declared.Name, theGroupingMeans, theNamedSetting, theStandardPod, theGPUPod))
 			}
 		}
 	}
-	if held != onlyOnce {
-		offenders = append(offenders, fmt.Sprintf("  %s defines %s %d times", thePodSpecifications, theNamedSetting, held))
+	if held[theNamedSetting] != onlyOnce {
+		offenders = append(offenders, fmt.Sprintf("  %s defines %s %d times", thePodSpecifications, theNamedSetting, held[theNamedSetting]))
+	}
+	for _, named := range theNamedRequests {
+		if held[named] > onlyOnce {
+			offenders = append(offenders, fmt.Sprintf("  %s defines %s %d times", thePodSpecifications, named, held[named]))
+		}
 	}
 
 	return offenders
 }
 
-func whyNotTheNamedSetting(declared modulerules.Declaration) string {
+// theGroupedSettings are the Named settings that return one pod.Settings call,
+// each with the reading of what that group must hold.
+var theGroupedSettings = map[string]func(modulerules.Declaration) string{
+	theNamedSetting: whyNotTheNamedSetting,
+	theStandardPod:  whyNotAGroupOfOneRequest,
+	theGPUPod:       whyNotAGroupOfOneRequest,
+}
+
+func theGroupOf(declared modulerules.Declaration) (*ast.CallExpr, string) {
 	if !declared.Exported || len(declared.Parameters) != 0 || len(declared.Statements) != onlyOnce {
-		return "is not an exported function taking nothing whose body is one statement"
+		return nil, "is not an exported function taking nothing whose body is one statement"
 	}
 	returned, isAReturn := strings.CutPrefix(declared.Statements[0].Written, theReturn)
 	if !isAReturn {
-		return "does not return its group"
+		return nil, "does not return its group"
 	}
 	parsed, err := parser.ParseExpr(returned)
 	if err != nil {
-		return "does not return an expression"
+		return nil, "does not return an expression"
 	}
 	group, isACall := parsed.(*ast.CallExpr)
 	if !isACall || !callsThe(group, thePodName, theGroupingMeans) {
-		return fmt.Sprintf("does not return one pod.%s call", theGroupingMeans)
+		return nil, fmt.Sprintf("does not return one pod.%s call", theGroupingMeans)
+	}
+
+	return group, ""
+}
+
+func whyNotTheNamedSetting(declared modulerules.Declaration) string {
+	group, why := theGroupOf(declared)
+	if group == nil {
+		return why
 	}
 	if len(group.Args) != len(theLabsTaints) {
 		return fmt.Sprintf("groups %d settings, not the %d tolerations of the lab's taints", len(group.Args), len(theLabsTaints))
@@ -1370,6 +1638,43 @@ func whyNotTheNamedSetting(declared modulerules.Declaration) string {
 	}
 
 	return ""
+}
+
+func whyNotAGroupOfOneRequest(declared modulerules.Declaration) string {
+	group, why := theGroupOf(declared)
+	if group == nil {
+		return why
+	}
+	if len(group.Args) != onlyOnce || !isAStatedRequest(group.Args[0]) {
+		return fmt.Sprintf("does not group exactly one pod.%s keyed by both its CPU and its Memory", theRequestSetting)
+	}
+
+	return ""
+}
+
+func isAStatedRequest(setting ast.Expr) bool {
+	fields, isARequest := keyedFieldsOf(setting, thePodName, theRequestSetting)
+	_, statesTheCPU := fields["CPU"]
+	_, statesTheMemory := fields["Memory"]
+
+	return isARequest && len(fields) == 2 && statesTheCPU && statesTheMemory
+}
+
+func isTheRequestOf(setting ast.Expr, cpu, memory string) bool {
+	fields, isARequest := keyedFieldsOf(setting, thePodName, theRequestSetting)
+	if !isARequest || len(fields) != 2 {
+		return false
+	}
+	gibibytes, isAProduct := fields["Memory"].(*ast.BinaryExpr)
+
+	return isTheInteger(fields["CPU"], cpu) &&
+		isAProduct && gibibytes.Op == token.MUL && namesThe(gibibytes.Y, thePodName, "Gi") && isTheInteger(gibibytes.X, memory)
+}
+
+func isTheInteger(written ast.Expr, value string) bool {
+	literal, isALiteral := written.(*ast.BasicLit)
+
+	return isALiteral && literal.Kind == token.INT && literal.Value == value
 }
 
 // The toleration is a keyed literal of its four fields: the taint as its key,
@@ -1502,23 +1807,63 @@ func theLabsOwnSources(t *testing.T) []modulerules.GoFile {
 
 // No Scenario of the lab writes a Customization yet, so the rule's decisions
 // are read on scratch sources.
-func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnythingElse(t *testing.T) {
+func TestTheWorkloadLineRule_ShouldAdmitOneRequestAndOneCustomizedSpecificationAndReportAnythingElse(t *testing.T) {
 	written := map[string]struct {
 		line     string
 		admitted bool
 	}{
 		"one predefined specification": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement())`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement())`,
 			admitted: true,
 		},
+		"GPU Pods as the Request": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), GPUPod(), ResilientPlacement())`,
+			admitted: true,
+		},
+		"a Request of the line's own": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), pod.Request{CPU: 3, Memory: 12 * pod.Gi}, ResilientPlacement())`,
+			admitted: true,
+		},
+		"no Request at all": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement())`,
+			admitted: false,
+		},
+		"two Requests on the line": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), pod.Request{CPU: 3, Memory: 12 * pod.Gi},
+		ResilientPlacement())`,
+			admitted: false,
+		},
+		"a Request leaving out its memory": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), pod.Request{CPU: 3}, ResilientPlacement())`,
+			admitted: false,
+		},
+		"a Request written by position": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), pod.Request{3, 12 * pod.Gi}, ResilientPlacement())`,
+			admitted: false,
+		},
+		"a group of the Scenario's own as the Request": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), pod.Settings(pod.Request{CPU: 3, Memory: 12 * pod.Gi}),
+		ResilientPlacement())`,
+			admitted: false,
+		},
+		"a Request stated in Customize": {
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(
+		pod.Request{CPU: 3, Memory: 12 * pod.Gi},
+	))`,
+			admitted: false,
+		},
+		"a Named Request named in Customize": {
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(GPUPod()))`,
+			admitted: false,
+		},
 		"a specification it customizes": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(
 		pod.TopologySpreadConstraint{TopologyKey: node.Zone, MaxSkew: 2, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor},
 	))`,
 			admitted: true,
 		},
 		"a Customize naming no setting": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize())`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize())`,
 			admitted: true,
 		},
 		"no specification at all": {
@@ -1526,54 +1871,54 @@ func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnyth
 			admitted: false,
 		},
 		"a setting written beside the specification": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement(),
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement(),
 		pod.TopologySpreadConstraint{TopologyKey: node.Zone, MaxSkew: 2, WhenUnsatisfiable: pod.DoNotSchedule, NodeTaintsPolicy: pod.Honor})`,
 			admitted: false,
 		},
 		"a second Customize written on the first": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize().Customize())`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize().Customize())`,
 			admitted: false,
 		},
 		"a Required Capacity written after the Workload Step": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).RequiredCapacity(lab.Pods(6))`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).RequiredCapacity(lab.Pods(6))`,
 			admitted: true,
 		},
 		"a second Required Capacity written on the first": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).` +
 				`RequiredCapacity(lab.Pods(6)).RequiredCapacity(lab.Pods(3))`,
 			admitted: false,
 		},
 		"a Wait chained onto the Workload Step": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).WaitFor().AllPodsReady()`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).WaitFor().AllPodsReady()`,
 			admitted: true,
 		},
 		"a Wait chained onto the Required Capacity": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).` +
 				`RequiredCapacity(lab.Pods(6)).WaitFor().AllPodsReady()`,
 			admitted: true,
 		},
 		"a Wait written on the Workload Step with no WaitFor opening it": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).AllPodsReady()`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).AllPodsReady()`,
 			admitted: false,
 		},
 		"a Customize written after the Workload Step": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).Customize()`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).Customize()`,
 			admitted: false,
 		},
 		"a call written after the Workload Step": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).Pool("general", node.PerZone(1), StandardNodes())`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).Pool("general", node.PerZone(1), StandardNode())`,
 			admitted: false,
 		},
 		"a specification of the Scenario's own": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), aSpecificationOfItsOwn())`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), aSpecificationOfItsOwn())`,
 			admitted: false,
 		},
 		"a specification named on the Step surface": {
-			line:     `s.Given().Workload(Checkout, lab.Pods(9), lab.ResilientPlacement())`,
+			line:     `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), lab.ResilientPlacement())`,
 			admitted: false,
 		},
 		"a specification defined on the line itself": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ` +
 				`pod.Predefined("Inline placement", pod.StartupMillisBetween(500, 1000)))`,
 			admitted: false,
 		},
@@ -1581,7 +1926,52 @@ func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnyth
 
 	for shape, taken := range written {
 		t.Run(shape, func(t *testing.T) {
-			offenders := workloadLinesDeclaringNoPredefinedSpecification(aScenarioWhoseWorkloadLineIs(t, taken.line))
+			offenders := workloadLinesNotOfTheAdmittedShape(aScenarioWhoseWorkloadLineIs(t, taken.line))
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+func TestThePluralNameRule_ShouldAdmitTheSingularNamesAndReportAPluralOneDefinedOrNamed(t *testing.T) {
+	const (
+		theSingularLines = `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))
+	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement())`
+		aPluralNodeCapacityDefinition = `func GPUNodes() node.Capacity {
+	return node.Named("GPU", node.Capacity{CPU: 32, Memory: 128 * node.Gi, Pods: 10})
+}`
+		aPluralNamedSettingDefinition = `func StandardPods() pod.Customization {
+	return pod.Settings(pod.Request{CPU: 4, Memory: 16 * pod.Gi})
+}`
+	)
+
+	written := map[string]struct {
+		sources  map[string]string
+		admitted bool
+	}{
+		"the singular names": {
+			sources:  map[string]string{theScenarioSource: aScenarioSourceWhoseStepsAre(theSingularLines)},
+			admitted: true,
+		},
+		"a Named Node capacity named in the plural": {
+			sources: map[string]string{theScenarioSource: aScenarioSourceWhoseStepsAre(
+				`s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()))`)},
+		},
+		"a Named setting named in the plural": {
+			sources: map[string]string{theScenarioSource: aScenarioSourceWhoseStepsAre(
+				`s.Given().Workload(Checkout, lab.Pods(9), GPUPods(), ResilientPlacement())`)},
+		},
+		"a Named Node capacity defined in the plural": {
+			sources: map[string]string{theNamedNodeCapacities: aNamedNodeCapacitiesSourceOf(aPluralNodeCapacityDefinition)},
+		},
+		"a Named setting defined in the plural": {
+			sources: map[string]string{thePodSpecifications: aPodSpecificationsSourceOf(aPluralNamedSettingDefinition)},
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			offenders := namesLeftInThePlural(aPlaceHolding(t, taken.sources))
 
 			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
 		})
@@ -1589,8 +1979,8 @@ func TestTheWorkloadLineRule_ShouldAdmitOneCustomizedSpecificationAndReportAnyth
 }
 
 const (
-	theWorkloadLine   = `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement())`
-	theFullAccessLine = `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(
+	theWorkloadLine   = `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement())`
+	theFullAccessLine = `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(
 		pod.FullAccess(func(spec *` + thePodSettingsName + `.PodSpec) {
 			spec.PriorityClassName = "critical"
 		}),
@@ -1614,8 +2004,8 @@ func aScenarioSourceThatImports(t *testing.T, imported []string, line string) []
 
 	return aPlaceHolding(t, map[string]string{
 		theScenarioSource: fmt.Sprintf(theScenarioSourceShape, anImportBlockOf(imported), line),
-		thePodSpecifications: aPodSpecificationsSourceOf(
-			theNamedSettingDefinition, theEvenSpreadDefinition, theResilientPlacementDefinition),
+		thePodSpecifications: aPodSpecificationsSourceOf(theNamedSettingDefinition, theStandardPodDefinition,
+			theGPUPodDefinition, theEvenSpreadDefinition, theResilientPlacementDefinition),
 	})
 }
 
@@ -1624,7 +2014,7 @@ func aScenarioBesideTheNamedNodeCapacities(t *testing.T, steps ...string) []modu
 
 	return aPlaceHolding(t, map[string]string{
 		theScenarioSource:      aScenarioSourceWhoseStepsAre(steps...),
-		theNamedNodeCapacities: aNamedNodeCapacitiesSourceOf(theStandardNodesDefinition),
+		theNamedNodeCapacities: aNamedNodeCapacitiesSourceOf(theStandardNodeDefinition),
 	})
 }
 
@@ -1854,7 +2244,7 @@ func TestTheWaitOrderingRule_ShouldReportEveryThenAndFailureNoWaitStandsBefore(t
 }
 
 const (
-	theTopologyLine         = `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()))`
+	theTopologyLine         = `s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))`
 	theTopologyWaitingLine  = theTopologyLine + `.WaitFor().AllNodesReady()`
 	theWorkloadWaitingLine  = theWorkloadLine + `.WaitFor().AllPodsReady()`
 	theWaitForEveryNodeLine = `s.WaitFor().AllNodesReady()`
@@ -2031,30 +2421,30 @@ func TestTheNameRule_ShouldReportANameNeitherItsSubjectNorThePlaceDeclares(t *te
 		admitted bool
 	}{
 		"the names each subject's package exports": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(` +
 				`pod.Request{CPU: 1, Memory: 1 * pod.Gi}))`,
 			admitted: true,
 		},
 		"a specification the Step surface no longer exports": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), lab.MaximumAvailability())`,
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), lab.MaximumAvailability())`,
 		},
 		"a name of the Scenario's own": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), aSpecificationOfItsOwn())`,
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), aSpecificationOfItsOwn())`,
 		},
 		"a Pod setting under the Scenario's package": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(` +
 				`lab.Request{CPU: 1, Memory: 1 * pod.Gi}))`,
 		},
 		"a Node's taint under the pod package": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(` +
 				`pod.Toleration{Key: pod.NotReady, Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: 300}))`,
 		},
 		"a function marking the position of a value": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(` +
 				`pod.Toleration{Key: pod.Key(node.NotReady), Operator: pod.Exists, Effect: pod.NoExecute, TolerationSeconds: 300}))`,
 		},
 		"a Pod setting written unqualified, as a dot import writes it": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(` +
 				`Request{CPU: 1, Memory: 1 * Gi}))`,
 		},
 	}
@@ -2456,7 +2846,7 @@ func declaresNodeLabelKeysAlone(declared ast.Decl) bool {
 
 // A Scenario declaring no Workload line is reported too, since it would meet
 // the shape rule by having nothing to check.
-func workloadLinesDeclaringNoPredefinedSpecification(files []modulerules.GoFile) []string {
+func workloadLinesNotOfTheAdmittedShape(files []modulerules.GoFile) []string {
 	defined := thePodSpecificationsDeclaredIn(files)
 
 	var offenders []string
@@ -2465,14 +2855,14 @@ func workloadLinesDeclaringNoPredefinedSpecification(files []modulerules.GoFile)
 			if !isAScenario(declared) {
 				continue
 			}
-			offenders = append(offenders, workloadLinesOfScenarioThatDeclareNoSpecification(source.Path, declared, defined)...)
+			offenders = append(offenders, workloadLinesOfScenarioNotOfTheAdmittedShape(source.Path, declared, defined)...)
 		}
 	}
 
 	return offenders
 }
 
-func workloadLinesOfScenarioThatDeclareNoSpecification(
+func workloadLinesOfScenarioNotOfTheAdmittedShape(
 	path string, declared modulerules.Declaration, defined map[string]bool,
 ) []string {
 	var offenders []string
@@ -2482,13 +2872,30 @@ func workloadLinesOfScenarioThatDeclareNoSpecification(
 			continue
 		}
 		deploying++
-		if !declaresOnePredefinedSpecification(line, defined) {
-			offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s declares no predefined Pod specification",
-				path, declared.Name, line.Written))
+		if why := whyNotOneRequestAndOnePredefinedSpecification(line, defined); why != "" {
+			offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s %s", path, declared.Name, line.Written, why))
 		}
 	}
 	if deploying == 0 {
 		offenders = append(offenders, fmt.Sprintf("  %s, in %s: no Workload is declared at all", path, declared.Name))
+	}
+
+	return offenders
+}
+
+func namesLeftInThePlural(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, file := range files {
+		for _, declared := range file.Declarations {
+			if slices.Contains(thePluralNames, declared.Name) {
+				offenders = append(offenders, fmt.Sprintf("  %s: defines %s", file.Path, declared.Name))
+			}
+			for _, used := range declared.Names {
+				if used.Qualifier == "" && slices.Contains(thePluralNames, used.Name) {
+					offenders = append(offenders, fmt.Sprintf("  %s, in %s: names %s", file.Path, declared.Name, used.Name))
+				}
+			}
+		}
 	}
 
 	return offenders
@@ -2506,18 +2913,45 @@ func namesTheWorkloadStep(line modulerules.Statement) bool {
 	return false
 }
 
-func declaresOnePredefinedSpecification(line modulerules.Statement, defined map[string]bool) bool {
+func whyNotOneRequestAndOnePredefinedSpecification(line modulerules.Statement, defined map[string]bool) string {
 	deploying, ends := theWorkloadStepTheLineEndsAt(line)
 	if !ends || len(deploying.Arguments) != theWorkloadLineArguments {
-		return false
+		return "is not one Workload Step of a Request and a predefined Pod specification"
+	}
+	if !isOneRequest(deploying.Arguments[theRequestArgument]) {
+		return fmt.Sprintf("names no %s(), %s() or pod.%s keyed by both its CPU and its Memory",
+			theStandardPod, theGPUPod, theRequestSetting)
 	}
 
 	declared := deploying.Arguments[theSpecificationArgument]
 	if declared.Call && declared.Name == theCustomize && declared.On != nil {
+		if slices.ContainsFunc(declared.Arguments, customizesARequest) {
+			return "states a Request in Customize beside the line's own"
+		}
 		declared = *declared.On
 	}
+	if !isAPredefinedSpecification(declared, defined) {
+		return "declares no predefined Pod specification"
+	}
 
-	return isAPredefinedSpecification(declared, defined)
+	return ""
+}
+
+func isOneRequest(asks modulerules.Statement) bool {
+	if asks.Call && asks.On == nil && len(asks.Arguments) == 0 && slices.Contains(theNamedRequests, asks.Name) {
+		return true
+	}
+	written, err := parser.ParseExpr(asks.Written)
+
+	return err == nil && isAStatedRequest(written)
+}
+
+// A setting that does not parse on its own is no Request the rule can read, and
+// the line's other rules report it.
+func customizesARequest(setting modulerules.Statement) bool {
+	written, err := parser.ParseExpr(setting.Written)
+
+	return err == nil && holdsARequest(written)
 }
 
 // A Wait chained onto the line is read past first: it is a Step of its own and
@@ -3103,7 +3537,7 @@ func TestTheKeyedSettingRule_ShouldAdmitAKeyedLiteralAndReportOneWrittenByPositi
 		admitted bool
 	}{
 		"a keyed Request": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(` +
 				`pod.Request{CPU: 3, Memory: 12 * pod.Gi}))`,
 			admitted: true,
 		},
@@ -3113,7 +3547,7 @@ func TestTheKeyedSettingRule_ShouldAdmitAKeyedLiteralAndReportOneWrittenByPositi
 			admitted: true,
 		},
 		"a Request by position": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(` +
 				`pod.Request{3, 12 * pod.Gi}))`,
 		},
 		"a Node capacity by position": {
@@ -3121,7 +3555,7 @@ func TestTheKeyedSettingRule_ShouldAdmitAKeyedLiteralAndReportOneWrittenByPositi
 				`node.Capacity{4, 16 * node.Gi, 10}))`,
 		},
 		"a toleration by position": {
-			line: `s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement().Customize(` +
+			line: `s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement().Customize(` +
 				`pod.Toleration{node.NotReady, pod.Exists, pod.NoExecute, 300}))`,
 		},
 	}

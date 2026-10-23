@@ -26,9 +26,9 @@ func All() []func(*lab.Scenario) {
 // An even Placement over Zones and Nodes with room for more than one Pod is the
 // scheduler honouring Resilient placement.
 func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()))
+	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement())
+	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement())
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
@@ -38,9 +38,9 @@ func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *la
 // Capacity comes back after one Node stops responding, on the Nodes still
 // responding.
 func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()))
+	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
+	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
@@ -56,9 +56,9 @@ func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab
 // Capacity comes back after a whole Zone stops responding, on the Zones still
 // responding.
 func AZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNodes()))
+	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
+	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
@@ -78,8 +78,7 @@ func NoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending
 	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3),
 		node.Capacity{CPU: 4, Memory: 16 * node.Gi, Pods: 10}))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9),
-		ResilientPlacement().Customize(pod.Request{CPU: 3, Memory: 12 * pod.Gi})).
+	s.Given().Workload(Checkout, lab.Pods(9), pod.Request{CPU: 3, Memory: 12 * pod.Gi}, ResilientPlacement()).
 		RequiredCapacity(lab.Pods(6))
 	s.WaitFor().AllPodsReady()
 
@@ -98,11 +97,11 @@ func NoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending
 // honouring both spreads at once.
 func AWorkloadSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerCapacityType(s *lab.Scenario) {
 	s.Given().Topology(lab.Zones(3),
-		node.Pool("on-demand", node.PerZone(1), StandardNodes()).Labels(node.Labels{CapacityType: "on-demand"}),
-		node.Pool("spot", node.PerZone(1), StandardNodes()).Labels(node.Labels{CapacityType: "spot"}),
+		node.Pool("on-demand", node.PerZone(1), StandardNode()).Labels(node.Labels{CapacityType: "on-demand"}),
+		node.Pool("spot", node.PerZone(1), StandardNode()).Labels(node.Labels{CapacityType: "spot"}),
 	)
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(6), SpreadOverOnDemandAndSpot())
+	s.Given().Workload(Checkout, lab.Pods(6), StandardPod(), SpreadOverOnDemandAndSpot())
 	s.WaitFor().AllPodsReady()
 
 	s.Then().AllPodsRunning()
@@ -114,11 +113,11 @@ func AWorkloadSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerCapa
 // restored on the on-demand Nodes in every Zone.
 func SpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNinePodsOnTheOnDemandNodes(s *lab.Scenario) {
 	s.Given().Topology(lab.Zones(3),
-		node.Pool("on-demand", node.PerZone(2), StandardNodes()).Labels(node.Labels{CapacityType: "on-demand"}),
-		node.Pool("spot", node.PerZone(1), StandardNodes()).Labels(node.Labels{CapacityType: "spot"}),
+		node.Pool("on-demand", node.PerZone(2), StandardNode()).Labels(node.Labels{CapacityType: "on-demand"}),
+		node.Pool("spot", node.PerZone(1), StandardNode()).Labels(node.Labels{CapacityType: "spot"}),
 	)
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
+	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerNode(1)
@@ -136,18 +135,18 @@ func SpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNinePods
 // reach them because only a gpu Node has room for what each asks for.
 func GeneralPodsBesideTaintedGPUNodes_ShouldStayOffThemWhileTheTolerantPodsReachThemByTheirRequest(s *lab.Scenario) {
 	s.Given().Topology(lab.Zones(3),
-		node.Pool("general", node.PerZone(2), StandardNodes()),
-		node.Pool("gpu", node.PerZone(1), GPUNodes()).Taints(node.Taint{Key: GPU, Value: GPUPresent, Effect: node.NoSchedule}),
+		node.Pool("general", node.PerZone(2), StandardNode()),
+		node.Pool("gpu", node.PerZone(1), GPUNode()).Taints(node.Taint{Key: GPU, Value: GPUPresent, Effect: node.NoSchedule}),
 	)
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(6), ResilientPlacement())
+	s.Given().Workload(Checkout, lab.Pods(6), StandardPod(), ResilientPlacement())
 	s.WaitFor().AllPodsReady()
 
 	s.Then().AllPodsRunning()
 	s.Then().PodsOnNodePool("general", 6)
 	s.Then().PodsOnNodePool("gpu", 0)
 
-	s.Given().Workload(Inference, lab.Pods(3), ToleratingGPUNodes())
+	s.Given().Workload(Inference, lab.Pods(3), GPUPod(), ToleratingGPUNodes())
 	s.WaitFor().AllPodsReady()
 
 	s.Then().AllPodsRunning()

@@ -5,16 +5,16 @@ package scenarios
 
 import "github.com/woditschka/k8s-resilience-lab/internal/lab/node"
 
-// StandardNodes leave room for more than one Pod per Node, so an even Placement
-// is the scheduler honouring the declared spread rather than the Nodes running
-// out of room. Their cpu and memory cover an ordinary share for each of those
-// Pods, so the Pod count stays the tighter bound.
-func StandardNodes() node.Capacity {
+// StandardNode leaves room for more than one Pod, so an even Placement is the
+// scheduler honouring the declared spread rather than the Nodes running out of
+// room. A Standard Pod takes a quarter of it, so four fit by cpu and memory,
+// more than any Scenario spreads onto one Node, and the spread still decides.
+func StandardNode() node.Capacity {
 	return node.Named("Standard", node.Capacity{CPU: 16, Memory: 64 * node.Gi, Pods: 10})
 }
 
-// GPUNodes have twice a Standard Node's cpu and memory, so a Pod asking for
-// more than a Standard Node holds fits on one of them alone.
-func GPUNodes() node.Capacity {
+// GPUNode has twice a Standard Node's cpu and memory, so a Pod asking for more
+// than a Standard Node holds fits on a GPU Node alone.
+func GPUNode() node.Capacity {
 	return node.Named("GPU", node.Capacity{CPU: 32, Memory: 128 * node.Gi, Pods: 10})
 }
