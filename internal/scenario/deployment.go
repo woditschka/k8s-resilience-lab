@@ -11,30 +11,59 @@ type Deployment struct {
 	name          string
 	replicas      int
 	specification PodSpecification
-	tolerance     failureTolerance
+	tolerance     FailureTolerance
+	// floor is derived once, from the Topology the tolerance was declared
+	// against, so it never follows where the Pods landed.
+	floor    int
+	declares bool
 }
 
-// A Deployment declaring no Failure tolerance is judged by none, and a
-// tolerance of no Pod is a declaration rather than the absence of one.
-type failureTolerance struct {
-	pods     int
-	declared bool
+// ToleratedLoss is which part of a Topology a Failure tolerance counts.
+type ToleratedLoss string
+
+const (
+	// ZonesLost counts the Zones a Deployment survives losing.
+	ZonesLost ToleratedLoss = "Zone"
+	// NodesLost counts the Nodes a Deployment survives losing.
+	NodesLost ToleratedLoss = "Node"
+)
+
+// FailureTolerance carries no invariant of its own: the Deployment declaring it
+// refuses a count its Topology cannot lose.
+type FailureTolerance struct {
+	Lost  ToleratedLoss
+	Count int
+}
+
+// Reads is the count with what it counts, as a report line states it.
+func (f FailureTolerance) Reads() string {
+	if f.Count == 1 {
+		return "1 " + string(f.Lost)
+	}
+
+	return fmt.Sprintf("%d %ss", f.Count, f.Lost)
 }
 
 // NewDeployment returns a Deployment that declares no Failure tolerance.
 func NewDeployment(name string, replicas int, declared PodSpecification) (Deployment, error) {
-	return newDeployment(name, replicas, declared, failureTolerance{})
+	return newDeployment(name, replicas, declared)
 }
 
-// WithFailureTolerance refuses a tolerance below zero and one of every replica
-// or more, since a Deployment losing every Pod has survived nothing.
-func (d Deployment) WithFailureTolerance(pods int) (Deployment, error) {
-	return newDeployment(d.name, d.replicas, d.specification, failureTolerance{pods: pods, declared: true})
+// WithFailureTolerance derives the Floor from the Topology the tolerance is
+// declared against. A count below zero is refused, and so is one reaching every
+// Zone or Node the Topology holds, since a Deployment losing all of them has
+// survived nothing.
+func (d Deployment) WithFailureTolerance(tolerance FailureTolerance, against Topology) (Deployment, error) {
+	floor, err := floorOf(d.replicas, tolerance, against)
+	if err != nil {
+		return Deployment{}, err
+	}
+	d.tolerance, d.floor, d.declares = tolerance, floor, true
+
+	return d, nil
 }
 
-// newDeployment is the one validation home, so the copies declaring a Failure
-// tolerance are checked alike.
-func newDeployment(name string, replicas int, declared PodSpecification, tolerance failureTolerance) (Deployment, error) {
+func newDeployment(name string, replicas int, declared PodSpecification) (Deployment, error) {
 	if name == "" {
 		return Deployment{}, errors.New("a Deployment carries the name its Pods are labelled with, so an empty name is refused")
 	}
@@ -44,14 +73,35 @@ func newDeployment(name string, replicas int, declared PodSpecification, toleran
 	if len(declared.settings) == 0 {
 		return Deployment{}, errors.New("a Deployment's Pods are deployed with the specification it declares, so a specification holding no setting is refused")
 	}
-	if tolerance.declared && tolerance.pods < 0 {
-		return Deployment{}, fmt.Errorf("a Failure tolerance counts the Pods a Deployment survives losing, from zero up, so a tolerance of %d Pods is refused", tolerance.pods)
+
+	return Deployment{name: name, replicas: replicas, specification: declared, floor: replicas}, nil
+}
+
+// floorOf takes the Pods an even spread puts on the declared Zones or Nodes
+// holding the most of them: each holds the quotient, and the first of them one
+// of the remainder each.
+func floorOf(replicas int, tolerance FailureTolerance, against Topology) (int, error) {
+	var parts int
+	switch tolerance.Lost {
+	case ZonesLost:
+		parts = len(against.Zones())
+	case NodesLost:
+		parts = len(against.Nodes())
+	default:
+		return 0, fmt.Errorf("a Failure tolerance counts Zones or Nodes, so one counting %q is refused", tolerance.Lost)
 	}
-	if tolerance.declared && tolerance.pods >= replicas {
-		return Deployment{}, fmt.Errorf("a Deployment of %d replicas survives losing fewer Pods than its replicas, so a Failure tolerance of %d Pods is refused", replicas, tolerance.pods)
+	if tolerance.Count < 0 {
+		return 0, fmt.Errorf("a Failure tolerance counts the %ss a Deployment survives losing, from zero up, "+
+			"so a tolerance of %d %ss is refused", tolerance.Lost, tolerance.Count, tolerance.Lost)
+	}
+	if tolerance.Count >= parts {
+		return 0, fmt.Errorf("a Deployment survives losing fewer %ss than the %d its Topology holds, "+
+			"so a Failure tolerance of %s is refused", tolerance.Lost, parts, tolerance.Reads())
 	}
 
-	return Deployment{name: name, replicas: replicas, specification: declared, tolerance: tolerance}, nil
+	each, remaining := replicas/parts, replicas%parts
+
+	return replicas - (tolerance.Count*each + min(tolerance.Count, remaining)), nil
 }
 
 func (d Deployment) Name() string {
@@ -66,13 +116,19 @@ func (d Deployment) PodSpecification() PodSpecification {
 	return d.specification
 }
 
-func (d Deployment) FailureTolerance() (pods int, declared bool) {
-	return d.tolerance.pods, d.tolerance.declared
+func (d Deployment) FailureTolerance() (tolerance FailureTolerance, declared bool) {
+	return d.tolerance, d.declares
+}
+
+// Floor is every replica for a Deployment declaring no Failure tolerance.
+func (d Deployment) Floor() int {
+	return d.floor
 }
 
 // Equal is the equality go-cmp compares through, since the type's fields are
 // unexported.
 func (d Deployment) Equal(other Deployment) bool {
 	return d.name == other.name && d.replicas == other.replicas &&
-		d.specification.Equal(other.specification) && d.tolerance == other.tolerance
+		d.specification.Equal(other.specification) && d.tolerance == other.tolerance &&
+		d.floor == other.floor && d.declares == other.declares
 }

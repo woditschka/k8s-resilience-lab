@@ -146,7 +146,7 @@ A Customization writing another time for either toleration changes nothing, and 
 
 A Scenario handles no error of its own and the lab keeps no copy of Kubernetes' admission rules. A Given's refusals are a Pod count below one, a specification holding no setting, an empty name, the zero Startup time, and a setting with a field left out. The mapping test's pinning keeps the lab from spelling a setting wrong.
 
-The Deployment-line rule reads that Step's own expression, admitting the Request's Customization and a `Customize` call of any length. [ADR: A Deployment declares its Failure tolerance, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md) admits one further call of the Deployment's own.
+The Deployment-line rule reads that Step's own expression, admitting the Request's Customization and a `Customize` call of any length. [ADR: A Deployment declares the Zones or Nodes it survives losing, judged over the whole Timeline](2026-10-06-required-capacity-judged-at-two-moments.md) admits one further call of the Deployment's own.
 
 A Pod template carries the two Startup annotations from its specification's own Startup time, and the lab's Stage set is unchanged, per [ADR: The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md).
 
@@ -170,7 +170,7 @@ A Scenario using full access reads in two vocabularies. A lab setting re-written
 - [ADR: Kubernetes version pin for the Simulated Cluster](2026-10-03-kubernetes-version-pin.md)
 - [ADR: Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md)
 - [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md)
-- [ADR: A Deployment declares its Failure tolerance, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md)
+- [ADR: A Deployment declares the Zones or Nodes it survives losing, judged over the whole Timeline](2026-10-06-required-capacity-judged-at-two-moments.md)
 - [ADR: The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md)
 - [ADR: A Topology declares the NodePools every Zone holds](2026-10-08-a-topology-declares-the-nodepools-every-zone-holds.md)
 - [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)

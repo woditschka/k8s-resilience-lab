@@ -18,7 +18,8 @@ Every Scenario is a Go function in [scenarios/scenarios.go](scenarios/scenarios.
 func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab.Scenario) {
 	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosingPods(3)
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).
+		SurvivesLosing(lab.Nodes(1))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
@@ -28,7 +29,7 @@ func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab
 
 	s.Then().PodsPerZone(3)
 	s.Then().NoPodsOnTheFailedNodes()
-	s.Then().Survived()
+	s.Then().EnoughPodsStayedReady()
 }
 ```
 
@@ -41,7 +42,7 @@ A run reports every Scenario under its name and the Simulated Cluster it ran on,
 ```text
 ======================================================================================================================================
 Scenario a-node-that-stops-responding, on k8s-resilience-lab-a-node-that-stops-responding-b7pzswsf
-  Given a Deployment checkout of 9 replicas declaring Resilient placement, each Pod starting in 500ms to 1s, surviving the loss of 3 Pods
+  Given a Deployment checkout of 9 replicas declaring Resilient placement, each Pod starting in 500ms to 1s, surviving the loss of 1 Node
   Wait for all Pods Ready, reached in 2.2s
   +8.223s  Pod checkout-5llj7 scheduled on zone-1-node-1, Running at +9.084s
   +8.224s  Pod checkout-xdtwv scheduled on zone-2-node-1, Running at +8.800s
@@ -73,7 +74,8 @@ Scenario a-node-that-stops-responding, on k8s-resilience-lab-a-node-that-stops-r
   ----------------------------------------------------------------------------
   Then 3 Pods per Zone
   Then no Pod on the Nodes that failed
-  Then survives losing 3 Pods: 1 lost at the Failure, 0 once Settled
+  Then enough Pods stayed Ready from the first Failure
+    checkout kept its Floor of 8 Ready Pods through the loss of 1 Node: lowest 8 of 9 at +10.405s for 6.413s
   Skew of checkout: 0 over Zones, 1 over Nodes
   --------------------------------------------------------------------------------------------------------
   Timeline, 189 entries, filed at timelines/k8s-resilience-lab-a-node-that-stops-responding-b7pzswsf.jsonl
@@ -113,7 +115,7 @@ On that cluster a Scenario declares what a real team would declare, then watches
 - **A Topology** of Zones and NodePools, each NodePool stating how many Nodes it holds per Zone, their capacity, and the labels and taints its Nodes carry.
 - **A Deployment** of a given replica count under a Pod specification: topology spread constraints, tolerations and resource requests under their Kubernetes names.
 - **A Failure** that stops one Node, every Node of a Zone, or every Node of one label value. The lab withholds the Node's heartbeat, so the control plane marks it unresponsive and reschedules exactly as it would after a lost machine.
-- **Assertions** on the Placement once it has Settled: Pods per Zone, per Node and per NodePool, and the Pods a Deployment survives losing to the Failure, its Failure tolerance.
+- **Assertions** on the Placement once it has Settled: Pods per Zone, per Node and per NodePool, and the Floor of Ready Pods a Deployment keeps at every moment of the Failure, set by the Zones or Nodes its Failure tolerance survives losing.
 
 Every Scenario also leaves a Timeline, recorded from the API's own watch streams, naming each Node, Pod and Deployment change, the scheduler's reason for each Placement, and each Step at its moment. A run narrates from it under every Wait and files it, so what happened inside the cluster is explainable afterwards.
 

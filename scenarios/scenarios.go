@@ -40,7 +40,7 @@ func ADeploymentPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *
 func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab.Scenario) {
 	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosingPods(3)
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosing(lab.Nodes(1))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
@@ -50,7 +50,7 @@ func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab
 
 	s.Then().PodsPerZone(3)
 	s.Then().NoPodsOnTheFailedNodes()
-	s.Then().Survived()
+	s.Then().EnoughPodsStayedReady()
 }
 
 // Capacity comes back after a whole Zone stops responding, on the Zones still
@@ -58,7 +58,7 @@ func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab
 func AZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding(s *lab.Scenario) {
 	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosingPods(3)
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosing(lab.Zones(1))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
@@ -67,19 +67,19 @@ func AZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding(
 	s.WaitFor().AllPodsReadyWithinSeconds(30)
 
 	s.Then().NoPodsInTheFailedZones()
-	s.Then().Survived()
+	s.Then().EnoughPodsStayedReady()
 }
 
 // Capacity only partly comes back after a whole Zone stops responding, where each
 // Node still responding has room for one Pod of the Deployment: the Pods that no
-// longer fit anywhere stay Pending, and the Deployment still loses no more than
-// its Failure tolerance.
+// longer fit anywhere stay Pending, and the Deployment still keeps its Floor of
+// six Ready Pods.
 func NoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending(s *lab.Scenario) {
 	s.Given().Zones(3, node.Pool("general", node.PerZone(3),
 		node.Capacity{CPU: 4, Memory: 16 * node.Gi, Pods: 10}))
 	s.WaitFor().AllNodesReady()
 	s.Given().Deployment(Checkout, 9, pod.Request{CPU: 3, Memory: 12 * pod.Gi}, ResilientPlacement()).
-		SurvivesLosingPods(3)
+		SurvivesLosing(lab.Zones(1))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerNode(1)
@@ -89,7 +89,7 @@ func NoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending
 
 	s.Then().NoPodsInTheFailedZones()
 	s.Then().PodsPending(3)
-	s.Then().Survived()
+	s.Then().EnoughPodsStayedReady()
 }
 
 // Every Zone holds an on-demand and a spot Node with room for more than one Pod,
@@ -117,7 +117,7 @@ func SpotNodesThatStopResponding_ShouldSurviveLosingThreePodsAndRestoreNinePodsO
 		node.Pool("spot", node.PerZone(1), StandardNode()).Labels(node.Labels{CapacityType: "spot"}),
 	)
 	s.WaitFor().AllNodesReady()
-	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosingPods(3)
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosing(lab.Nodes(3))
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerNode(1)
@@ -127,7 +127,7 @@ func SpotNodesThatStopResponding_ShouldSurviveLosingThreePodsAndRestoreNinePodsO
 
 	s.Then().PodsPerZone(3)
 	s.Then().NoPodsOnTheFailedNodes()
-	s.Then().Survived()
+	s.Then().EnoughPodsStayedReady()
 }
 
 // Every Zone holds two general Nodes and one larger gpu Node tainted NoSchedule.

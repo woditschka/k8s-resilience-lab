@@ -74,7 +74,7 @@ type StepKind string
 
 const (
 	GivenStep StepKind = "Given"
-	WhenStep  StepKind = "When"
+	WhenStep  StepKind = scenario.WhenStepNamed
 	WaitStep  StepKind = scenario.WaitStepNamed
 	ThenStep  StepKind = "Then"
 )
@@ -106,6 +106,9 @@ type Step struct {
 	// Settings stay out of the name, so a Finding and the Step a Scenario ended
 	// at stay one short line.
 	Settings []string
+	// Readings are an EnoughPodsStayedReady's alone, one line per Deployment it
+	// judged, kept out of the name as Settings are.
+	Readings []string
 	// Narrative and Board are a Wait's alone. The Narrative is given once the
 	// record has stopped; the Board is observed as the Wait ended, reached or
 	// not, and BoardNotObserved says why a Wait has none.
@@ -166,8 +169,10 @@ type Scenario struct {
 
 	// undeployed are earlier Deployments a later Given superseded before a Wait
 	// deployed them; the next Wait deploys them before the newest.
-	undeployed          []pendingDeployment
-	declaredDeployments []DeploymentName
+	undeployed []pendingDeployment
+	// declaredDeployments are every Deployment in declaration order, so a Then
+	// judging every Floor reads the earlier ones too.
+	declaredDeployments []scenario.Deployment
 
 	steps    []Step
 	findings []Finding
@@ -177,11 +182,13 @@ type Scenario struct {
 
 	failed      []string
 	failedZones []string
+	// stoppedPerWhen pairs with the When notes on the Timeline: the k-th set is
+	// the k-th When's.
+	stoppedPerWhen [][]string
 
-	// runningAtTheFailure is derived when a When discards the Placement. A
-	// later When overwrites it, so a Then judges the Failure standing before
-	// it.
-	runningAtTheFailure int
+	// recorded is the Scenario's copy of its Timeline, filled by the recording
+	// goroutine while the Steps run on this one.
+	recorded *timelineCopy
 
 	// A Wait applies what the Givens above it declared, so its cause names a
 	// declaration by the line that wrote it.
@@ -221,8 +228,8 @@ type pendingDeployment struct {
 	declaredAs string
 }
 
-func newScenario(ctx context.Context, provisioned *cluster.SimulatedCluster) *Scenario {
-	return &Scenario{ctx: ctx, provisioned: provisioned}
+func newScenario(ctx context.Context, provisioned *cluster.SimulatedCluster, recorded *timelineCopy) *Scenario {
+	return &Scenario{ctx: ctx, provisioned: provisioned, recorded: recorded}
 }
 
 func (s *Scenario) Given() Given {
@@ -292,6 +299,13 @@ func (s *Scenario) rename(name string) Step {
 func (s *Scenario) carrying(settings []string) Step {
 	last := len(s.steps) - 1
 	s.steps[last].Settings = settings
+
+	return s.steps[last]
+}
+
+func (s *Scenario) reading(lines []string) Step {
+	last := len(s.steps) - 1
+	s.steps[last].Readings = lines
 
 	return s.steps[last]
 }
@@ -508,7 +522,34 @@ func (s *Scenario) declareDeployment(deployment scenario.Deployment, accesses []
 		s.observed, s.settled = scenario.Placement{}, false
 	}
 	s.deployment, s.accesses, s.deploymentDeclaredAs, s.deployed = deployment, accesses, declaredAs, false
-	s.declaredDeployments = append(s.declaredDeployments, DeploymentName(deployment.Name()))
+	s.declaredDeployments = append(s.declaredDeployments, deployment)
+}
+
+// A further call on the newest Deployment's line declares it again, so the
+// newest and its place among every Deployment change together.
+func (s *Scenario) redeclareTheNewest(deployment scenario.Deployment, declaredAs string) {
+	s.deployment, s.deploymentDeclaredAs = deployment, declaredAs
+	s.declaredDeployments[len(s.declaredDeployments)-1] = deployment
+}
+
+func (s *Scenario) declaringAFailureTolerance() []scenario.Deployment {
+	var declaring []scenario.Deployment
+	for _, deployment := range s.declaredDeployments {
+		if _, declares := deployment.FailureTolerance(); declares {
+			declaring = append(declaring, deployment)
+		}
+	}
+
+	return declaring
+}
+
+func (s *Scenario) namesOfTheDeployments() []string {
+	names := make([]string, 0, len(s.declaredDeployments))
+	for _, deployment := range s.declaredDeployments {
+		names = append(names, deployment.Name())
+	}
+
+	return names
 }
 
 // Given declares one part of the world a Scenario runs in, and ends the
@@ -533,7 +574,8 @@ func (g Given) Zones(zones int, pools ...node.DeclaredPool) DeclaredTopology {
 
 // Deployment declares the Pod replicas the Scenario deploys. A Deployment declared
 // after another is deployed beside it by the next Wait, every Step after it
-// reads it alone, and a name already declared ends the Scenario.
+// reads it alone, EnoughPodsStayedReady aside, and a name already declared ends
+// the Scenario.
 //
 // The Pods ask for what the line asks, applied after the specification, so it
 // stands over a Request the specification holds; the empty pod.Settings asks for
@@ -555,7 +597,7 @@ func (g Given) Deployment(name DeploymentName, replicas int, asks pod.Customizat
 	}
 	step = g.scenario.carrying(declares.Carries())
 
-	if slices.Contains(g.scenario.declaredDeployments, name) {
+	if slices.Contains(g.scenario.namesOfTheDeployments(), string(name)) {
 		g.scenario.end(step, fmt.Errorf("a Scenario declares each Deployment once, "+
 			"so the Deployment %q declared again is refused", name))
 
@@ -582,22 +624,40 @@ type DeclaredDeployment struct {
 	declares pod.Specification
 }
 
-// SurvivesLosingPods declares the most Pods this Deployment survives losing to
-// a Failure.
-func (d DeclaredDeployment) SurvivesLosingPods(pods int) DeclaredDeployment {
+// FailureTolerance is the Zones or Nodes a Deployment survives losing to a
+// Failure, written as Zones(n) or Nodes(n).
+type FailureTolerance struct {
+	tolerance scenario.FailureTolerance
+}
+
+// Zones names a count rather than the Zones, since which Zones fail is the
+// When's to pick.
+func Zones(count int) FailureTolerance {
+	return FailureTolerance{tolerance: scenario.FailureTolerance{Lost: scenario.ZonesLost, Count: count}}
+}
+
+// Nodes names a count rather than the Nodes, since which Nodes fail is the
+// When's to pick.
+func Nodes(count int) FailureTolerance {
+	return FailureTolerance{tolerance: scenario.FailureTolerance{Lost: scenario.NodesLost, Count: count}}
+}
+
+// SurvivesLosing sets this Deployment's Floor from the Topology declared above
+// it, and keeps every replica deployed: declaring it scales nothing.
+func (d DeclaredDeployment) SurvivesLosing(lost FailureTolerance) DeclaredDeployment {
 	if d.scenario.cause != nil {
 		return d
 	}
 
-	step := d.scenario.rename(d.named() + ", surviving the loss of " + counted(pods, "Pod", "Pods"))
+	step := d.scenario.rename(d.named() + ", surviving the loss of " + lost.tolerance.Reads())
 
-	declared, err := d.scenario.deployment.WithFailureTolerance(pods)
+	declared, err := d.scenario.deployment.WithFailureTolerance(lost.tolerance, d.scenario.topology)
 	if err != nil {
 		d.scenario.end(step, err)
 
 		return d
 	}
-	d.scenario.deployment, d.scenario.deploymentDeclaredAs = declared, step.Name
+	d.scenario.redeclareTheNewest(declared, step.Name)
 
 	return d
 }
@@ -817,16 +877,11 @@ func (s *Scenario) stop(at Step, nodes []string) bool {
 		}
 		s.failed = append(s.failed, node)
 	}
-	s.runningAtTheFailure = s.podsKeptRunning(s.observed)
+	s.stoppedPerWhen = append(s.stoppedPerWhen, slices.Clone(nodes))
 
 	s.observed, s.settled = scenario.Placement{}, false
 
 	return true
-}
-
-// Both moments a Failure tolerance is judged at count Pods this way.
-func (s *Scenario) podsKeptRunning(observed scenario.Placement) int {
-	return len(observed.PodsRunningApartFrom(s.failed))
 }
 
 func nodesFailing(count int) string {
@@ -960,72 +1015,65 @@ func (t Then) NoPodsInTheFailedZones() {
 	})
 }
 
-const (
-	atTheMomentOfTheFailure    = "at the moment of the Failure"
-	onceThePlacementHadSettled = "once the Placement had settled"
-)
+const enoughPodsStayedReady = "enough Pods stayed Ready from the first Failure"
 
-// Survived judges the Pods lost against the declared Failure tolerance at the
-// moment of the Failure and once the Placement has settled again. A Pod is lost
-// while not Running, Pending for want of room included. A Deployment declaring
-// no Failure tolerance, or a Scenario with no When before this Then, ends the
-// Scenario.
-func (t Then) Survived() {
-	step, open := t.scenario.record(ThenStep, "survives losing the Pods its Failure tolerance declares")
+// EnoughPodsStayedReady judges every Deployment declaring a Failure tolerance at
+// every moment from the first Failure to this Then, reading the Timeline rather
+// than the Settled Placement. One Deployment below its Floor at any moment
+// records a Finding naming it. A Scenario where no Deployment declares a Failure
+// tolerance, or no When ran before this Then, ends at it.
+func (t Then) EnoughPodsStayedReady() {
+	step, open := t.scenario.record(ThenStep, enoughPodsStayedReady)
 	if !open {
 		return
 	}
 
-	tolerance, judgeable := t.toleranceToJudge(step)
+	readings, judgeable := t.floorsToJudge(step)
 	if !judgeable {
 		return
 	}
-
-	settled, observed := t.scenario.placement(step)
-	if !observed {
-		return
+	lines := make([]string, 0, len(readings))
+	for _, reading := range readings {
+		lines = append(lines, reading.Line())
 	}
-	replicas := t.scenario.deployment.Replicas()
-	atTheFailure := replicas - t.scenario.runningAtTheFailure
-	onceSettled := replicas - t.scenario.podsKeptRunning(settled)
 
-	judged := t.scenario.rename(fmt.Sprintf("survives losing %s: %d lost at the Failure, %d once Settled",
-		counted(tolerance, "Pod", "Pods"), atTheFailure, onceSettled))
-
-	t.judgeAt(judged, func(_ scenario.Placement, judging expect.T) {
-		expect.Expect(judging, atTheFailure).To(lostAtMost(tolerance, atTheMomentOfTheFailure))
-		expect.Expect(judging, onceSettled).To(lostAtMost(tolerance, onceThePlacementHadSettled))
-	})
+	judging := &findings{scenario: t.scenario, step: t.scenario.reading(lines)}
+	for _, reading := range readings {
+		expect.Expect(judging, reading).To(keptItsFloor())
+	}
 }
 
-func (t Then) toleranceToJudge(step Step) (tolerance int, judgeable bool) {
-	tolerance, declared := t.scenario.deployment.FailureTolerance()
+func (t Then) floorsToJudge(step Step) ([]scenario.FloorReading, bool) {
+	judged := t.scenario.declaringAFailureTolerance()
 	switch {
-	case !declared:
-		t.scenario.end(step, errors.New("this Then judges the most Pods a Deployment survives losing, "+
-			"and this Deployment declares no Failure tolerance"))
+	case len(judged) == 0:
+		t.scenario.end(step, errors.New("this Then judges every Deployment declaring a Failure tolerance, "+
+			"and no Deployment declares one"))
 
-		return 0, false
-	case len(t.scenario.failed) == 0:
-		t.scenario.end(step, errors.New("this Then judges a Failure tolerance through a Failure, "+
+		return nil, false
+	case len(t.scenario.stoppedPerWhen) == 0:
+		t.scenario.end(step, errors.New("this Then judges each Floor from the first Failure, "+
 			"and no When ran before it"))
 
-		return 0, false
+		return nil, false
 	}
 
-	return tolerance, true
+	readings, err := scenario.NewTimeline(t.scenario.recorded.entries()).
+		Floors(judged, t.scenario.namesOfTheDeployments(), t.scenario.stoppedPerWhen)
+	if err != nil {
+		t.scenario.end(step, err)
+
+		return nil, false
+	}
+
+	return readings, true
 }
 
-// lostAtMost lives here rather than in internal/expect, which keeps its general
-// matchers alone. Each moment exceeded is its own Finding.
-func lostAtMost(tolerance int, moment string) expect.Matcher[int] {
-	return func(lost int) (string, bool) {
-		if lost <= tolerance {
-			return "", true
-		}
-
-		return fmt.Sprintf("%s the Deployment lost %s, beyond the %s its Failure tolerance declares",
-			moment, counted(lost, "Pod", "Pods"), counted(tolerance, "Pod", "Pods")), false
+// keptItsFloor lives here rather than in internal/expect, which keeps its general
+// matchers alone.
+func keptItsFloor() expect.Matcher[scenario.FloorReading] {
+	return func(reading scenario.FloorReading) (string, bool) {
+		return reading.Fall(), reading.Kept()
 	}
 }
 

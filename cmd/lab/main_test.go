@@ -67,8 +67,11 @@ const (
 // A declaration renames the line it is written on, so the renamed Given is the
 // one a Failure Scenario reports.
 const (
-	theFailureToleranceDeclared = resilientPlacementDeclared + ", surviving the loss of 3 Pods"
-	theSurvivalJudged           = "Then survives losing 3 Pods: "
+	theLossOfOneNodeDeclared    = resilientPlacementDeclared + ", surviving the loss of 1 Node"
+	theLossOfOneZoneDeclared    = resilientPlacementDeclared + ", surviving the loss of 1 Zone"
+	theLossOfThreeNodesDeclared = resilientPlacementDeclared + ", surviving the loss of 3 Nodes"
+
+	enoughPodsStayedReadyJudged = "Then enough Pods stayed Ready from the first Failure"
 )
 
 const aSettingCarried = "\n    "
@@ -103,7 +106,9 @@ const (
 	oneNodeFailsReported        = "When 1 Node fails, " + theNodePickedToFail
 	noPodOnTheFailedNodesJudged = "Then no Pod on the Nodes that failed"
 
-	survivedWhenTheNodeStoppedJudged = theSurvivalJudged + "1 lost at the Failure, 0 once Settled"
+	// One Node holds one of the nine Pods, so the Floor is eight and the
+	// Failure reaches it.
+	theFloorKeptWhenTheNodeStopped = "checkout kept its Floor of 8 Ready Pods through the loss of 1 Node: lowest 8 of 9 at +"
 )
 
 // A lost Zone takes three of the nine Pods, so exactly the minimum is left
@@ -114,7 +119,7 @@ const (
 	oneZoneFailsReported        = "When 1 Zone fails, " + theZonePickedToFail
 	noPodInTheFailedZonesJudged = "Then no Pod in the Zones that failed"
 
-	survivedWhenTheZoneStoppedJudged = theSurvivalJudged + "3 lost at the Failure, 0 once Settled"
+	theFloorKeptWhenTheZoneStopped = "checkout kept its Floor of 6 Ready Pods through the loss of 1 Zone: lowest 6 of 9 at +"
 )
 
 // Each Pod asks for more than half of what a Node holds, so the six Nodes still
@@ -124,11 +129,11 @@ const (
 	thePlacementSettledAwaited              = "Wait for the Placement Settled, reached in "
 	threePodsPendingJudged                  = "Then 3 Pods Pending"
 
-	survivedWithNoRoomLeftJudged = theSurvivalJudged + "3 lost at the Failure, 3 once Settled"
+	theFloorKeptWithNoRoomLeft = theFloorKeptWhenTheZoneStopped
 )
 
-// The spot Nodes hold three of the nine Pods, so the Failure costs exactly the
-// three Pods the Deployment survives losing.
+// The spot Nodes are three of the nine Nodes, so the Failure costs exactly the
+// three Pods the Deployment's Floor admits.
 const (
 	spotNodesStopRespondingReported = aScenarioHeading + "spot-nodes-that-stop-responding"
 	theOnDemandAndSpotNodesDeclared = "Given a Topology of 3 Zones of " +
@@ -137,7 +142,7 @@ const (
 		"a NodePool spot of 1 Standard Node holding 16 cpu, 64Gi memory and 10 Pods each, labelled capacity-type=spot"
 	theSpotNodesFailReported = "When Nodes labelled capacity-type=spot fail, " +
 		"zone-1-node-3, zone-2-node-3, zone-3-node-3"
-	survivedWhenTheSpotNodesStoppedJudged = theSurvivalJudged + "3 lost at the Failure, 0 once Settled"
+	theFloorKeptWhenTheSpotNodesStopped = "checkout kept its Floor of 6 Ready Pods through the loss of 3 Nodes: lowest 6 of 9 at +"
 )
 
 // Each Zone holds one on-demand and one spot Node, so six Pods spread evenly
@@ -388,14 +393,13 @@ func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFai
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, nodeStopsRespondingReported)
-	reportShows(t, reported, theFailureToleranceDeclared+resilientPlacementCarries()+theStandardPodCarried)
+	reportShows(t, reported, theLossOfOneNodeDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneNodeFailsReported)
 	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, noPodOnTheFailedNodesJudged)
 	reportShows(t, reported, threePodsPerZoneJudged)
-	reportShows(t, reported, survivedWhenTheNodeStoppedJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
@@ -406,13 +410,12 @@ func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *tes
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, zoneStopsRespondingReported)
-	reportShows(t, reported, theFailureToleranceDeclared+resilientPlacementCarries()+theStandardPodCarried)
+	reportShows(t, reported, theLossOfOneZoneDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneZoneFailsReported)
 	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, noPodInTheFailedZonesJudged)
-	reportShows(t, reported, survivedWhenTheZoneStoppedJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
@@ -422,14 +425,13 @@ func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndTh
 
 	reportShows(t, reported, noRoomAfterAZoneStopsRespondingReported)
 	reportShows(t, reported, theNodeCapacityDeclared)
-	reportShows(t, reported, theFailureToleranceDeclared+resilientPlacementCarries()+theRequestCarried)
+	reportShows(t, reported, theLossOfOneZoneDeclared+resilientPlacementCarries()+theRequestCarried)
 	reportShows(t, reported, onePodPerNodeJudged)
 	reportShows(t, reported, oneZoneFailsReported)
 	reportShows(t, reported, thePlacementSettledAwaited)
 	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, noPodInTheFailedZonesJudged)
 	reportShows(t, reported, threePodsPendingJudged)
-	reportShows(t, reported, survivedWithNoRoomLeftJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
@@ -438,14 +440,37 @@ func TestSpotNodesThatStopResponding_ShouldSurviveLosingThreePodsAndRestoreNineP
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), spotNodesStopRespondingReported)
 
 	reportShows(t, reported, theOnDemandAndSpotNodesDeclared)
-	reportShows(t, reported, theFailureToleranceDeclared+resilientPlacementCarries()+theStandardPodCarried)
+	reportShows(t, reported, theLossOfThreeNodesDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, onePodPerNodeJudged)
 	reportShows(t, reported, theSpotNodesFailReported)
 	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, threePodsPerZoneJudged)
 	reportShows(t, reported, noPodOnTheFailedNodesJudged)
-	reportShows(t, reported, survivedWhenTheSpotNodesStoppedJudged)
 	reportLacks(t, reported, aFindingReported)
+}
+
+// Each Failure Scenario's own test asserts its Placement outcome; this one
+// reads every Floor judged beneath its Then.
+func TestEveryFailureScenario_ShouldDeclareWhatItsWhenFailsAndKeepEveryFloor(t *testing.T) {
+	t.Parallel()
+	reported := theRunOfEveryScenario(t)
+	cases := map[string]struct {
+		kept string
+	}{
+		nodeStopsRespondingReported:             {kept: theFloorKeptWhenTheNodeStopped},
+		zoneStopsRespondingReported:             {kept: theFloorKeptWhenTheZoneStopped},
+		noRoomAfterAZoneStopsRespondingReported: {kept: theFloorKeptWithNoRoomLeft},
+		spotNodesStopRespondingReported:         {kept: theFloorKeptWhenTheSpotNodesStopped},
+	}
+
+	for heading, one := range cases {
+		t.Run(heading, func(t *testing.T) {
+			section := theScenarioSectionHeaded(t, reported, heading)
+
+			reportShows(t, section, enoughPodsStayedReadyJudged+aSettingCarried+one.kept)
+			reportLacks(t, section, aFindingReported)
+		})
+	}
 }
 
 func TestSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerLabelValue(t *testing.T) {

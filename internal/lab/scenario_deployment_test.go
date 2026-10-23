@@ -86,7 +86,7 @@ func aClusterFor(t *testing.T, scenarioName string) *cluster.SimulatedCluster {
 func aScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario {
 	t.Helper()
 
-	return newScenario(t.Context(), aClusterFor(t, scenarioName))
+	return newScenario(t.Context(), aClusterFor(t, scenarioName), &timelineCopy{})
 }
 
 func aRecordedScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario {
@@ -110,7 +110,7 @@ func aRecordedScenarioOnAClusterFor(t *testing.T, scenarioName string) *Scenario
 		t.Fatalf("record the Timeline of %s: %v", provisioned.Name(), err)
 	}
 
-	return newScenario(t.Context(), provisioned)
+	return newScenario(t.Context(), provisioned, &timelineCopy{})
 }
 
 // How long a Wait held varies from run to run, so a comparison pins only that
@@ -474,7 +474,7 @@ func TestABoardThatCannotBeObserved_ShouldBeNamedOnItsWaitWithTheCause(t *testin
 	shared := aClusterFor(t, theUnobservedBoardScenario)
 	gone, cancel := context.WithCancel(t.Context())
 	cancel()
-	waiting := newScenario(gone, shared)
+	waiting := newScenario(gone, shared, &timelineCopy{})
 
 	waiting.Given().Zones(twoZones, theGeneralNodePool()).WaitFor().AllNodesReady()
 

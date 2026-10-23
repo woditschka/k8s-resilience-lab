@@ -272,13 +272,16 @@ func notFiled(outcome lab.Outcome) error {
 	return fmt.Errorf("the Timeline of the Scenario %s was not filed: %w", outcome.Name, outcome.NotFiled)
 }
 
-// A Deployment's settings are reported one level deeper, so what a Named setting
-// stands for stays visible.
+// A Deployment's settings, and the Floor each Deployment kept or fell below, are
+// reported one level deeper, so what a Named setting stands for stays visible.
 func writeSteps(part *reportPart, outcome lab.Outcome) {
 	for _, step := range outcome.Steps {
 		part.addf("  %s", step)
 		for _, setting := range step.Settings {
 			part.addf("    %s", setting)
+		}
+		for _, reading := range step.Readings {
+			part.addf("    %s", reading)
 		}
 		if step.Kind == lab.WaitStep {
 			writeBoard(part, step)

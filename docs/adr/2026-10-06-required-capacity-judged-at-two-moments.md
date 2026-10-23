@@ -1,6 +1,6 @@
-# A Deployment declares its Failure tolerance, judged at the moment of the Failure and once Settled
+# A Deployment declares the Zones or Nodes it survives losing, judged over the whole Timeline
 
-**Status:** Accepted, amended 2026-10-22: the declaration counts the Pods lost, `SurvivesLosingPods`, and its Then is `Survived`, option 9
+**Status:** Accepted, amended 2026-10-22: the declaration counted the Pods lost, option 9. Amended 2026-10-23: it counts Zones or Nodes, sets a Floor, and one Then judges the whole Timeline, options 10, 12, 14 and 16
 
 ## Context
 
@@ -8,11 +8,11 @@ The owner named the property the lab is ultimately for: a cluster serves its Req
 
 When this was decided, every Then awaited the Settled Placement, so the moment a Failure was injected has no observation of its own. The control plane goes on reporting a failed Node's Pods Running for the eviction wait, per [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md). An observation taken right after the Failure would therefore read every Pod Running and prove nothing.
 
-The When already holds two things at that moment: the Settled Placement from before the Failure, and the Nodes it is stopping.
-
 A Workload line declares one predefined Pod specification and carries nothing after it, per [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md). A Required Capacity is optional: Resilient placement declares none.
 
-On 2026-10-22 the owner read `.RequiredCapacity(lab.Pods(6))` and asked: "what capacity memor,cpu, why 6?", then: "i still don't get this line dreat 0 standard pods then reduce to 6?" The owner chose to state what a Failure takes, written `.SurvivesLosingPods(3)`, with Failure tolerance as the term. The Workload became a Deployment, per [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md).
+On 2026-10-22 the owner read `.RequiredCapacity(lab.Pods(6))` and asked: "what capacity memor,cpu, why 6?" The owner chose to state what a Failure takes, written `.SurvivesLosingPods(3)`, judged by `Survived` at the moment of the Failure and once Settled.
+
+On 2026-10-23 the owner asked to "think bigger": "we can loose 33% and still serve (1 AZ)". The assertion "shall check the whole timeline if all pods at all times had 100 - 33%". The owner chose `SurvivesLosing(Zones(n))` and `SurvivesLosing(Nodes(n))` on the Deployment line, and found that `Survived` "doesnt carry the whole timeline perspectve". The owner named the Then `EnoughPodsStayedReady`, ruled "A Pod counts while Ready", and "One failing promise fails the whole Then".
 
 ## Options Considered
 
@@ -27,41 +27,62 @@ On 2026-10-22 the owner read `.RequiredCapacity(lab.Pods(6))` and asked: "what c
 What the declaration counts:
 
 8. **The fewest Pods kept Running**, `RequiredCapacity(lab.Pods(6))`, the 2026-10-06 form.
-9. **The most Pods lost**, `SurvivesLosingPods(3)`, a Pod not Running at a moment lost there.
+9. **The most Pods lost**, `SurvivesLosingPods(3)`, the 2026-10-22 form.
+10. **The Zones or Nodes lost**, `SurvivesLosing(lab.Zones(1))` or `SurvivesLosing(lab.Nodes(1))`.
+11. **A percentage of the replicas**, the owner's first sketch.
+
+Where the Floor comes from:
+
+12. **The replicas and the Topology**, less the most Pods the declared Zones or Nodes hold under an even spread.
+13. **Where the Pods landed**, read from the Placement before the Failure.
+
+What the Then reads:
+
+14. **Every moment from the first Failure**, replayed from the Timeline the run records.
+15. **The two moments** of options 2 and 7.
+
+How a Then reads the Timeline before the run ends:
+
+16. **The Scenario keeps a copy** of each entry the recording delivers to its sink.
+17. **The recording answers a query** from its owning goroutine.
 
 ## Decision
 
-Options 2, 4, 7 and 9.
+Options 4, 10, 12, 14 and 16.
 
-The Deployment Step returns the Deployment it declared, as the Zones Step returns the Topology it declared. `SurvivesLosingPods` is written on that value with a bare count and renames the Given line to the loss it names. `scenario.Deployment` holds the Failure tolerance as an optional attribute routed through its one constructor. It refuses a tolerance below zero and one of every replica or more, and accepts zero.
+The Deployment Step returns the Deployment it declared. `SurvivesLosing` takes a `lab.FailureTolerance`, written `lab.Zones(n)` or `lab.Nodes(n)`, and renames the Given line to the loss it names. `scenario.Deployment` holds the tolerance and its Floor through its one constructor, given the Topology declared before it.
 
-The Deployment-line rule admits a line ending at one further call of the Deployment's own closed set, `SurvivesLosingPods` today. A setting of the Scenario's own, a further argument, and a Topology call written after the Deployment Step stay refused. This narrows the specification ADR's consequence that the rule admits nothing after the Step.
+The Floor is the replicas less the most Pods n of the Topology's Zones, or n of its Nodes, hold when the replicas spread evenly over all of them. Nine replicas over three Zones of three Nodes keep six through one Zone and eight through one Node. A count below zero, or reaching the Topology's own Zones or Nodes, is refused at that Given. A count of zero is accepted, its Floor every replica.
 
-The When derives what the Failure cost from the Placement it discards: the Pods that observation found Running on Nodes other than the ones being stopped. The Step surface keeps that one count, which a later When overwrites.
+The Deployment-line rule admits a line ending at one further call of the Deployment's own closed set, `SurvivesLosing` today. This narrows the specification ADR's consequence that the rule admits nothing after the Step. `lab.Zones` and `lab.Nodes` name which domain a count counts, narrowing the bare-count rule of [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md) for this one call.
 
-One Then, `Survived`, judges the tolerance at both moments. The Pods lost at a moment are the replicas less the Pods Running there, so a Pod on a stopped Node or Pending for want of room is lost. The Then renames its Step to the tolerance and the two losses, so a run states them whether met or not. A moment losing more is a Finding naming that moment, reported through a matcher the Step surface declares over `expect.Matcher`.
+The Scenario keeps every Deployment declaring a tolerance. `EnoughPodsStayedReady` judges each of them, narrowing [the taint ADR](2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md)'s rule that a Then judges the newest Deployment alone. A Then with no When before it, or no declaring Deployment, ends the Scenario there.
 
-Option 1 races the control plane and reads a first moment that proves nothing. Option 3 makes an optional declaration mandatory on every Deployment line. Option 5 reads apart from the Pods it qualifies, against the owner's placing it on the Deployment. Option 6 reads as two Steps for one judgement. Option 8 counts the survivors, which reads as a cpu or memory capacity and as a scale-down the owner could not follow, while the owner chose to state what a Failure takes.
+The Then replays every entry received so far. It counts a Deployment's Pods Ready at each entry from the first When's note onward. A Pod counts while its latest entry reads Running. The lab's pod-ready Stage sets Running and Ready together, per [ADR: The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md). A Pod on a Node a When stopped counts as lost from that When's note, whatever later entries report.
+
+Beneath the Then, one line per judged Deployment states kept or fell, its Floor and declared loss. It adds the lowest Ready count, when first reached and how long it lasted. A Deployment below its Floor at any moment records one Finding, for its fall reaching the lowest count. The Finding states how low, the fall's start and span, the Pods lost against the most declared, and those Pods with their Nodes. A fall still open at the Then lasts "for the rest of the Scenario".
+
+Option 1 races the control plane and reads a first moment that proves nothing. Option 3 makes an optional declaration mandatory on every Deployment line. Option 5 reads apart from the Pods it qualifies. Options 6, 7 and 15 judge two moments, so a dip between them passes unseen. Option 8 reads as a cpu or memory capacity. Option 9 states a count the reader must derive from the Topology, where the owner thinks in Zones. Option 11 rounds, and still hides which loss it means. Option 13 lets a skewed Placement lower its own Floor. Option 17 adds a query channel to a goroutine that takes notes alone.
 
 ## Consequences
 
-The first moment is a derivation and not an observation. It holds because the Placement before a Failure is Settled, which accounts for every declared Pod.
+The judgement reads the Timeline the lab already records, so every moment is an observation and no derivation of the first moment remains.
 
-A Scenario with several Whens judges the latest Failure at the first moment, while the Thens reading what failed judge every Failure so far.
+A Floor derives from every Zone or Node of the Topology. Which Nodes count for a Deployment confined to one NodePool stays an Open Question of `docs/prd.md`.
+
+Running stands for Ready while the lab owns the pod-ready Stage. A Stage setting them apart records a Pod's readiness in its entry first.
 
 The rename precedes the judgement, because a Finding carries the Step as it was recorded.
 
-Resilient placement declares no Failure tolerance, so the further call is exercised by the two Failure Scenarios and by the rule's own cases.
+`internal/expect` keeps its general matchers alone. The reading is a pure function in `internal/scenario`, and its wording stays beside the Step wording in `internal/lab`.
 
-A later slice judging spread or restore time at the moment of the Failure takes the same derivation, or records its own reason to observe the cluster instead.
+A declared Failure tolerance no When exercises is a declaration the run does not prove.
 
-`internal/expect` keeps its general matchers alone, and the wording naming a moment stays beside the Step wording in `internal/lab`.
-
-A declared Failure tolerance that no When exercises is a declaration the run does not prove; the Failures a Deployment declares it survives stay an Open Question of `docs/prd.md`.
+The Then reads the copy while the recording runs, with no barrier of its own. Every Then follows a Wait, and every Wait returns a Placement two observations a poll interval apart agreed on. The changes it reflects therefore reached the API server a poll interval before the Then, far above a stream's delivery on the loopback. The Wait narratives rely on the same margin, per [ADR: A Timeline is recorded from the API's watch stream and filed as JSON Lines](2026-10-05-timeline-from-the-watch-stream.md). A delivery slower than that reads as a Pod not yet Ready.
 
 ## Implementation
 
-**Requirements:** REQ-SIM-010, REQ-SIM-025
+**Requirements:** REQ-SIM-027, superseding REQ-SIM-010; REQ-SIM-025
 
 ## References
 
@@ -69,4 +90,5 @@ A declared Failure tolerance that no When exercises is a declaration the run doe
 - [ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md)
 - [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
 - [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md)
-- [ADR: A Scenario writes its own Wait, with its Given or as a Step of its own](2026-10-07-a-scenario-writes-its-own-wait.md) — where each moment's observation comes from, now that a Scenario writes its Wait
+- [ADR: A Timeline is recorded from the API's watch stream and filed as JSON Lines](2026-10-05-timeline-from-the-watch-stream.md) — the record the Then replays
+- [ADR: A Scenario writes its own Wait, with its Given or as a Step of its own](2026-10-07-a-scenario-writes-its-own-wait.md)

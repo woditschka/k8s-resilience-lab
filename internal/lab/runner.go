@@ -105,6 +105,43 @@ func givenTheirNarratives(steps []Step, narratives []scenario.WaitNarrative) []S
 	return narrated
 }
 
+// timelineCopy is written by the recording goroutine and read by a Then on the
+// Scenario's, so both go through its lock.
+type timelineCopy struct {
+	guard  sync.Mutex
+	copied []scenario.Entry
+}
+
+func (c *timelineCopy) Write(entry scenario.Entry) {
+	c.guard.Lock()
+	defer c.guard.Unlock()
+
+	c.copied = append(c.copied, entry)
+}
+
+// A Scenario holding no copy reads an empty Timeline.
+func (c *timelineCopy) entries() []scenario.Entry {
+	if c == nil {
+		return nil
+	}
+
+	c.guard.Lock()
+	defer c.guard.Unlock()
+
+	return slices.Clone(c.copied)
+}
+
+// recordingInto writes each entry into the Timeline file and the Scenario's copy.
+type recordingInto struct {
+	filed  cluster.EntrySink
+	copied *timelineCopy
+}
+
+func (r recordingInto) Write(entry scenario.Entry) {
+	r.filed.Write(entry)
+	r.copied.Write(entry)
+}
+
 // Carried pairs a Scenario's Outcome with the lab's own failure while carrying
 // it out: a cluster it could not provision, watch or remove, or a panic.
 type Carried struct {
@@ -265,11 +302,12 @@ func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario
 		}
 	}()
 
-	if err := provisioned.Record(ctx, filed); err != nil {
+	copied := &timelineCopy{}
+	if err := provisioned.Record(ctx, recordingInto{filed: filed, copied: copied}); err != nil {
 		return Outcome{Name: name}, err
 	}
 
-	running := newScenario(ctx, provisioned)
+	running := newScenario(ctx, provisioned, copied)
 	if held != nil {
 		running.haltsAtTheFirstWhen = true
 		// Deferred after the removal, so it runs before it: no observation

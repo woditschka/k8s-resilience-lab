@@ -138,24 +138,6 @@ func (p Placement) PodsStarting() []Pod {
 	return starting
 }
 
-// PodsRunningApartFrom is what a Deployment kept at the moment a Failure stopped
-// those Nodes. An unplaced Pod is among none of them.
-func (p Placement) PodsRunningApartFrom(nodes []string) []Pod {
-	stopped := make(map[string]struct{}, len(nodes))
-	for _, node := range nodes {
-		stopped[node] = struct{}{}
-	}
-
-	var kept []Pod
-	for _, pod := range p.pods {
-		if _, onAStoppedNode := stopped[pod.Node]; pod.Phase == PodRunning && pod.Placed() && !onAStoppedNode {
-			kept = append(kept, pod)
-		}
-	}
-
-	return kept
-}
-
 // PodsPerNode still counts a Pod on a Node this observation does not hold under
 // that Node's name, because the report states what was observed.
 func (p Placement) PodsPerNode() map[string]int {

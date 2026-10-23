@@ -43,16 +43,18 @@ const (
 
 	noNodeDeclared = 0
 
-	// theFailureTolerance is the one Pod a Node holds, so one Node stopping
-	// loses exactly the tolerance.
-	theFailureTolerance = onePodLeftBehind
+	// A Topology of two Zones of two Nodes, so one Node holds one Pod of an
+	// even spread and one Zone two.
+	floorSurvivingOneNode = podsOverEveryNode - podsPerNodeWhenEven
+	floorSurvivingOneZone = podsOverEveryNode - podsPerZoneWhenEven
 
-	aToleranceNoDeploymentCouldJudge = podsOverEveryNode
+	oneLost = 1
 
-	// podsLostBeyondTheTolerance are left Pending once Settled, so a Pod
-	// Pending for want of room counts as lost.
-	podsLostBeyondTheTolerance = theFailureTolerance + 1
-	podsRunningBeyondTheLoss   = podsOverEveryNode - podsLostBeyondTheTolerance
+	// A loss reads as a report line states it, after the count it is written
+	// with.
+	oneNodeLost   = "1 Node"
+	oneZoneLost   = "1 Zone"
+	everyZoneLost = "2 Zones"
 
 	noNodesPerZone = 0
 	noPods         = 0
@@ -65,11 +67,7 @@ const (
 
 	oneNodeFailing = 1
 
-	theToleranceNeverDeclared = "declares no Failure tolerance"
-
-	// noMomentNamed makes a Finding that named neither moment visible in the
-	// comparison rather than missing from it.
-	noMomentNamed = "no moment"
+	theToleranceNeverDeclared = "no Deployment declares one"
 
 	noSpecificationAtAll = ""
 
@@ -135,11 +133,10 @@ func aScenarioAfterFailingWithNoWaitSince(placed scenario.Placement, stopped str
 	return &Scenario{observed: placed, failed: []string{stopped}}
 }
 
-func aScenarioAfterFailingWhichKept(placed scenario.Placement, kept int, stopped ...string) *Scenario {
-	failing := aScenarioAfterFailing(placed, stopped...)
-	failing.runningAtTheFailure = kept
-
-	return failing
+// The copy stands for the Timeline a recording delivered, so a Then judging
+// every Floor reads it without a cluster.
+func aScenarioRecording(stopped []string, recorded ...scenario.Entry) *Scenario {
+	return &Scenario{stoppedPerWhen: [][]string{stopped}, recorded: &timelineCopy{copied: recorded}}
 }
 
 func aScenarioAfterFailingAZone(placed scenario.Placement, stopped string) *Scenario {
@@ -218,12 +215,28 @@ func aDeploymentDeclaringResilientPlacementOf(t *testing.T, pods int) scenario.D
 	return deployment
 }
 
-func aDeploymentSurvivingTheLossOf(t *testing.T, pods, tolerance int) scenario.Deployment {
+func aDeploymentSurvivingTheLossOf(t *testing.T, pods int, lost FailureTolerance, against scenario.Topology) scenario.Deployment {
 	t.Helper()
 
-	deployment, err := aDeploymentDeclaringResilientPlacementOf(t, pods).WithFailureTolerance(tolerance)
+	return aDeploymentNamedSurvivingTheLossOf(t, someDeploymentName, pods, lost, against)
+}
+
+func aDeploymentNamedSurvivingTheLossOf(t *testing.T, name DeploymentName, pods int, lost FailureTolerance,
+	against scenario.Topology,
+) scenario.Deployment {
+	t.Helper()
+
+	specification, err := resilientPlacement().Declared()
 	if err != nil {
-		t.Fatalf("declare a Failure tolerance of %d Pods: %v", tolerance, err)
+		t.Fatalf("define Resilient placement: %v", err)
+	}
+	declared, err := scenario.NewDeployment(string(name), pods, specification)
+	if err != nil {
+		t.Fatalf("build a Deployment %s of %d replicas declaring Resilient placement: %v", name, pods, err)
+	}
+	deployment, err := declared.WithFailureTolerance(lost.tolerance, against)
+	if err != nil {
+		t.Fatalf("declare a Failure tolerance of %s: %v", lost.tolerance.Reads(), err)
 	}
 
 	return deployment
@@ -271,16 +284,6 @@ func onePodLeftOnTheFailedNodeOf(topology scenario.Topology, stopped string) sce
 	leftBehind := scenario.Pod{Name: podLeftOnTheFailedNode, Node: stopped, Phase: scenario.PodRunning}
 
 	return scenario.NewPlacement(responding, append(moved, leftBehind))
-}
-
-func podsLeftPendingBeyondTheToleranceOn(topology scenario.Topology, stopped string) scenario.Placement {
-	responding := theNodesStillRespondingIn(topology, stopped)
-	placed := podsRunningOver(responding, podsRunningBeyondTheLoss)
-	for at := range podsLostBeyondTheTolerance {
-		placed = append(placed, scenario.Pod{Name: fmt.Sprintf("%s-%d", podLeftPending, at), Phase: scenario.PodPending})
-	}
-
-	return scenario.NewPlacement(responding, placed)
 }
 
 // The first Zone the Topology derives is the pick internal/scenario makes.
@@ -399,14 +402,22 @@ func topologyStepHoldingCapacity(zones, nodesPerZone int, capacity string) Step 
 }
 
 func deploymentStepOf(pods int, declaring string) Step {
+	return deploymentStepNamedOf(someDeploymentName, pods, declaring)
+}
+
+func deploymentStepNamedOf(name DeploymentName, pods int, declaring string) Step {
 	return Step{
 		Kind: GivenStep,
-		Name: fmt.Sprintf("a Deployment %s of %d replicas declaring %s", someDeploymentName, pods, declaring),
+		Name: fmt.Sprintf("a Deployment %s of %d replicas declaring %s", name, pods, declaring),
 	}
 }
 
 func resilientPlacementDeploymentStepOf(pods int) Step {
-	return carrying(deploymentStepOf(pods, resilientPlacementReads()), resilientPlacementCarries()...)
+	return resilientPlacementDeploymentStepNamed(someDeploymentName, pods)
+}
+
+func resilientPlacementDeploymentStepNamed(name DeploymentName, pods int) Step {
+	return carrying(deploymentStepNamedOf(name, pods, resilientPlacementReads()), resilientPlacementCarries()...)
 }
 
 func resilientPlacementReads() string {
@@ -448,19 +459,15 @@ func resilientPlacementCarries() []string {
 }
 
 // Naming the Failure tolerance renames the line rather than adding one.
-func deploymentStepSurvivingTheLossOf(pods, tolerance int) Step {
-	surviving := resilientPlacementDeploymentStepOf(pods)
-	surviving.Name = fmt.Sprintf("%s, surviving the loss of %s", surviving.Name, podsCounted(tolerance))
-
-	return surviving
+func deploymentStepSurvivingTheLossOf(pods int, lost string) Step {
+	return namedDeploymentStepSurvivingTheLossOf(someDeploymentName, pods, lost)
 }
 
-func podsCounted(pods int) string {
-	if pods == 1 {
-		return "1 Pod"
-	}
+func namedDeploymentStepSurvivingTheLossOf(name DeploymentName, pods int, lost string) Step {
+	surviving := resilientPlacementDeploymentStepNamed(name, pods)
+	surviving.Name = fmt.Sprintf("%s, surviving the loss of %s", surviving.Name, lost)
 
-	return fmt.Sprintf("%d Pods", pods)
+	return surviving
 }
 
 func allPodsRunningStep() Step {
@@ -517,18 +524,10 @@ func noPodsInTheFailedZonesStep() Step {
 	return Step{Kind: ThenStep, Name: "no Pod in the Zones that failed"}
 }
 
-// survivedStep is the line a Scenario with nothing to judge ends at, recorded
-// before any count.
-func survivedStep() Step {
-	return Step{Kind: ThenStep, Name: "survives losing the Pods its Failure tolerance declares"}
-}
-
-func survivedStepOf(tolerance, lostAtTheFailure, lostOnceSettled int) Step {
-	return Step{
-		Kind: ThenStep,
-		Name: fmt.Sprintf("survives losing %s: %d lost at the Failure, %d once Settled",
-			podsCounted(tolerance), lostAtTheFailure, lostOnceSettled),
-	}
+// enoughPodsStayedReadyStep is also the line a Scenario with nothing to judge
+// ends at, recorded before any reading.
+func enoughPodsStayedReadyStep(readings ...string) Step {
+	return Step{Kind: ThenStep, Name: "enough Pods stayed Ready from the first Failure", Readings: readings}
 }
 
 // The mismatch text is internal/expect's and is not this suite's to pin.
@@ -544,27 +543,6 @@ func asJudged(findings []Finding) []judgedFinding {
 	}
 
 	return judged
-}
-
-// One judgement reports both moments under one Step, so the moment named is
-// what tells its Findings apart.
-func momentsNamedIn(findings []Finding) []string {
-	named := make([]string, 0, len(findings))
-	for _, finding := range findings {
-		named = append(named, momentNamedBy(finding))
-	}
-
-	return named
-}
-
-func momentNamedBy(finding Finding) string {
-	for _, moment := range []string{atTheMomentOfTheFailure, onceThePlacementHadSettled} {
-		if strings.Contains(finding.Mismatch, moment) {
-			return moment
-		}
-	}
-
-	return noMomentNamed
 }
 
 // A reader of a restore time must never read one time for the other.
@@ -724,36 +702,51 @@ func TestAGivenDeploymentCustomizedWithFullAccess_ShouldKeepItBesideTheDeploymen
 		To(expect.Equal(placesOfTheFullAccesses(customized.Accesses())))
 }
 
-func TestAGivenDeploymentDeclaringAFailureTolerance_ShouldDeclareTheMostPodsItSurvivesLosingBesideItsReplicas(t *testing.T) {
-	declaring := aScenario()
+func TestAGivenDeploymentDeclaringAFailureTolerance_ShouldSetItsFloorFromTheTopologyDeclaredAboveIt(t *testing.T) {
+	const twoNodesLost = 2
+	cases := map[string]struct {
+		lost  FailureTolerance
+		reads string
+	}{
+		"one Zone":  {lost: Zones(oneLost), reads: oneZoneLost},
+		"two Nodes": {lost: Nodes(twoNodesLost), reads: "2 Nodes"},
+	}
 
-	declaring.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
-		SurvivesLosingPods(theFailureTolerance)
+	for named, one := range cases {
+		t.Run(named, func(t *testing.T) {
+			declaring := aScenario()
+			declaring.Given().Zones(twoZones, theGeneralNodePool())
 
-	declared := declaring.outcome()
-	expect.Expect(t, declaring.deployment).
-		To(expect.Equal(aDeploymentSurvivingTheLossOf(t, podsOverEveryNode, theFailureTolerance)))
-	expect.Expect(t, declared.Steps).
-		To(expect.Equal([]Step{deploymentStepSurvivingTheLossOf(podsOverEveryNode, theFailureTolerance)}))
+			declaring.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+				SurvivesLosing(one.lost)
+
+			declared := declaring.outcome()
+			expect.Expect(t, declaring.deployment).To(expect.Equal(
+				aDeploymentSurvivingTheLossOf(t, podsOverEveryNode, one.lost, aTopologyOf(t, twoZones, twoNodesPerZone))))
+			expect.Expect(t, declared.Steps).To(expect.Equal([]Step{
+				topologyStepOf(twoZones, twoNodesPerZone),
+				deploymentStepSurvivingTheLossOf(podsOverEveryNode, one.reads),
+			}))
+		})
+	}
 }
 
-// The tolerances the domain refuses are its own suite's; this is the path
-// through the Given Step.
-func TestAFailureToleranceNoDeploymentCouldJudge_ShouldEndTheScenarioNamingThatGiven(t *testing.T) {
-	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
-	ending := aScenarioOver(onePodPerNodeOf(declared))
+// The losses the domain refuses are its own suite's; this is the path through
+// the Given Step.
+func TestALossADeploymentCannotDeclare_ShouldEndTheScenarioNamingThatGiven(t *testing.T) {
+	ending := aScenarioOver(onePodPerNodeOf(aTopologyOf(t, twoZones, twoNodesPerZone)))
 	ending.Given().Zones(twoZones, theGeneralNodePool())
 	ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
-		SurvivesLosingPods(aToleranceNoDeploymentCouldJudge)
+		SurvivesLosing(Zones(twoZones))
 
 	ending.Then().AllPodsRunning()
 
 	ended := ending.outcome()
-	refused := deploymentStepSurvivingTheLossOf(podsOverEveryNode, aToleranceNoDeploymentCouldJudge)
+	refused := deploymentStepSurvivingTheLossOf(podsOverEveryNode, everyZoneLost)
 	expect.Expect(t, ended.EndedAt).To(expect.Equal(refused))
 	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{topologyStepOf(twoZones, twoNodesPerZone), refused}))
 	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
-	causeNames(t, ended, fmt.Sprintf("a Failure tolerance of %d Pods is refused", aToleranceNoDeploymentCouldJudge))
+	causeNames(t, ended, "a Failure tolerance of "+everyZoneLost+" is refused")
 }
 
 // The times the domain refuses are its own suite's; this is the path through
@@ -1545,136 +1538,168 @@ func TestAPlacementStillHoldingAPodInAZoneThatFailed_ShouldReportAFindingAndRunT
 	}))
 }
 
-// The count at the moment of the Failure is a derivation, so it is driven over
-// the Placement the When discards rather than through the When, which needs a
-// cluster.
-func TestAPodOnANodeThatStoppedResponding_ShouldNotCountAsRunningAtTheMomentOfTheFailure(t *testing.T) {
-	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
-	stopped := theNodeThatStopped(declared)
-	beforeTheFailure := onePodLeftOnTheFailedNodeOf(declared, stopped)
-	failing := aScenarioAfterFailing(beforeTheFailure, stopped)
+func theNodesOneZoneFailingStops(t *testing.T, topology scenario.Topology) []string {
+	t.Helper()
 
-	kept := failing.podsKeptRunning(beforeTheFailure)
+	failure, err := scenario.NewZoneFailure(topology, oneLost)
+	if err != nil {
+		t.Fatalf("build a Failure stopping %d Zone: %v", oneLost, err)
+	}
 
-	expect.Expect(t, kept).To(expect.Equal(podsOverEveryNode - onePodLeftBehind))
+	return failure.NodeNames()
 }
 
-func TestADeploymentThatSurvivedAFailure_ShouldStateThePodsLostAtEachMomentAndRecordNoFinding(t *testing.T) {
-	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
-	stopped := theNodeThatStopped(declared)
-	judging := aScenarioAfterFailingWhichKept(
-		everyPodBackOnTheRespondingNodesOf(declared, stopped), podsOverEveryNode-theFailureTolerance, stopped)
-	judging.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
-		SurvivesLosingPods(theFailureTolerance)
+func onePodRunningPerNodeRecordedOf(topology scenario.Topology, deployment DeploymentName) []scenario.Entry {
+	nodes := topology.Nodes()
+	recorded := make([]scenario.Entry, 0, len(nodes))
+	for index, node := range nodes {
+		recorded = append(recorded, scenario.Entry{
+			Change: scenario.ChangeModified, Kind: scenario.PodObject, Name: fmt.Sprintf("%s-%d", deployment, index),
+			Reason: string(scenario.PodRunning), Detail: node.Name,
+		})
+	}
 
-	judging.Then().Survived()
-	judging.Then().AllPodsRunning()
+	return recorded
+}
+
+func aWhenNoted() scenario.Entry {
+	return scenario.Entry{Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: scenario.WhenStepNamed}
+}
+
+// theReadingsOf asks internal/scenario, whose suite owns how a Floor is read,
+// so this suite asserts only that the Then consulted it.
+func theReadingsOf(t *testing.T, recorded []scenario.Entry, stopped []string, judged ...scenario.Deployment) []scenario.FloorReading {
+	t.Helper()
+
+	readings, err := scenario.NewTimeline(recorded).
+		Floors(judged, []string{string(someDeploymentName), string(anotherDeploymentName)}, [][]string{stopped})
+	if err != nil {
+		t.Fatalf("read the Floors over the recorded Timeline: %v", err)
+	}
+
+	return readings
+}
+
+func linesOf(readings []scenario.FloorReading) []string {
+	lines := make([]string, 0, len(readings))
+	for _, reading := range readings {
+		lines = append(lines, reading.Line())
+	}
+
+	return lines
+}
+
+// The second Deployment declares no Failure tolerance, so it is not judged.
+func TestADeploymentKeepingItsFloorThroughTheFailure_ShouldReportItKeptAndRecordNoFinding(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stopped := []string{theNodeThatStopped(declared)}
+	recorded := slices.Concat(onePodRunningPerNodeRecordedOf(declared, someDeploymentName),
+		onePodRunningPerNodeRecordedOf(declared, anotherDeploymentName), []scenario.Entry{aWhenNoted()})
+	judging := aScenarioRecording(stopped, recorded...)
+	judging.Given().Zones(twoZones, theGeneralNodePool())
+	judging.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+		SurvivesLosing(Nodes(oneLost))
+	judging.Given().Deployment(anotherDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+
+	judging.Then().EnoughPodsStayedReady()
 
 	judged := judging.outcome()
+	surviving := aDeploymentSurvivingTheLossOf(t, podsOverEveryNode, Nodes(oneLost), declared)
+	expect.Expect(t, surviving.Floor()).To(expect.Equal(floorSurvivingOneNode))
 	expect.Expect(t, asJudged(judged.Findings)).To(expect.Equal([]judgedFinding{}))
 	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
-		deploymentStepSurvivingTheLossOf(podsOverEveryNode, theFailureTolerance),
-		survivedStepOf(theFailureTolerance, theFailureTolerance, noPods),
-		allPodsRunningStep(),
+		topologyStepOf(twoZones, twoNodesPerZone),
+		deploymentStepSurvivingTheLossOf(podsOverEveryNode, oneNodeLost),
+		resilientPlacementDeploymentStepNamed(anotherDeploymentName, podsOverEveryNode),
+		enoughPodsStayedReadyStep(linesOf(theReadingsOf(t, recorded, stopped, surviving))...),
 	}))
 }
 
-func TestAFailureToleranceExceededAtOneMoment_ShouldReportAFindingNamingThatMoment(t *testing.T) {
-	// Each case loses more than the tolerance at one moment and no more at the
-	// other, so its Finding names the moment exceeded.
-	cases := []struct {
-		name             string
-		lostAtTheFailure int
-		settledAt        func(scenario.Topology, string) scenario.Placement
-		lostOnceSettled  int
-		moment           string
-	}{
-		{
-			name:             "the Failure cost more Pods than the tolerance",
-			lostAtTheFailure: podsLostBeyondTheTolerance,
-			settledAt:        everyPodBackOnTheRespondingNodesOf,
-			lostOnceSettled:  noPods,
-			moment:           atTheMomentOfTheFailure,
-		},
-		{
-			name:             "the Placement settled leaving more Pods Pending than the tolerance",
-			lostAtTheFailure: theFailureTolerance,
-			settledAt:        podsLeftPendingBeyondTheToleranceOn,
-			lostOnceSettled:  podsLostBeyondTheTolerance,
-			moment:           onceThePlacementHadSettled,
-		},
-	}
+// A Zone holds two Pods of each Deployment: one Deployment's Floor admits that
+// loss and the other's does not.
+func TestOneOfTwoDeploymentsFallingBelowItsFloor_ShouldFailTheWholeThenNamingThatDeployment(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stopped := theNodesOneZoneFailingStops(t, declared)
+	recorded := slices.Concat(onePodRunningPerNodeRecordedOf(declared, someDeploymentName),
+		onePodRunningPerNodeRecordedOf(declared, anotherDeploymentName), []scenario.Entry{aWhenNoted()})
+	judging := aScenarioRecording(stopped, recorded...)
+	judging.Given().Zones(twoZones, theGeneralNodePool())
+	judging.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+		SurvivesLosing(Nodes(oneLost))
+	judging.Given().Deployment(anotherDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+		SurvivesLosing(Zones(oneLost))
+	judging.observed, judging.settled = onePodPerNodeOf(declared), true
 
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			declared := aTopologyOf(t, twoZones, twoNodesPerZone)
-			stopped := theNodeThatStopped(declared)
-			judging := aScenarioAfterFailingWhichKept(
-				one.settledAt(declared, stopped), podsOverEveryNode-one.lostAtTheFailure, stopped)
-			judging.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
-				SurvivesLosingPods(theFailureTolerance)
+	judging.Then().EnoughPodsStayedReady()
+	judging.Then().AllPodsRunning()
 
-			judging.Then().Survived()
-			judging.Then().NoPodsOnTheFailedNodes()
-
-			judged := judging.outcome()
-			exceeded := survivedStepOf(theFailureTolerance, one.lostAtTheFailure, one.lostOnceSettled)
-			expect.Expect(t, asJudged(judged.Findings)).
-				To(expect.Equal([]judgedFinding{{Step: exceeded, Mismatching: true}}))
-			expect.Expect(t, momentsNamedIn(judged.Findings)).To(expect.Equal([]string{one.moment}))
-			expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
-				deploymentStepSurvivingTheLossOf(podsOverEveryNode, theFailureTolerance),
-				exceeded,
-				noPodsOnTheFailedNodesStep(),
-			}))
-		})
-	}
+	judged := judging.outcome()
+	falling := aDeploymentSurvivingTheLossOf(t, podsOverEveryNode, Nodes(oneLost), declared)
+	keeping := aDeploymentNamedSurvivingTheLossOf(t, anotherDeploymentName, podsOverEveryNode, Zones(oneLost), declared)
+	readings := theReadingsOf(t, recorded, stopped, falling, keeping)
+	judgedAt := enoughPodsStayedReadyStep(linesOf(readings)...)
+	expect.Expect(t, keeping.Floor()).To(expect.Equal(floorSurvivingOneZone))
+	expect.Expect(t, judged.Findings).To(expect.Equal([]Finding{{Step: judgedAt, Mismatch: readings[0].Fall()}}))
+	expect.Expect(t, judged.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		deploymentStepSurvivingTheLossOf(podsOverEveryNode, oneNodeLost),
+		namedDeploymentStepSurvivingTheLossOf(anotherDeploymentName, podsOverEveryNode, oneZoneLost),
+		judgedAt,
+		allPodsRunningStep(),
+	}))
+	expect.Expect(t, causeOf(judged)).To(expect.Equal(""))
 }
 
-func TestAFailureToleranceWithNothingToJudge_ShouldEndTheScenarioNamingThatThen(t *testing.T) {
-	// The Then is recorded before it states any count.
-	cases := []struct {
-		name     string
-		declare  func(scenario.Topology, string) *Scenario
+func TestAFloorJudgementWithNothingToJudge_ShouldEndTheScenarioNamingThatThen(t *testing.T) {
+	// The Then is recorded before it states any reading.
+	cases := map[string]struct {
+		declare  func(*Scenario)
+		judging  *Scenario
 		declared Step
 		cause    string
 	}{
-		{
-			name: "a Failure tolerance no Failure came before",
-			declare: func(declared scenario.Topology, _ string) *Scenario {
-				ending := aScenarioOver(onePodPerNodeOf(declared))
+		"a Floor no Failure came before": {
+			judging: &Scenario{},
+			declare: func(ending *Scenario) {
 				ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
-					SurvivesLosingPods(theFailureTolerance)
-
-				return ending
+					SurvivesLosing(Nodes(oneLost))
 			},
-			declared: deploymentStepSurvivingTheLossOf(podsOverEveryNode, theFailureTolerance),
+			declared: deploymentStepSurvivingTheLossOf(podsOverEveryNode, oneNodeLost),
 			cause:    theWhenThatNeverRan,
 		},
-		{
-			name: "a Failure the Deployment declared no Failure tolerance for",
-			declare: func(declared scenario.Topology, stopped string) *Scenario {
-				ending := aScenarioAfterFailing(everyPodBackOnTheRespondingNodesOf(declared, stopped), stopped)
+		"a Failure no Deployment declared a Failure tolerance for": {
+			judging: aScenarioRecording([]string{theNodeThatStopped(aTopologyOf(t, twoZones, twoNodesPerZone))}, aWhenNoted()),
+			declare: func(ending *Scenario) {
 				ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
-
-				return ending
 			},
 			declared: resilientPlacementDeploymentStepOf(podsOverEveryNode),
 			cause:    theToleranceNeverDeclared,
 		},
+		"a Failure the Timeline holds no note of": {
+			judging: aScenarioRecording([]string{theNodeThatStopped(aTopologyOf(t, twoZones, twoNodesPerZone))}),
+			declare: func(ending *Scenario) {
+				ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+					SurvivesLosing(Nodes(oneLost))
+			},
+			declared: deploymentStepSurvivingTheLossOf(podsOverEveryNode, oneNodeLost),
+			cause:    "no When's note",
+		},
 	}
 
-	for _, one := range cases {
-		t.Run(one.name, func(t *testing.T) {
-			declared := aTopologyOf(t, twoZones, twoNodesPerZone)
-			ending := one.declare(declared, theNodeThatStopped(declared))
+	for named, one := range cases {
+		t.Run(named, func(t *testing.T) {
+			ending := one.judging
+			ending.Given().Zones(twoZones, theGeneralNodePool())
+			one.declare(ending)
 
-			ending.Then().Survived()
+			ending.Then().EnoughPodsStayedReady()
 			ending.Then().AllPodsRunning()
 
 			ended := ending.outcome()
-			expect.Expect(t, ended.EndedAt).To(expect.Equal(survivedStep()))
-			expect.Expect(t, ended.Steps).To(expect.Equal([]Step{one.declared, survivedStep()}))
+			expect.Expect(t, ended.EndedAt).To(expect.Equal(enoughPodsStayedReadyStep()))
+			expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+				topologyStepOf(twoZones, twoNodesPerZone), one.declared, enoughPodsStayedReadyStep(),
+			}))
 			expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
 			causeNames(t, ended, one.cause)
 		})

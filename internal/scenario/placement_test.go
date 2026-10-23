@@ -133,22 +133,6 @@ func TestAPlacement_ShouldNameThePodsItDoesNotReportReady(t *testing.T) {
 	expect.Expect(t, placement.PodsNotReady()).To(expect.Equal([]scenario.Pod{notReadyYet, pending}))
 }
 
-func TestAPlacement_ShouldReportThePodsRunningApartFromTheNodesNamed(t *testing.T) {
-	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), threePlacedPodsOverTwoZones())
-
-	expect.Expect(t, placement.PodsRunningApartFrom([]string{fullestNode})).To(expect.Equal([]scenario.Pod{
-		{Name: podOnTheNextNode, Node: nextNode, Phase: scenario.PodRunning},
-	}))
-}
-
-func TestAPodThatIsNotRunningOnARespondingNode_ShouldBeAmongNoneOfThem(t *testing.T) {
-	pending := scenario.Pod{Name: podOnNoNodeAtAll, Phase: scenario.PodPending}
-	onTheNodeThatStopped := scenario.Pod{Name: firstPodOnTheFullestNode, Node: fullestNode, Phase: scenario.PodRunning}
-	placement := scenario.NewPlacement(twoZonesOfTwoNodes(t), []scenario.Pod{pending, onTheNodeThatStopped})
-
-	expect.Expect(t, placement.PodsRunningApartFrom([]string{fullestNode})).To(expect.HaveLen[scenario.Pod](0))
-}
-
 func TestTwoObservationsOfTheSamePodsOnTheSameNodes_ShouldAgree(t *testing.T) {
 	firstObservation := scenario.NewPlacement(twoZonesOfTwoNodes(t), threePlacedPodsOverTwoZones())
 	secondObservation := scenario.NewPlacement(twoZonesOfTwoNodes(t), threePlacedPodsOverTwoZones())

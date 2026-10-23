@@ -255,7 +255,7 @@ var thePluralNames = []string{"StandardPods", "GPUPods", "StandardNodes", "GPUNo
 
 // A second call of theDeploymentsOwnCalls, or any other call written there, stays
 // refused.
-var theDeploymentsOwnCalls = []string{"SurvivesLosingPods"}
+var theDeploymentsOwnCalls = []string{"SurvivesLosing"}
 
 // theWaitOpener is the one opener that is not its kind's own word, and every
 // way of writing a Wait goes through it.
@@ -1905,12 +1905,12 @@ func TestTheDeploymentLineRule_ShouldAdmitOneRequestAndOneCustomizedSpecificatio
 			admitted: false,
 		},
 		"a Failure tolerance written after the Deployment Step": {
-			line:     `s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosingPods(3)`,
+			line:     `s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosing(lab.Zones(1))`,
 			admitted: true,
 		},
 		"a second Failure tolerance written on the first": {
 			line: `s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).` +
-				`SurvivesLosingPods(3).SurvivesLosingPods(1)`,
+				`SurvivesLosing(lab.Zones(1)).SurvivesLosing(lab.Nodes(1))`,
 			admitted: false,
 		},
 		"a Wait chained onto the Deployment Step": {
@@ -1919,7 +1919,7 @@ func TestTheDeploymentLineRule_ShouldAdmitOneRequestAndOneCustomizedSpecificatio
 		},
 		"a Wait chained onto the Failure tolerance": {
 			line: `s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).` +
-				`SurvivesLosingPods(3).WaitFor().AllPodsReady()`,
+				`SurvivesLosing(lab.Zones(1)).WaitFor().AllPodsReady()`,
 			admitted: true,
 		},
 		"a Wait written on the Deployment Step with no WaitFor opening it": {
