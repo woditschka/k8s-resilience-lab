@@ -89,7 +89,7 @@ The same command holds the lab to its declared dependencies, free of known vulne
 
 <a id="req-sim-009"></a>
 <a id="req-sim-025"></a>
-A run names each Deployment by its Kubernetes kind `[REQ-SIM-025]`. A Scenario's Deployment declares one of the predefined Pod specifications the Scenarios define, one per intent `[REQ-SIM-009]`. Resilient placement spreads Pods evenly over Zones and Nodes; Default placement, its weak counterpart, leaves the scheduler to decide. Customizations change a copy before deployment, through the lab's vocabulary or full access to any other Pod setting, which no Scenario uses yet.
+A run names each Deployment by its Kubernetes kind `[REQ-SIM-025]`. A Scenario's Deployment declares one of the predefined Pod specifications the Scenarios define, one per intent `[REQ-SIM-009]`. Customizations change a copy before deployment, through the lab's vocabulary or full access to any other Pod setting, which no Scenario uses yet.
 
 **Done when:**
 
@@ -115,7 +115,7 @@ A run names each Deployment by its Kubernetes kind `[REQ-SIM-025]`. A Scenario's
 ### Stating what decides a Placement
 
 <a id="req-sim-015"></a>
-Every value deciding a Placement stands on a Scenario's own lines, stated or named there, and the lab gives none `[REQ-SIM-015]`. A name stands for values the Scenarios define once beside them, and each further Named Node capacity arrives with its first Scenario. The lab keeps two waiting times of its own, reported when a run starts.
+Every value deciding a Placement stands on a Scenario's own lines, stated or named there, and the lab gives none `[REQ-SIM-015]`. A name stands for values the Scenarios define once beside them, and each further Named Node capacity arrives with its first Scenario.
 
 **Done when:**
 
@@ -165,7 +165,7 @@ A Deployment line names Standard Pod, a quarter of the Standard capacity, or GPU
 ### Holding Nodes of different kinds in a Zone
 
 <a id="req-sim-013"></a>
-A real cluster seldom runs one kind of machine, so a Zone holds NodePools of identical Nodes, the same in every Zone `[REQ-SIM-013]`. Every Node carries its NodePool's name as a label and keeps its positional name.
+A Zone holds NodePools of identical Nodes, the same in every Zone `[REQ-SIM-013]`.
 
 **Done when:**
 
@@ -213,7 +213,7 @@ A NodePool may state Kubernetes labels for its Nodes, beside the lab's own Zone,
 ### Starting a Deployment's Pods
 
 <a id="req-sim-012"></a>
-A real Pod takes time to become Ready, so a Deployment replacing Pods after a Failure runs short meanwhile `[REQ-SIM-012]`. Each placed Pod counts Pending on its Node for its own Startup time, within bounds above zero its specification names or a Customization states.
+A real Pod takes time to become Ready, so a Deployment replacing Pods after a Failure runs short meanwhile `[REQ-SIM-012]`.
 
 **Done when:**
 
@@ -352,7 +352,7 @@ A reported Placement says where Pods landed, and a Timeline says how they got th
 ### Reading the Placement under every Wait
 
 <a id="req-sim-021"></a>
-Under every Wait, a run shows how the Placement changed and where every Pod stands `[REQ-SIM-021]`. A Wait narrative orders the moments that changed it, and a Placement board shows every Node with its Pods.
+Under every Wait, a run shows how the Placement changed and where every Pod stands `[REQ-SIM-021]`.
 
 **Done when:**
 
@@ -387,7 +387,7 @@ Under every Wait, a run shows how the Placement changed and where every Pod stan
 ### Writing and finding a Scenario
 
 <a id="req-sim-006"></a>
-An engineer writes a Scenario as Steps, one per line: Given declares, When changes the cluster, Wait waits for a cluster state, Then asserts the Placement `[REQ-SIM-006]`. A failing Step ends the Scenario, and a missed Then is a Finding. A Wait names the time it took, and every Scenario sits in one place beside a README.
+An engineer writes a Scenario as Steps, one per line: Given declares, When changes the cluster, Wait waits for a cluster state, Then asserts the Placement `[REQ-SIM-006]`.
 
 <a id="req-sim-020"></a>
 An engineer reads every Scenario of the lab in one source, each run and reported under its Scenario name, the condition its function names `[REQ-SIM-020]`.
@@ -452,7 +452,7 @@ Each name a Scenario writes shows its subject, a Pod, a Node, or the Scenario wi
 <a id="req-sim-022"></a>
 An engineer starts an Interactive run naming one Scenario and opens its Live view in a browser `[REQ-SIM-022]`. Its Steps run up to its first When, reporting as in a run, and its Simulated Cluster is then held until the lab stops `[REQ-SIM-022]`. The Live view shows that cluster alone and changes nothing in it `[REQ-SIM-022]`.
 
-The Live view draws each Zone as a box of its Nodes and each Node as a box of its Pods, Pending Pods apart `[REQ-SIM-022]`. A Node shows its NodePool, Node labels, capacity, requests and what is left, and a Pod its Request `[REQ-SIM-022]`. Every open Live view follows each change as the lab observes it `[REQ-SIM-022]`.
+The Live view draws each Zone as a box of its Nodes and each Node as a box of its Pods, Pending Pods apart `[REQ-SIM-022]`. A Node shows its NodePool, Node labels, capacity, requests and what is left, and a Pod its Request `[REQ-SIM-022]`. A Node's or Pod's box gives its name and whether it is Ready on its first line, and the page header names k8s-resilience-lab and the Scenario `[REQ-SIM-022]`. Every open Live view follows each change as the lab observes it `[REQ-SIM-022]`.
 
 **Done when:**
 
@@ -461,13 +461,14 @@ The Live view draws each Zone as a box of its Nodes and each Node as a box of it
 - `[REQ-SIM-022]` given a held Simulated Cluster, when the Live view is read, then each Zone's box holds one box per Node. Each Node's box holds its Pods by Deployment name and own suffix, and the Pending Pods stand apart.
 - `[REQ-SIM-022]` given a Node, when its box is read, then it names its NodePool and the Node labels that NodePool states. It gives its Pods, cpu and memory as capacity, requests and left: its Node capacity, what its Pods take by count and Request, and the difference.
 - `[REQ-SIM-022]` given a placed or Pending Pod, when its box is read, then it gives its Request as cpu and memory, under the word requests. A Pod declaring no Request shows cpu 0 and memory 0.
-- `[REQ-SIM-022]` given a Node or a placed Pod, when its box is read, then it states by colour and by word whether it is Ready. A Pod new on its Node is marked as a Placement board marks it, and the mark fades.
+- `[REQ-SIM-022]` given an Interactive run naming a Scenario, when the page header is read, then it names k8s-resilience-lab, a separator such as a hyphen, then the Scenario name.
+- `[REQ-SIM-022]` given a Node or a placed Pod, when its box is read, then its first line gives its name and, at the top right, whether it is Ready by colour and word. A Pod's requests stand beneath, its box as wide as its Node's. A Pod new on its Node is marked as a Placement board marks it, and the mark fades.
 - `[REQ-SIM-022]` given a narrow window, or a system set to light or dark, when the Live view is read, then it fits the window and follows that setting, loading nothing from another host.
 - `[REQ-SIM-022]` given those Steps have run, when the engineer watches, then the cluster stays as they left it until the engineer stops the lab, removing it.
 - `[REQ-SIM-022]` given every Scenario of the lab, when a run carries it out, then it reaches the outcome it asserted before.
 
 <a id="req-sim-023"></a>
-**Not yet in force.** Later slices add the following, first the Timeline growing beneath the boxes `[REQ-SIM-023]`. Until the controls ship, an Interactive run naming no Scenario is refused, as edge case 1 states.
+**Not yet in force.** Later slices add the following, first the Timeline growing beneath the boxes `[REQ-SIM-023]`. Whether Zones stack in a column, leaving a pane to their right on a laptop, is decided with it `[REQ-SIM-023]`. Until the controls ship, an Interactive run naming no Scenario is refused, as edge case 1 states.
 
 - `[REQ-SIM-023]` given the Live view open, when the Timeline gains an Entry, then it appears beneath the boxes in order with no reload. Every Entry appears, each Step at its moment, each showing at a glance what changed.
 - `[REQ-SIM-022]` given an Interactive run naming no Scenario, when the Live view opens, then it offers every Scenario by its Scenario name and provisions nothing until the engineer picks one.
