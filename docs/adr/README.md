@@ -70,11 +70,11 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-04 | [The gate runs the tests under the race detector](2026-10-04-race-detector-in-the-gate.md) | Accepted |
 | 2026-10-05 | [A Timeline is recorded from the API's watch stream and filed as JSON Lines](2026-10-05-timeline-from-the-watch-stream.md) | Accepted, amended 2026-10-05 and 2026-10-20 |
 | 2026-10-05 | [A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md) | Accepted |
-| 2026-10-05 | [A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md) | Accepted, amended 2026-10-18 (three times) |
-| 2026-10-06 | [A Workload declares its Required Capacity, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md) | Accepted |
+| 2026-10-05 | [A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md) | Accepted, amended 2026-10-18 (three times) and 2026-10-22 |
+| 2026-10-06 | [A Deployment declares its Failure tolerance, judged at the moment of the Failure and once Settled](2026-10-06-required-capacity-judged-at-two-moments.md) | Accepted, amended 2026-10-22 |
 | 2026-10-07 | [A Scenario writes its own Wait, with its Given or as a Step of its own](2026-10-07-a-scenario-writes-its-own-wait.md) | Accepted, amended 2026-10-07 and 2026-10-08 |
 | 2026-10-08 | [The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md) | Accepted, amended 2026-10-09 and 2026-10-18 |
-| 2026-10-08 | [A Topology declares the NodePools every Zone holds](2026-10-08-a-topology-declares-the-nodepools-every-zone-holds.md) | Accepted, amended 2026-10-09 (twice) and 2026-10-18 (twice) |
-| 2026-10-18 | [Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md) | Accepted, amended 2026-10-18 and 2026-10-19 |
-| 2026-10-19 | [A NodePool states NoSchedule taints, and a later Workload deploys beside the earlier, judged alone](2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md) | Accepted, amended 2026-10-20 |
-| 2026-10-21 | [The Live view is served on loopback from one shared observation](2026-10-21-the-live-view-is-served-on-loopback-from-one-shared-observation.md) | Accepted |
+| 2026-10-08 | [A Topology declares the NodePools every Zone holds](2026-10-08-a-topology-declares-the-nodepools-every-zone-holds.md) | Accepted, amended 2026-10-09 (twice), 2026-10-18 (twice) and 2026-10-23 |
+| 2026-10-18 | [Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md) | Accepted, amended 2026-10-18, 2026-10-19 and 2026-10-23 |
+| 2026-10-19 | [A NodePool states NoSchedule taints, and a later Deployment runs beside the earlier, judged alone](2026-10-19-a-nodepool-states-noschedule-taints-and-a-later-workload-deploys-beside-the-earlier.md) | Accepted, amended 2026-10-20, retitled 2026-10-22 |
+| 2026-10-21 | [The Live view is served on loopback from one shared observation](2026-10-21-the-live-view-is-served-on-loopback-from-one-shared-observation.md) | Accepted, amended 2026-10-21 and 2026-10-22 |

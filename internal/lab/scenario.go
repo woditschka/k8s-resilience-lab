@@ -61,18 +61,8 @@ const (
 	theWaitReachedTooLate = "this Wait states the time it must be reached in, and the cluster reached it later"
 )
 
-// Zones is a count rather than a list of names, so no Scenario names a Zone its
-// Givens do not derive.
-type Zones int
-
-type Pods int
-
-// Nodes is a count rather than a list of names, so no Scenario names a Node its
-// Givens do not derive.
-type Nodes int
-
-// WorkloadName is also the label value the Workload's Pods carry.
-type WorkloadName string
+// DeploymentName is also the label value the Deployment's Pods carry.
+type DeploymentName string
 
 // The types above carry no invariant of their own: a swapped argument does not
 // compile, and a value a Scenario may not declare is refused by the
@@ -169,15 +159,15 @@ type Scenario struct {
 	provisioned *cluster.SimulatedCluster
 
 	topology scenario.Topology
-	// accesses sit beside the Workload, because the domain value carries no
+	// accesses sit beside the Deployment, because the domain value carries no
 	// function value.
-	workload scenario.Workload
-	accesses []cluster.PodSpecAccessInPlace
+	deployment scenario.Deployment
+	accesses   []cluster.PodSpecAccessInPlace
 
-	// undeployed are earlier Workloads a later Given superseded before a Wait
+	// undeployed are earlier Deployments a later Given superseded before a Wait
 	// deployed them; the next Wait deploys them before the newest.
-	undeployed        []declaredDeployment
-	declaredWorkloads []WorkloadName
+	undeployed          []pendingDeployment
+	declaredDeployments []DeploymentName
 
 	steps    []Step
 	findings []Finding
@@ -195,8 +185,8 @@ type Scenario struct {
 
 	// A Wait applies what the Givens above it declared, so its cause names a
 	// declaration by the line that wrote it.
-	topologyDeclaredAs string
-	workloadDeclaredAs string
+	topologyDeclaredAs   string
+	deploymentDeclaredAs string
 
 	observed scenario.Placement
 	// board is the one the last Wait drew, which the next marks its newcomers
@@ -204,9 +194,9 @@ type Scenario struct {
 	board scenario.PlacementBoard
 	// settled is cleared by a When alone, so the next Wait applies nothing and
 	// holds for the world the Failure left.
-	topologyApplied  bool
-	workloadDeployed bool
-	settled          bool
+	topologyApplied bool
+	deployed        bool
+	settled         bool
 	// changedTheCluster is set before the first change is attempted, so a
 	// change that fails partway still has its board observed.
 	changedTheCluster bool
@@ -225,8 +215,8 @@ type Scenario struct {
 	published atomic.Pointer[scenario.Topology]
 }
 
-type declaredDeployment struct {
-	workload   scenario.Workload
+type pendingDeployment struct {
+	deployment scenario.Deployment
 	accesses   []cluster.PodSpecAccessInPlace
 	declaredAs string
 }
@@ -389,13 +379,13 @@ func (s *Scenario) endWait() {
 
 // drawBoard observes under a waiting time of its own rather than the Wait's,
 // so a Wait that expired still shows where every Pod stood as it ended. Before
-// the Scenario first changes its own cluster no Workload Pod can exist, so the
+// the Scenario first changes its own cluster no Deployment Pod can exist, so the
 // declared Nodes alone are the board and nothing is observed.
 func (s *Scenario) drawBoard() {
 	last := len(s.steps) - 1
 	var observed scenario.Placement
 	if s.changedTheCluster {
-		placed, err := s.observeEveryWorkload()
+		placed, err := s.observeEveryDeployment()
 		if err != nil {
 			s.steps[last].BoardNotObserved = fmt.Errorf("observe the Placement board: %w", err)
 			s.end(s.steps[last], s.steps[last].BoardNotObserved)
@@ -409,11 +399,11 @@ func (s *Scenario) drawBoard() {
 	s.steps[last].Board = s.board
 }
 
-func (s *Scenario) observeEveryWorkload() (scenario.Placement, error) {
+func (s *Scenario) observeEveryDeployment() (scenario.Placement, error) {
 	observing, cancel := context.WithTimeout(s.ctx, scenario.WaitingTime)
 	defer cancel()
 
-	return s.provisioned.ObserveEveryWorkload(observing)
+	return s.provisioned.ObserveEveryDeployment(observing)
 }
 
 // A Wait reached later than it was held to ends the Scenario, since the Steps
@@ -437,18 +427,18 @@ func (s *Scenario) notReached(held scenario.StatedWait) Step {
 // because a Scenario reaches them through a Given's WaitFor and through a Wait
 // Step of its own.
 func (s *Scenario) reachNodesReady() (scenario.Placement, error) {
-	return s.provisioned.AwaitNodesReady(s.ctx, s.topology, s.workload)
+	return s.provisioned.AwaitNodesReady(s.ctx, s.topology, s.deployment)
 }
 
 func (s *Scenario) reachPodsReady() (scenario.Placement, error) {
-	return s.provisioned.AwaitPodsReady(s.ctx, s.workload)
+	return s.provisioned.AwaitPodsReady(s.ctx, s.deployment)
 }
 
 // reachSettledPlacement is reached by a Placement leaving Pods Pending, so a
-// Scenario of a Workload the Nodes have no room for has a Wait its Thens can
+// Scenario of a Deployment the Nodes have no room for has a Wait its Thens can
 // judge after.
 func (s *Scenario) reachSettledPlacement() (scenario.Placement, error) {
-	return s.provisioned.AwaitSettled(s.ctx, s.workload)
+	return s.provisioned.AwaitSettled(s.ctx, s.deployment)
 }
 
 // The plain forms state no time rather than the lab's own waiting time, which
@@ -477,7 +467,7 @@ func (s *Scenario) awaitSettledPlacementWithinSeconds(seconds int) {
 	s.awaitStating(theSettledPlacement, seconds, s.reachSettledPlacement)
 }
 
-// apply applies the Topology first, so the Workload's Pods have Nodes to be
+// apply applies the Topology first, so the Deployment's Pods have Nodes to be
 // placed on. A Given reaches no cluster, so a refusal only the control plane
 // can give is named here, and one the lab checks itself stays at the Given.
 func (s *Scenario) apply(at Step) bool {
@@ -491,34 +481,34 @@ func (s *Scenario) apply(at Step) bool {
 		s.topologyApplied = true
 	}
 	pending := slices.Clone(s.undeployed)
-	if s.workloadDeclaredAs != "" && !s.workloadDeployed {
-		pending = append(pending, declaredDeployment{workload: s.workload, accesses: s.accesses, declaredAs: s.workloadDeclaredAs})
+	if s.deploymentDeclaredAs != "" && !s.deployed {
+		pending = append(pending, pendingDeployment{deployment: s.deployment, accesses: s.accesses, declaredAs: s.deploymentDeclaredAs})
 	}
 	for _, deploying := range pending {
 		s.changedTheCluster = true
-		if err := s.provisioned.Deploy(s.ctx, deploying.workload, deploying.accesses...); err != nil {
+		if err := s.provisioned.Deploy(s.ctx, deploying.deployment, deploying.accesses...); err != nil {
 			s.end(at, fmt.Errorf("deploy %s: %w", deploying.declaredAs, err))
 
 			return false
 		}
 	}
-	s.undeployed, s.workloadDeployed = nil, true
+	s.undeployed, s.deployed = nil, true
 
 	return true
 }
 
-// The earlier Workloads stay deployed. The Placement observed before belongs to
-// an earlier Workload, so it is discarded and the next Then judges the
+// The earlier Deployments stay deployed. The Placement observed before belongs to
+// an earlier Deployment, so it is discarded and the next Then judges the
 // Placement a Wait reaches for this one.
-func (s *Scenario) declareWorkload(workload scenario.Workload, accesses []cluster.PodSpecAccessInPlace, declaredAs string) {
-	if s.workloadDeclaredAs != "" {
-		if !s.workloadDeployed {
-			s.undeployed = append(s.undeployed, declaredDeployment{workload: s.workload, accesses: s.accesses, declaredAs: s.workloadDeclaredAs})
+func (s *Scenario) declareDeployment(deployment scenario.Deployment, accesses []cluster.PodSpecAccessInPlace, declaredAs string) {
+	if s.deploymentDeclaredAs != "" {
+		if !s.deployed {
+			s.undeployed = append(s.undeployed, pendingDeployment{deployment: s.deployment, accesses: s.accesses, declaredAs: s.deploymentDeclaredAs})
 		}
 		s.observed, s.settled = scenario.Placement{}, false
 	}
-	s.workload, s.accesses, s.workloadDeclaredAs, s.workloadDeployed = workload, accesses, declaredAs, false
-	s.declaredWorkloads = append(s.declaredWorkloads, WorkloadName(workload.Name()))
+	s.deployment, s.accesses, s.deploymentDeclaredAs, s.deployed = deployment, accesses, declaredAs, false
+	s.declaredDeployments = append(s.declaredDeployments, DeploymentName(deployment.Name()))
 }
 
 // Given declares one part of the world a Scenario runs in, and ends the
@@ -527,9 +517,11 @@ type Given struct {
 	scenario *Scenario
 }
 
-// Topology declares the Zones the Scenario provisions and the NodePools each of
-// them holds. A line holding no NodePool is refused.
-func (g Given) Topology(zones Zones, pools ...node.DeclaredPool) DeclaredTopology {
+// Zones declares the Topology of Zones the Scenario provisions and the NodePools
+// each of them holds. Zones and Nodes are counts rather than lists of names, so
+// no Scenario names a Zone or Node its Givens do not derive. A line holding no
+// NodePool is refused.
+func (g Given) Zones(zones int, pools ...node.DeclaredPool) DeclaredTopology {
 	declared := DeclaredTopology{scenario: g.scenario, zones: zones, pools: slices.Clone(pools)}
 	step, open := g.scenario.record(GivenStep, declared.named())
 	if !open {
@@ -539,17 +531,17 @@ func (g Given) Topology(zones Zones, pools ...node.DeclaredPool) DeclaredTopolog
 	return declared.declareNodePools(step)
 }
 
-// Workload declares the Pod replicas the Scenario deploys. A Workload declared
+// Deployment declares the Pod replicas the Scenario deploys. A Deployment declared
 // after another is deployed beside it by the next Wait, every Step after it
 // reads it alone, and a name already declared ends the Scenario.
 //
 // The Pods ask for what the line asks, applied after the specification, so it
 // stands over a Request the specification holds; the empty pod.Settings asks for
-// nothing. The full accesses are kept beside the Workload, because the domain
+// nothing. The full accesses are kept beside the Deployment, because the domain
 // holds a specification's settings alone.
-func (g Given) Workload(name WorkloadName, pods Pods, asks pod.Customization, declares pod.Specification) DeclaredWorkload {
+func (g Given) Deployment(name DeploymentName, replicas int, asks pod.Customization, declares pod.Specification) DeclaredDeployment {
 	declares = declares.Customize(asks)
-	declared := DeclaredWorkload{scenario: g.scenario, name: name, pods: pods, declares: declares}
+	declared := DeclaredDeployment{scenario: g.scenario, name: name, replicas: replicas, declares: declares}
 	step, open := g.scenario.record(GivenStep, declared.named())
 	if !open {
 		return declared
@@ -563,65 +555,65 @@ func (g Given) Workload(name WorkloadName, pods Pods, asks pod.Customization, de
 	}
 	step = g.scenario.carrying(declares.Carries())
 
-	if slices.Contains(g.scenario.declaredWorkloads, name) {
-		g.scenario.end(step, fmt.Errorf("a Scenario declares each Workload once, "+
-			"so the Workload %q declared again is refused", name))
+	if slices.Contains(g.scenario.declaredDeployments, name) {
+		g.scenario.end(step, fmt.Errorf("a Scenario declares each Deployment once, "+
+			"so the Deployment %q declared again is refused", name))
 
 		return declared
 	}
 
-	workload, err := scenario.NewWorkload(string(name), int(pods), specification)
+	deployment, err := scenario.NewDeployment(string(name), replicas, specification)
 	if err != nil {
 		g.scenario.end(step, err)
 
 		return declared
 	}
-	g.scenario.declareWorkload(workload, declares.Accesses(), step.Name)
+	g.scenario.declareDeployment(deployment, declares.Accesses(), step.Name)
 
 	return declared
 }
 
-// DeclaredWorkload is complete as it stands, so no half-built Workload ever
+// DeclaredDeployment is complete as it stands, so no half-built Deployment ever
 // exists.
-type DeclaredWorkload struct {
+type DeclaredDeployment struct {
 	scenario *Scenario
-	name     WorkloadName
-	pods     Pods
+	name     DeploymentName
+	replicas int
 	declares pod.Specification
 }
 
-// RequiredCapacity declares the fewest Pods this Workload must keep Running
-// through a Failure.
-func (d DeclaredWorkload) RequiredCapacity(pods Pods) DeclaredWorkload {
+// SurvivesLosingPods declares the most Pods this Deployment survives losing to
+// a Failure.
+func (d DeclaredDeployment) SurvivesLosingPods(pods int) DeclaredDeployment {
 	if d.scenario.cause != nil {
 		return d
 	}
 
-	step := d.scenario.rename(d.named() + ", keeping at least " + counted(int(pods), "Pod", "Pods") + " Running")
+	step := d.scenario.rename(d.named() + ", surviving the loss of " + counted(pods, "Pod", "Pods"))
 
-	declared, err := d.scenario.workload.WithRequiredCapacity(int(pods))
+	declared, err := d.scenario.deployment.WithFailureTolerance(pods)
 	if err != nil {
 		d.scenario.end(step, err)
 
 		return d
 	}
-	d.scenario.workload, d.scenario.workloadDeclaredAs = declared, step.Name
+	d.scenario.deployment, d.scenario.deploymentDeclaredAs = declared, step.Name
 
 	return d
 }
 
-func (d DeclaredWorkload) WaitFor() WorkloadWait {
-	return WorkloadWait{scenario: d.scenario}
+func (d DeclaredDeployment) WaitFor() DeploymentWait {
+	return DeploymentWait{scenario: d.scenario}
 }
 
-func (d DeclaredWorkload) named() string {
-	return fmt.Sprintf("a Workload %s of %s declaring %s",
-		d.name, counted(int(d.pods), "Pod", "Pods"), d.declares.Reads())
+func (d DeclaredDeployment) named() string {
+	return fmt.Sprintf("a Deployment %s of %s declaring %s",
+		d.name, counted(d.replicas, "replica", "replicas"), d.declares.Reads())
 }
 
 type DeclaredTopology struct {
 	scenario *Scenario
-	zones    Zones
+	zones    int
 	pools    []node.DeclaredPool
 }
 
@@ -637,7 +629,7 @@ func (d DeclaredTopology) declareNodePools(step Step) DeclaredTopology {
 		pools = append(pools, pool)
 	}
 
-	topology, err := scenario.NewTopology(int(d.zones), pools...)
+	topology, err := scenario.NewTopology(d.zones, pools...)
 
 	return d.declare(step, topology, err)
 }
@@ -660,7 +652,7 @@ func (d DeclaredTopology) WaitFor() TopologyWait {
 
 func (d DeclaredTopology) named() string {
 	if len(d.pools) == 0 {
-		return fmt.Sprintf("a Topology of %s of no NodePool", counted(int(d.zones), "Zone", "Zones"))
+		return fmt.Sprintf("a Topology of %s of no NodePool", counted(d.zones, "Zone", "Zones"))
 	}
 
 	held := make([]string, 0, len(d.pools))
@@ -668,7 +660,7 @@ func (d DeclaredTopology) named() string {
 		held = append(held, pool.Reads())
 	}
 
-	return fmt.Sprintf("a Topology of %s of %s", counted(int(d.zones), "Zone", "Zones"), strings.Join(held, "; "))
+	return fmt.Sprintf("a Topology of %s of %s", counted(d.zones, "Zone", "Zones"), strings.Join(held, "; "))
 }
 
 // TopologyWait offers only the Wait that fits the line that opened it.
@@ -676,7 +668,7 @@ type TopologyWait struct {
 	scenario *Scenario
 }
 
-type WorkloadWait struct {
+type DeploymentWait struct {
 	scenario *Scenario
 }
 
@@ -690,16 +682,16 @@ func (t TopologyWait) AllNodesReadyWithinSeconds(seconds int) {
 }
 
 // AllPodsReady is held to the lab's own waiting time.
-func (w WorkloadWait) AllPodsReady() {
+func (w DeploymentWait) AllPodsReady() {
 	w.scenario.awaitPodsReady()
 }
 
-func (w WorkloadWait) AllPodsReadyWithinSeconds(seconds int) {
+func (w DeploymentWait) AllPodsReadyWithinSeconds(seconds int) {
 	w.scenario.awaitPodsReadyWithinSeconds(seconds)
 }
 
 // Wait offers all three Waits, because a Wait of its own stands wherever a
-// Scenario needs one: before any Workload is declared, and after a Failure.
+// Scenario needs one: before any Deployment is declared, and after a Failure.
 type Wait struct {
 	scenario *Scenario
 }
@@ -741,8 +733,8 @@ type When struct {
 
 // NodesFail stops the first Nodes the declared Topology derives, so the pick is
 // the same on every run.
-func (w When) NodesFail(nodes Nodes) {
-	step, open := w.scenario.record(WhenStep, nodesFailing(int(nodes)))
+func (w When) NodesFail(nodes int) {
+	step, open := w.scenario.record(WhenStep, nodesFailing(nodes))
 	if !open {
 		return
 	}
@@ -751,21 +743,21 @@ func (w When) NodesFail(nodes Nodes) {
 		return
 	}
 
-	failure, err := scenario.NewNodeFailure(w.scenario.topology, int(nodes))
+	failure, err := scenario.NewNodeFailure(w.scenario.topology, nodes)
 	if err != nil {
 		w.scenario.end(step, err)
 
 		return
 	}
-	stopping := w.scenario.rename(nodesFailing(int(nodes)) + ", " + strings.Join(failure.Names(), ", "))
+	stopping := w.scenario.rename(nodesFailing(nodes) + ", " + strings.Join(failure.Names(), ", "))
 
 	w.scenario.stop(stopping, failure.Names())
 }
 
 // ZonesFail stops every Node of the first Zones the declared Topology derives,
 // so the pick is the same on every run.
-func (w When) ZonesFail(zones Zones) {
-	step, open := w.scenario.record(WhenStep, zonesFailing(int(zones)))
+func (w When) ZonesFail(zones int) {
+	step, open := w.scenario.record(WhenStep, zonesFailing(zones))
 	if !open {
 		return
 	}
@@ -774,13 +766,13 @@ func (w When) ZonesFail(zones Zones) {
 		return
 	}
 
-	failure, err := scenario.NewZoneFailure(w.scenario.topology, int(zones))
+	failure, err := scenario.NewZoneFailure(w.scenario.topology, zones)
 	if err != nil {
 		w.scenario.end(step, err)
 
 		return
 	}
-	stopping := w.scenario.rename(zonesFailing(int(zones)) + ", " + strings.Join(failure.Names(), ", "))
+	stopping := w.scenario.rename(zonesFailing(zones) + ", " + strings.Join(failure.Names(), ", "))
 
 	if w.scenario.stop(stopping, failure.NodeNames()) {
 		w.scenario.failedZones = append(w.scenario.failedZones, failure.Names()...)
@@ -832,7 +824,7 @@ func (s *Scenario) stop(at Step, nodes []string) bool {
 	return true
 }
 
-// Both moments a Required Capacity is judged at count Pods this way.
+// Both moments a Failure tolerance is judged at count Pods this way.
 func (s *Scenario) podsKeptRunning(observed scenario.Placement) int {
 	return len(observed.PodsRunningApartFrom(s.failed))
 }
@@ -875,7 +867,7 @@ type Then struct {
 func (t Then) AllPodsRunning() {
 	t.judge("every Pod Running", func(settled scenario.Placement, judged expect.T) {
 		expect.Expect(judged, settled.PodsInPhase(scenario.PodRunning)).
-			To(expect.HaveLen[scenario.Pod](t.scenario.workload.Pods()))
+			To(expect.HaveLen[scenario.Pod](t.scenario.deployment.Replicas()))
 	})
 }
 
@@ -973,16 +965,18 @@ const (
 	onceThePlacementHadSettled = "once the Placement had settled"
 )
 
-// RequiredCapacityHeld judges the declared minimum at the moment of the Failure
-// and once the Placement has settled again. A Workload declaring no minimum, or
-// a Scenario with no When before this Then, ends the Scenario.
-func (t Then) RequiredCapacityHeld() {
-	step, open := t.scenario.record(ThenStep, "the Required Capacity held")
+// Survived judges the Pods lost against the declared Failure tolerance at the
+// moment of the Failure and once the Placement has settled again. A Pod is lost
+// while not Running, Pending for want of room included. A Deployment declaring
+// no Failure tolerance, or a Scenario with no When before this Then, ends the
+// Scenario.
+func (t Then) Survived() {
+	step, open := t.scenario.record(ThenStep, "survives losing the Pods its Failure tolerance declares")
 	if !open {
 		return
 	}
 
-	minimum, judgeable := t.minimumToJudge(step)
+	tolerance, judgeable := t.toleranceToJudge(step)
 	if !judgeable {
 		return
 	}
@@ -991,46 +985,47 @@ func (t Then) RequiredCapacityHeld() {
 	if !observed {
 		return
 	}
-	atTheFailure, onceSettled := t.scenario.runningAtTheFailure, t.scenario.podsKeptRunning(settled)
+	replicas := t.scenario.deployment.Replicas()
+	atTheFailure := replicas - t.scenario.runningAtTheFailure
+	onceSettled := replicas - t.scenario.podsKeptRunning(settled)
 
-	judged := t.scenario.rename(fmt.Sprintf(
-		"the Required Capacity held: a minimum of %s, %d at the moment of the Failure and %d once Settled",
-		counted(minimum, "Pod", "Pods"), atTheFailure, onceSettled))
+	judged := t.scenario.rename(fmt.Sprintf("survives losing %s: %d lost at the Failure, %d once Settled",
+		counted(tolerance, "Pod", "Pods"), atTheFailure, onceSettled))
 
 	t.judgeAt(judged, func(_ scenario.Placement, judging expect.T) {
-		expect.Expect(judging, atTheFailure).To(keptAtLeast(minimum, atTheMomentOfTheFailure))
-		expect.Expect(judging, onceSettled).To(keptAtLeast(minimum, onceThePlacementHadSettled))
+		expect.Expect(judging, atTheFailure).To(lostAtMost(tolerance, atTheMomentOfTheFailure))
+		expect.Expect(judging, onceSettled).To(lostAtMost(tolerance, onceThePlacementHadSettled))
 	})
 }
 
-func (t Then) minimumToJudge(step Step) (minimum int, judgeable bool) {
-	minimum, declared := t.scenario.workload.RequiredCapacity()
+func (t Then) toleranceToJudge(step Step) (tolerance int, judgeable bool) {
+	tolerance, declared := t.scenario.deployment.FailureTolerance()
 	switch {
 	case !declared:
-		t.scenario.end(step, errors.New("this Then judges the fewest Pods a Workload must keep Running, "+
-			"and this Workload declares no Required Capacity"))
+		t.scenario.end(step, errors.New("this Then judges the most Pods a Deployment survives losing, "+
+			"and this Deployment declares no Failure tolerance"))
 
 		return 0, false
 	case len(t.scenario.failed) == 0:
-		t.scenario.end(step, errors.New("this Then judges a Required Capacity through a Failure, "+
+		t.scenario.end(step, errors.New("this Then judges a Failure tolerance through a Failure, "+
 			"and no When ran before it"))
 
 		return 0, false
 	}
 
-	return minimum, true
+	return tolerance, true
 }
 
-// keptAtLeast lives here rather than in internal/expect, which keeps its
-// general matchers alone. Each moment missed is its own Finding.
-func keptAtLeast(minimum int, moment string) expect.Matcher[int] {
-	return func(kept int) (string, bool) {
-		if kept >= minimum {
+// lostAtMost lives here rather than in internal/expect, which keeps its general
+// matchers alone. Each moment exceeded is its own Finding.
+func lostAtMost(tolerance int, moment string) expect.Matcher[int] {
+	return func(lost int) (string, bool) {
+		if lost <= tolerance {
 			return "", true
 		}
 
-		return fmt.Sprintf("%s the Workload kept %s Running, short of the %s its Required Capacity declares",
-			moment, counted(kept, "Pod", "Pods"), counted(minimum, "Pod", "Pods")), false
+		return fmt.Sprintf("%s the Deployment lost %s, beyond the %s its Failure tolerance declares",
+			moment, counted(lost, "Pod", "Pods"), counted(tolerance, "Pod", "Pods")), false
 	}
 }
 

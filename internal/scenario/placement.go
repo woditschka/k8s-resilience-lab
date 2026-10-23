@@ -6,7 +6,7 @@ import (
 )
 
 // SpreadDomain is a way of reading an observation and not a declaration, since
-// a Workload declares its spread through its Pod specification.
+// a Deployment declares its spread through its Pod specification.
 type SpreadDomain string
 
 const (
@@ -34,9 +34,9 @@ const (
 // plane.
 type Pod struct {
 	Name string
-	// Workload is read from the label the lab gives a Workload's Pods, never
+	// Deployment is read from the label the lab gives a Deployment's Pods, never
 	// parsed from the Pod's name.
-	Workload string
+	Deployment string
 	// Node is empty while the Pod is unplaced.
 	Node  string
 	Phase PodPhase
@@ -138,7 +138,7 @@ func (p Placement) PodsStarting() []Pod {
 	return starting
 }
 
-// PodsRunningApartFrom is what a Workload kept at the moment a Failure stopped
+// PodsRunningApartFrom is what a Deployment kept at the moment a Failure stopped
 // those Nodes. An unplaced Pod is among none of them.
 func (p Placement) PodsRunningApartFrom(nodes []string) []Pod {
 	stopped := make(map[string]struct{}, len(nodes))

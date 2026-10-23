@@ -42,7 +42,7 @@ const (
 	// part of the report.
 	aScenarioHeading = "Scenario "
 
-	resilientPlacementReported = aScenarioHeading + "a-workload-placed-for-resilience"
+	resilientPlacementReported = aScenarioHeading + "a-deployment-placed-for-resilience"
 	threePodsPerZoneJudged     = "Then 3 Pods per Zone"
 	onePodPerNodeJudged        = "Then 1 Pod per Node"
 	aFindingReported           = "Finding"
@@ -50,7 +50,7 @@ const (
 	// The Step's name is derived from the predefined Pod specification and the
 	// Startup time its definition names, so a run is where the definition and
 	// the line meet.
-	resilientPlacementDeclared = "Given a Workload checkout of 9 Pods declaring Resilient placement, " +
+	resilientPlacementDeclared = "Given a Deployment checkout of 9 replicas declaring Resilient placement, " +
 		"each Pod starting in 500ms to 1s"
 )
 
@@ -67,8 +67,8 @@ const (
 // A declaration renames the line it is written on, so the renamed Given is the
 // one a Failure Scenario reports.
 const (
-	theRequiredCapacityDeclared = resilientPlacementDeclared + ", keeping at least 6 Pods Running"
-	theCapacityJudged           = "Then the Required Capacity held: a minimum of 6 Pods, "
+	theFailureToleranceDeclared = resilientPlacementDeclared + ", surviving the loss of 3 Pods"
+	theSurvivalJudged           = "Then survives losing 3 Pods: "
 )
 
 const aSettingCarried = "\n    "
@@ -87,7 +87,7 @@ func theLabsTolerationCarried(taint string) string {
 		strconv.FormatInt(int64(scenario.UnresponsiveNodeWait/time.Second), 10) + "}"
 }
 
-// A Workload line's Request reports after the settings its specification
+// A Deployment line's Request reports after the settings its specification
 // holds.
 const (
 	theRequestCarried     = aSettingCarried + "resources.requests: {cpu: 3, memory: 12Gi}"
@@ -103,7 +103,7 @@ const (
 	oneNodeFailsReported        = "When 1 Node fails, " + theNodePickedToFail
 	noPodOnTheFailedNodesJudged = "Then no Pod on the Nodes that failed"
 
-	capacityHeldWhenTheNodeStoppedJudged = theCapacityJudged + "8 at the moment of the Failure and 9 once Settled"
+	survivedWhenTheNodeStoppedJudged = theSurvivalJudged + "1 lost at the Failure, 0 once Settled"
 )
 
 // A lost Zone takes three of the nine Pods, so exactly the minimum is left
@@ -114,7 +114,7 @@ const (
 	oneZoneFailsReported        = "When 1 Zone fails, " + theZonePickedToFail
 	noPodInTheFailedZonesJudged = "Then no Pod in the Zones that failed"
 
-	capacityHeldWhenTheZoneStoppedJudged = theCapacityJudged + "6 at the moment of the Failure and 9 once Settled"
+	survivedWhenTheZoneStoppedJudged = theSurvivalJudged + "3 lost at the Failure, 0 once Settled"
 )
 
 // Each Pod asks for more than half of what a Node holds, so the six Nodes still
@@ -124,11 +124,11 @@ const (
 	thePlacementSettledAwaited              = "Wait for the Placement Settled, reached in "
 	threePodsPendingJudged                  = "Then 3 Pods Pending"
 
-	capacityHeldWithNoRoomLeftJudged = theCapacityJudged + "6 at the moment of the Failure and 6 once Settled"
+	survivedWithNoRoomLeftJudged = theSurvivalJudged + "3 lost at the Failure, 3 once Settled"
 )
 
-// The spot Nodes hold three of the nine Pods, so exactly the minimum of six is
-// left Running at the moment of the Failure.
+// The spot Nodes hold three of the nine Pods, so the Failure costs exactly the
+// three Pods the Deployment survives losing.
 const (
 	spotNodesStopRespondingReported = aScenarioHeading + "spot-nodes-that-stop-responding"
 	theOnDemandAndSpotNodesDeclared = "Given a Topology of 3 Zones of " +
@@ -137,18 +137,18 @@ const (
 		"a NodePool spot of 1 Standard Node holding 16 cpu, 64Gi memory and 10 Pods each, labelled capacity-type=spot"
 	theSpotNodesFailReported = "When Nodes labelled capacity-type=spot fail, " +
 		"zone-1-node-3, zone-2-node-3, zone-3-node-3"
-	capacityHeldWhenTheSpotNodesStoppedJudged = theCapacityJudged + "6 at the moment of the Failure and 9 once Settled"
+	survivedWhenTheSpotNodesStoppedJudged = theSurvivalJudged + "3 lost at the Failure, 0 once Settled"
 )
 
 // Each Zone holds one on-demand and one spot Node, so six Pods spread evenly
 // put two in each Zone and three on each capacity type.
 const (
-	spreadOverOnDemandAndSpotReported = aScenarioHeading + "a-workload-spread-over-on-demand-and-spot"
+	spreadOverOnDemandAndSpotReported = aScenarioHeading + "a-deployment-spread-over-on-demand-and-spot"
 	theLabelledNodePoolsDeclared      = "Given a Topology of 3 Zones of " +
 		"a NodePool on-demand of 1 Standard Node holding 16 cpu, 64Gi memory and 10 Pods each, " +
 		"labelled capacity-type=on-demand; " +
 		"a NodePool spot of 1 Standard Node holding 16 cpu, 64Gi memory and 10 Pods each, labelled capacity-type=spot"
-	spreadOverOnDemandAndSpotDeclared = "Given a Workload checkout of 6 Pods declaring Spread over on-demand and spot, " +
+	spreadOverOnDemandAndSpotDeclared = "Given a Deployment checkout of 6 replicas declaring Spread over on-demand and spot, " +
 		"each Pod starting in 500ms to 1s"
 	everyPodRunningJudged          = "Then every Pod Running"
 	twoPodsPerZoneJudged           = "Then 2 Pods per Zone"
@@ -172,9 +172,9 @@ const (
 		"a NodePool general of 2 Standard Nodes holding 16 cpu, 64Gi memory and 10 Pods each; " +
 		"a NodePool gpu of 1 GPU Node holding 32 cpu, 128Gi memory and 10 Pods each, " +
 		"tainted nvidia.com/gpu=present:NoSchedule"
-	sixGeneralPodsDeclared = "Given a Workload checkout of 6 Pods declaring Resilient placement, " +
+	sixGeneralPodsDeclared = "Given a Deployment checkout of 6 replicas declaring Resilient placement, " +
 		"each Pod starting in 500ms to 1s"
-	toleratingGpuNodesDeclared = "Given a Workload inference of 3 Pods declaring Tolerating GPU Nodes, " +
+	toleratingGpuNodesDeclared = "Given a Deployment inference of 3 replicas declaring Tolerating GPU Nodes, " +
 		"each Pod starting in 500ms to 1s"
 	sixPodsOnTheGeneralNodePoolJudged = "Then 6 Pods on the NodePool general"
 	noPodOnTheGpuNodePoolJudged       = "Then 0 Pods on the NodePool gpu"
@@ -218,7 +218,7 @@ const (
 	noEntryPrinted     = 0
 )
 
-const theWorkloadOfEveryScenario = "checkout-"
+const theDeploymentOfEveryScenario = "checkout-"
 
 const noPodShared = 0
 
@@ -353,14 +353,14 @@ func theLineOpeningWith(reported, label string) string {
 	return ""
 }
 
-func TestAWorkloadDeclaringResilientPlacement_ShouldReportBothSpreadsInFullBeneathItsGivenLine(t *testing.T) {
+func TestADeploymentDeclaringResilientPlacement_ShouldReportBothSpreadsInFullBeneathItsGivenLine(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, resilientPlacementDeclared+resilientPlacementCarries())
 }
 
-func TestAWorkloadNamingStandardPod_ShouldReportTheRequestBeneathItsGivenLine(t *testing.T) {
+func TestADeploymentNamingStandardPod_ShouldReportTheRequestBeneathItsGivenLine(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
 
@@ -388,31 +388,31 @@ func TestANodeThatStopsResponding_ShouldSettleAtThreePodsPerZoneWithNoneOnTheFai
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, nodeStopsRespondingReported)
-	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries()+theStandardPodCarried)
+	reportShows(t, reported, theFailureToleranceDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneNodeFailsReported)
 	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, noPodOnTheFailedNodesJudged)
 	reportShows(t, reported, threePodsPerZoneJudged)
-	reportShows(t, reported, capacityHeldWhenTheNodeStoppedJudged)
+	reportShows(t, reported, survivedWhenTheNodeStoppedJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
 // Pods per Zone are not read after the Failure: two Zones carry nine Pods, so
-// the Placement is skewed and the Scenario judges the capacity alone.
+// the Placement is skewed and the Scenario judges its Failure tolerance alone.
 func TestARunOfAZoneThatStopsResponding_ShouldReportTheZoneItPickedToFail(t *testing.T) {
 	t.Parallel()
 	reported := theRunOfEveryScenario(t)
 
 	reportShows(t, reported, zoneStopsRespondingReported)
-	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries()+theStandardPodCarried)
+	reportShows(t, reported, theFailureToleranceDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, allNodesReadyAwaited)
 	reportShows(t, reported, allPodsReadyAwaited)
 	reportShows(t, reported, oneZoneFailsReported)
 	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, noPodInTheFailedZonesJudged)
-	reportShows(t, reported, capacityHeldWhenTheZoneStoppedJudged)
+	reportShows(t, reported, survivedWhenTheZoneStoppedJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
@@ -422,29 +422,29 @@ func TestARunOfNoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndTh
 
 	reportShows(t, reported, noRoomAfterAZoneStopsRespondingReported)
 	reportShows(t, reported, theNodeCapacityDeclared)
-	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries()+theRequestCarried)
+	reportShows(t, reported, theFailureToleranceDeclared+resilientPlacementCarries()+theRequestCarried)
 	reportShows(t, reported, onePodPerNodeJudged)
 	reportShows(t, reported, oneZoneFailsReported)
 	reportShows(t, reported, thePlacementSettledAwaited)
 	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, noPodInTheFailedZonesJudged)
 	reportShows(t, reported, threePodsPendingJudged)
-	reportShows(t, reported, capacityHeldWithNoRoomLeftJudged)
+	reportShows(t, reported, survivedWithNoRoomLeftJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
-func TestSpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNinePodsOnTheOnDemandNodes(t *testing.T) {
+func TestSpotNodesThatStopResponding_ShouldSurviveLosingThreePodsAndRestoreNinePodsOnTheOnDemandNodes(t *testing.T) {
 	t.Parallel()
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), spotNodesStopRespondingReported)
 
 	reportShows(t, reported, theOnDemandAndSpotNodesDeclared)
-	reportShows(t, reported, theRequiredCapacityDeclared+resilientPlacementCarries()+theStandardPodCarried)
+	reportShows(t, reported, theFailureToleranceDeclared+resilientPlacementCarries()+theStandardPodCarried)
 	reportShows(t, reported, onePodPerNodeJudged)
 	reportShows(t, reported, theSpotNodesFailReported)
 	reportShows(t, reported, theStatedRestoreTimeAwaited)
 	reportShows(t, reported, threePodsPerZoneJudged)
 	reportShows(t, reported, noPodOnTheFailedNodesJudged)
-	reportShows(t, reported, capacityHeldWhenTheSpotNodesStoppedJudged)
+	reportShows(t, reported, survivedWhenTheSpotNodesStoppedJudged)
 	reportLacks(t, reported, aFindingReported)
 }
 
@@ -745,7 +745,7 @@ func thePodsFiledByMoreThanOneScenario(t *testing.T, reported string) []string {
 			if err := json.Unmarshal([]byte(line), &entry); err != nil {
 				t.Fatalf("read an entry of the Timeline of %s: %v", theScenarioNamedIn(section), err)
 			}
-			if entry.Kind != string(scenario.PodObject) || !strings.HasPrefix(entry.Name, theWorkloadOfEveryScenario) {
+			if entry.Kind != string(scenario.PodObject) || !strings.HasPrefix(entry.Name, theDeploymentOfEveryScenario) {
 				continue
 			}
 			if filedBy[entry.Name] == nil {
@@ -882,14 +882,14 @@ func TestARunOfOneScenario_ShouldPrintOneHeavierSeparatorAfterItsOpeningLines(t 
 // These Outcomes are built rather than run, because a Scenario whose Steps fail
 // part-way cannot be written as a Scenario source.
 const (
-	theScenarioReported = "a-workload-placed-for-resilience"
-	itsCluster          = "k8s-resilience-lab-a-workload-placed-for-resilience-7f3a9c"
+	theScenarioReported = "a-deployment-placed-for-resilience"
+	itsCluster          = "k8s-resilience-lab-a-deployment-placed-for-resilience-7f3a9c"
 	theThenStepName     = "3 Pods per Zone"
 	aTopologyStepName   = "a Topology of 3 Zones of 3 Nodes"
 
 	whatEndedTheScenario      = "apply " + aTopologyStepName + ": create Node zone-1-node-1: already exists"
 	whyTheTimelineWasNotFiled = "create the Timeline folder /read-only/timelines: permission denied"
-	someTimelinePath          = "/tmp/a-run/timelines/k8s-resilience-lab-a-workload-placed-for-resilience-7f3a9c.jsonl"
+	someTimelinePath          = "/tmp/a-run/timelines/k8s-resilience-lab-a-deployment-placed-for-resilience-7f3a9c.jsonl"
 
 	theScenarioNotStarted    = "a-node-that-stops-responding"
 	whyTheClusterDidNotStart = "the Scenario " + theScenarioNotStarted + ": start the Simulated Cluster: port already allocated"
@@ -1032,21 +1032,21 @@ func expectNamed(t *testing.T, err error, named string) {
 // A board of one Zone of one Node holding one Pod is enough to tell its lines
 // from the Steps around it.
 const (
-	someNodePool        = "general"
-	someNodeCPU         = scenario.CPU(16000)
-	someNodeMemory      = scenario.Memory(65536)
-	someNodePods        = 10
-	oneZone             = 1
-	oneNodePerZone      = 1
-	theOnlyNode         = "zone-1-node-1"
-	aWorkloadOnTheBoard = "checkout"
-	aPodOnTheBoard      = "checkout-5fc87ff7c8-7vd48"
-	theWaitStepName     = "all Pods Ready"
-	theWhenStepName     = "1 Node fails, zone-1-node-1"
-	aSecondThenStepName = "1 Pod per Node"
-	whyNoBoard          = "observe the Placement board: context canceled"
-	aStepIndent         = "  "
-	aSeparatorRune      = "-"
+	someNodePool          = "general"
+	someNodeCPU           = scenario.CPU(16000)
+	someNodeMemory        = scenario.Memory(65536)
+	someNodePods          = 10
+	oneZone               = 1
+	oneNodePerZone        = 1
+	theOnlyNode           = "zone-1-node-1"
+	aDeploymentOnTheBoard = "checkout"
+	aPodOnTheBoard        = "checkout-5fc87ff7c8-7vd48"
+	theWaitStepName       = "all Pods Ready"
+	theWhenStepName       = "1 Node fails, zone-1-node-1"
+	aSecondThenStepName   = "1 Pod per Node"
+	whyNoBoard            = "observe the Placement board: context canceled"
+	aStepIndent           = "  "
+	aSeparatorRune        = "-"
 
 	// One rune, so an empty line does not pass for a separator.
 	aSeparatorOfAnyWidth = 1
@@ -1060,7 +1060,7 @@ func aBoardOfOnePod(t *testing.T) scenario.PlacementBoard {
 }
 
 func thePodOnTheBoard() scenario.Pod {
-	return scenario.Pod{Name: aPodOnTheBoard, Workload: aWorkloadOnTheBoard, Node: theOnlyNode, Phase: scenario.PodRunning}
+	return scenario.Pod{Name: aPodOnTheBoard, Deployment: aDeploymentOnTheBoard, Node: theOnlyNode, Phase: scenario.PodRunning}
 }
 
 func aTopologyOfOneNode(t *testing.T) scenario.Topology {
@@ -1216,12 +1216,12 @@ func TestAScenarioReport_ShouldCloseWithOneSkewLineAndTheTimelinesLineAndNoCount
 	waited := aWaitStepWith(board)
 	settled := scenario.NewPlacement(aTopologyOfOneNode(t).Nodes(), []scenario.Pod{thePodOnTheBoard()})
 	held := anOutcomeOf(waited, aThenStep())
-	held.Placement, held.JudgedWorkload = settled, aWorkloadOnTheBoard
+	held.Placement, held.JudgedDeployment = settled, aDeploymentOnTheBoard
 
 	reported := whatTheRunReportsFor(t, held, theReportAlone())
 
 	theSkew := fmt.Sprintf("Skew of %s: %d over Zones, %d over Nodes",
-		aWorkloadOnTheBoard, settled.Skew(scenario.SpreadOverZones), settled.Skew(scenario.SpreadOverNodes))
+		aDeploymentOnTheBoard, settled.Skew(scenario.SpreadOverZones), settled.Skew(scenario.SpreadOverNodes))
 	afterTheLastThen := theLinesAfter(t, reported, reportedAsAStep(aThenStep().String()), 3)
 	expect.Expect(t, afterTheLastThen[0]).To(expect.Equal(reportedAsAStep(theSkew)))
 	expect.Expect(t, spansAtLeast(afterTheLastThen[1], aSeparatorOfAnyWidth)).To(expect.Equal(true))
@@ -1246,7 +1246,7 @@ const (
 func aNarrativeOfOnePod() scenario.WaitNarrative {
 	narratives := scenario.NewTimeline([]scenario.Entry{
 		{Elapsed: aNodeTurningReady, Change: scenario.ChangeAdded, Kind: scenario.NodeObject, Name: aWideNodeName, Reason: string(scenario.NodeReady)},
-		{Elapsed: aNodeTurningReady, Change: scenario.ChangeAdded, Kind: scenario.DeploymentObject, Name: aWorkloadOnTheBoard, Detail: someDeploymentReady},
+		{Elapsed: aNodeTurningReady, Change: scenario.ChangeAdded, Kind: scenario.DeploymentObject, Name: aDeploymentOnTheBoard, Detail: someDeploymentReady},
 		{Elapsed: thePodRunning, Change: scenario.ChangeAdded, Kind: scenario.PodObject, Name: aPodOnTheBoard, Reason: string(scenario.PodRunning), Detail: theOnlyNode},
 		{Elapsed: theWaitNoted, Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: aWaitNoteIsNamed, Detail: theWaitLineNoted},
 	}).WaitNarratives()
@@ -1269,7 +1269,7 @@ func TestAWaitsNarrative_ShouldPrintUnderItsLineAboveTheSeparatorAndTheBoard(t *
 }
 
 // The filing line ends the report: nothing of a summary follows it.
-func TestAScenarioReport_ShouldPrintNoSummaryOfEachWorkloadsPods(t *testing.T) {
+func TestAScenarioReport_ShouldPrintNoSummaryOfEachDeploymentsPods(t *testing.T) {
 	held := anOutcomeOf(aWaitStepWith(aBoardOfOnePod(t)), aThenStep())
 
 	reported := whatTheRunReportsFor(t, held, theReportAlone())
@@ -1282,7 +1282,7 @@ const (
 	interactive              = "--interactive"
 	aNameNoScenarioCarries   = "a-condition-no-scenario-states"
 	theLiveViewOnLoopback    = "Live view:          http://127.0.0.1:"
-	theFirstScenarioOfTheLab = "a-workload-placed-for-resilience"
+	theFirstScenarioOfTheLab = "a-deployment-placed-for-resilience"
 	aSecondScenarioOfTheLab  = "a-node-that-stops-responding"
 	theTimelineFiled         = "Timeline, "
 )

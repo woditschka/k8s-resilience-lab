@@ -1,6 +1,6 @@
 # A Topology declares the NodePools every Zone holds
 
-**Status:** Accepted, amended 2026-10-09: every NodePool is named as its first argument and a Topology takes NodePools alone, options 4 and 8; amended 2026-10-09: a NodePool states its capacity or names one its Scenarios define, as its third argument, options 12, 14, 16, 18 and 20; amended 2026-10-18: `lab.NodePool`, `lab.NodePoolName`, `lab.NodesPerZone` and `lab.NamedNodeCapacity` are now `node.Pool`, `node.PoolName`, `node.PerZone` and `node.Named`, and a capacity is the keyed literal `node.Capacity`, per [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md); amended 2026-10-18: a NodePool states its own Node labels, options 22, 25 and 27
+**Status:** Accepted, amended 2026-10-09: every NodePool is named as its first argument and a Topology takes NodePools alone, options 4 and 8; amended 2026-10-09: a NodePool states its capacity or names one its Scenarios define, as its third argument, options 12, 14, 16, 18 and 20; amended 2026-10-18: `lab.NodePool`, `lab.NodePoolName`, `lab.NodesPerZone` and `lab.NamedNodeCapacity` are now `node.Pool`, `node.PoolName`, `node.PerZone` and `node.Named`, and a capacity is the keyed literal `node.Capacity`, per [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md); amended 2026-10-18: a NodePool states its own Node labels, options 22, 25 and 27; amended 2026-10-23: the Given is `Zones`, taking a plain `int` Zone count, per [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)
 
 ## Context
 
@@ -81,10 +81,10 @@ Where a Then reads a Node's labels:
 
 Options 2, 4, 8, 10, 12, 14, 16, 18, 20, 22, 25 and 27.
 
-- `Given().Topology` takes the Zone count, then one or more `node.Pool`. A line of no NodePool ends the Scenario there.
+- `Given().Zones` takes the Zone count as a plain `int`, then one or more `node.Pool`: `Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))`. A line of no NodePool ends the Scenario there.
 - `node.Pool` takes a `node.PoolName`, a `node.PerZone` and a `node.Capacity`, in that order. The defined types make a swap a compile error.
 - A capacity is a `node.Capacity` literal of `CPU`, `Memory` and `Pods`, or one the Scenarios name through `node.Named`. A dimension left out is refused at the Topology Given.
-- `scenarios/nodes.go` defines each Named Node capacity once, as a function taking nothing, such as `StandardNodes()`. The lab defines none.
+- `scenarios/nodes.go` defines each Named Node capacity once, as a function taking nothing, such as `StandardNode()`, singular since 2026-10-22 as it stands for one Node's room. The lab defines none.
 - `.Labels(node.Labels{…})` adds a NodePool's own labels and may be written more than once. The lab's own keys are those it writes on every Node and every key under its prefix.
 - Every Node carries `k8s-resilience-lab/node-pool` with its NodePool's name, written by the mapper after the stated labels.
 - `internal/scenario` holds the label key and value syntax and the lab's own keys without a Kubernetes import. A test in `internal/cluster` pins them to the client library and to what the mapper writes.
@@ -96,13 +96,13 @@ Options 2, 4, 8, 10, 12, 14, 16, 18, 20, 22, 25 and 27.
 
 The Scenario ADR's rule makes a mandatory value an argument and an optional setting a further call. Name and capacity became mandatory, so each moved into the argument list. Labels stay optional, so they stay a call.
 
-The dated course: on 2026-10-08 a Topology took a Node count per Zone or NodePools, a name was the optional `.Named`, and capacity the optional `.NodeCapacity`. On 2026-10-09 the name became the first argument and the short form went. Later that day capacity became the third argument, with Named capacities defined beside the Scenarios. On 2026-10-18 the names moved to package `node` and the labels call joined.
+The dated course: on 2026-10-08 a Topology took a Node count per Zone or NodePools, a name was the optional `.Named`, and capacity the optional `.NodeCapacity`. On 2026-10-09 the name became the first argument and the short form went. Later that day capacity became the third argument, with Named capacities defined beside the Scenarios. On 2026-10-18 the names moved to package `node` and the labels call joined. On 2026-10-23 the Given became `Zones`, its count a plain `int`.
 
 ## Consequences
 
 A Scenario's Topology line shows every value its Nodes hold, readable top to bottom in the order the Nodes are numbered. Every Node is selectable by its NodePool, and a spread can count NodePools or stated label values as domains.
 
-A NodePool reads as a manifest: `node.Pool("spot", node.PerZone(1), StandardNodes()).Labels(node.Labels{CapacityType: "spot"})`. A Scenario of one NodePool names it general. A further Named capacity is one function in `scenarios/nodes.go`, and the lab's code does not change.
+A NodePool reads as a manifest: `node.Pool("spot", node.PerZone(1), StandardNode()).Labels(node.Labels{CapacityType: "spot"})`. A Scenario of one NodePool names it general. A further Named capacity is one function in `scenarios/nodes.go`, and the lab's code does not change.
 
 The empty name, a capacity dimension left out and every label refusal are run-time ends at the Given rather than compile errors. Two definitions under one name in two Scenarios are not refused within a run; the place rule keeps the lab's own Scenarios to one.
 
@@ -117,5 +117,5 @@ A hand-written label syntax lives in the domain, held to the library's by a test
 - [system-design.md § Contracts](../system-design.md#contracts)
 - [ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md)
 - [ADR: Provisioning ends when the scheduler has placed a Pod on every Node](2026-10-04-scheduler-observable-provisioning.md)
-- [ADR: A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
+- [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
 - [ADR: Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)

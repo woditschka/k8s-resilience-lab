@@ -4,13 +4,13 @@
 
 ## Context
 
-"Resilience" covers two different questions. The first: does the control plane place and re-place a Workload's Pods the way its manifests declare? The second: does the application inside a Pod survive being restarted, drained, starved of memory, or cut off from its dependencies?
+"Resilience" covers two different questions. The first: does the control plane place and re-place a Deployment's Pods the way its manifests declare? The second: does the application inside a Pod survive being restarted, drained, starved of memory, or cut off from its dependencies?
 
 A Simulated Cluster answers only the first. Its control plane is genuine, but its Pods are fake and no container image is ever pulled, so there is no process to probe, shut down, or starve. A lab that claimed the second question would report green for behavior it never executed.
 
 ## Options Considered
 
-1. **Placement only** — the lab asserts Placement and Required Capacity, and says so plainly.
+1. **Placement only** — the lab asserts Placement and Failure tolerance, and says so plainly.
 2. **Placement plus a real-cluster profile** — a second run mode against a staging cluster, with a chaos tool injecting process-level faults.
 3. **Placement plus simulated application state** — script Pod status transitions so a Pod can appear to fail its readiness check. The transitions are declared by the lab, so the assertion only re-reads its own input.
 

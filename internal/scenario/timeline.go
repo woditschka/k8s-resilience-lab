@@ -116,7 +116,7 @@ func (t Timeline) Entries() []Entry {
 // way the run that recorded it did. A change after the last Wait's note stands
 // under no Wait.
 func (t Timeline) WaitNarratives() []WaitNarrative {
-	narrating := newNarration(t.workloadsNamed())
+	narrating := newNarration(t.deploymentsNamed())
 	var narratives []WaitNarrative
 	for _, entry := range t.entries {
 		if entry.notesAWait() {
@@ -130,7 +130,7 @@ func (t Timeline) WaitNarratives() []WaitNarrative {
 	return narratives
 }
 
-func (t Timeline) workloadsNamed() []string {
+func (t Timeline) deploymentsNamed() []string {
 	var named []string
 	for _, entry := range t.entries {
 		if entry.Kind == DeploymentObject && !slices.Contains(named, entry.Name) {
@@ -175,11 +175,11 @@ func (n WaitNarrative) Equal(other WaitNarrative) bool {
 // narration keeps each object's last reading across the whole Timeline and the
 // moments since the last cut.
 type narration struct {
-	workloads []string
-	nodes     map[string]NodeReadiness
-	pods      map[string]*podNarrated
-	podOrder  []string
-	moments   []moment
+	deployments []string
+	nodes       map[string]NodeReadiness
+	pods        map[string]*podNarrated
+	podOrder    []string
+	moments     []moment
 }
 
 type podNarrated struct {
@@ -212,8 +212,8 @@ func (m moment) line() string {
 	return line
 }
 
-func newNarration(workloads []string) *narration {
-	return &narration{workloads: workloads, nodes: map[string]NodeReadiness{}, pods: map[string]*podNarrated{}}
+func newNarration(deployments []string) *narration {
+	return &narration{deployments: deployments, nodes: map[string]NodeReadiness{}, pods: map[string]*podNarrated{}}
 }
 
 func (n *narration) read(entry Entry) {
@@ -246,7 +246,7 @@ func (n *narration) readNode(entry Entry) {
 	}
 }
 
-// A Pod no Workload claims is the lab's own setup and in no narrative.
+// A Pod no Deployment claims is the lab's own setup and in no narrative.
 func (n *narration) readPod(entry Entry) {
 	pod, claimed := n.podOf(entry.Name)
 	if !claimed {
@@ -278,7 +278,7 @@ func (n *narration) readPod(entry Entry) {
 	}
 }
 
-// The lab deletes no Workload Pod, so the first entry marking one for deletion
+// The lab deletes no Deployment Pod, so the first entry marking one for deletion
 // is its eviction.
 func (n *narration) evict(pod *podNarrated, entry Entry) {
 	pod.phase = PodTerminating
@@ -306,12 +306,12 @@ func (n *narration) podOf(name string) (*podNarrated, bool) {
 		return pod, true
 	}
 
-	workload := workloadOf(name, n.workloads)
-	if workload == "" {
+	deployment := deploymentOf(name, n.deployments)
+	if deployment == "" {
 		return nil, false
 	}
 
-	pod := &podNarrated{named: boardNameOf(workload, name), scheduled: noMoment}
+	pod := &podNarrated{named: boardNameOf(deployment, name), scheduled: noMoment}
 	n.pods[name] = pod
 	n.podOrder = append(n.podOrder, name)
 
@@ -352,12 +352,12 @@ func (p *podNarrated) pendingLine() string {
 	return line
 }
 
-// The longest match wins where two Workload names nest.
-func workloadOf(pod string, workloads []string) string {
+// The longest match wins where two Deployment names nest.
+func deploymentOf(pod string, deployments []string) string {
 	claimed := ""
-	for _, workload := range workloads {
-		if strings.HasPrefix(pod, workload+"-") && len(workload) > len(claimed) {
-			claimed = workload
+	for _, deployment := range deployments {
+		if strings.HasPrefix(pod, deployment+"-") && len(deployment) > len(claimed) {
+			claimed = deployment
 		}
 	}
 

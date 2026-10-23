@@ -169,16 +169,16 @@ func (c *SimulatedCluster) openStreams(ctx context.Context) ([]*stream, error) {
 			return c.watches.CoreV1().Nodes().Watch(ctx, options)
 		}},
 		{named: "Pod", watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			return c.watches.CoreV1().Pods(workloadNamespace).Watch(ctx, options)
+			return c.watches.CoreV1().Pods(clusterNamespace).Watch(ctx, options)
 		}},
 		{named: "Deployment", watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			return c.watches.AppsV1().Deployments(workloadNamespace).Watch(ctx, options)
+			return c.watches.AppsV1().Deployments(clusterNamespace).Watch(ctx, options)
 		}},
 		{named: "ReplicaSet", watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			return c.watches.AppsV1().ReplicaSets(workloadNamespace).Watch(ctx, options)
+			return c.watches.AppsV1().ReplicaSets(clusterNamespace).Watch(ctx, options)
 		}},
 		{named: "Event", watch: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
-			return c.watches.CoreV1().Events(workloadNamespace).Watch(ctx, options)
+			return c.watches.CoreV1().Events(clusterNamespace).Watch(ctx, options)
 		}},
 	}
 

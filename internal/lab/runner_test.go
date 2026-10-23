@@ -78,12 +78,12 @@ func TestAScenarioFunction_ShouldRunUnderTheConditionItsNameStatesWithHyphens(t 
 
 func TestAFunctionNameStatingNoCondition_ShouldYieldNoScenarioNameButNameTheFunction(t *testing.T) {
 	functionsNamingNoCondition := map[string]string{
-		"a name without the outcome":         "AWorkloadPlacedForResilience",
+		"a name without the outcome":         "ADeploymentPlacedForResilience",
 		"an empty condition":                 "_ShouldPlaceThreePodsPerZone",
-		"a closure inside a Scenario":        "AWorkload_ShouldBePlaced.func1",
-		"a method value":                     "(*Catalog).AWorkload_ShouldBePlaced-fm",
-		"an underscore inside the condition": "A_Workload_ShouldBePlaced",
-		"a letter beyond ASCII":              "AWorkloadÜberall_ShouldBePlaced",
+		"a closure inside a Scenario":        "ADeployment_ShouldBePlaced.func1",
+		"a method value":                     "(*Catalog).ADeployment_ShouldBePlaced-fm",
+		"an underscore inside the condition": "A_Deployment_ShouldBePlaced",
+		"a letter beyond ASCII":              "ADeploymentÜberall_ShouldBePlaced",
 	}
 
 	for named, function := range functionsNamingNoCondition {
@@ -331,8 +331,8 @@ func theKindsOf(steps []Step) []StepKind {
 func TestAHeldRunsScenarioReachingItsFirstWhen_ShouldCarryOutNeitherItNorALaterStepAndNotEnd(t *testing.T) {
 	halting := aScenarioHaltingAtItsFirstWhen()
 
-	halting.Given().Topology(Zones(twoZones), theGeneralNodePool())
-	halting.When().NodesFail(Nodes(oneNodeFailing))
+	halting.Given().Zones(twoZones, theGeneralNodePool())
+	halting.When().NodesFail(oneNodeFailing)
 	halting.Then().PodsPerZone(podsPerZoneWhenEven)
 
 	expect.Expect(t, theKindsOf(halting.outcome().Steps)).To(expect.Equal([]StepKind{GivenStep}))
@@ -343,7 +343,7 @@ func TestAnInteractiveRunOfAScenarioWithNoWhen_ShouldRunEveryStep(t *testing.T) 
 	halting := aScenarioOver(onePodPerNodeOf(aTopologyOf(t, twoZones, twoNodesPerZone)))
 	halting.haltsAtTheFirstWhen = true
 
-	halting.Given().Topology(Zones(twoZones), theGeneralNodePool())
+	halting.Given().Zones(twoZones, theGeneralNodePool())
 	halting.Then().PodsPerNode(podsPerNodeWhenEven)
 
 	expect.Expect(t, theKindsOf(halting.outcome().Steps)).To(expect.Equal([]StepKind{GivenStep, ThenStep}))

@@ -1,6 +1,6 @@
-# A NodePool states NoSchedule taints, and a later Workload deploys beside the earlier, judged alone
+# A NodePool states NoSchedule taints, and a later Deployment runs beside the earlier, judged alone
 
-**Status:** Accepted, amended 2026-10-20: every Wait's Placement board observes every deployed Workload, option 9
+**Status:** Accepted, amended 2026-10-20: every Wait's Placement board observes every deployed Workload, option 9; retitled 2026-10-22: the Workload is a Deployment, and this record keeps the earlier name
 
 ## Context
 
@@ -50,7 +50,7 @@ Option 8 reports a Placement no Wait observed. Option 2 departs from Kubernetes'
 
 ## Consequences
 
-A Scenario's gpu NodePool reads as a manifest's taint: `node.Pool("gpu", node.PerZone(1), GPUNodes()).Taints(node.Taint{Key: GPU, Value: GPUPresent, Effect: node.NoSchedule})`.
+A Scenario's gpu NodePool reads as a manifest's taint: `node.Pool("gpu", node.PerZone(1), GPUNode()).Taints(node.Taint{Key: GPU, Value: GPUPresent, Effect: node.NoSchedule})`.
 
 A Scenario may judge one Workload, then place another beside it and judge that. An earlier Workload is never judged again, yet every board after it shows its Pods.
 

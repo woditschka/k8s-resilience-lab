@@ -123,7 +123,7 @@ func theBoardOfAClusterNoLongerChanging(topology scenario.Topology, placed scena
 	return observed{Lines: scenario.NewPlacementBoard(topology, placed, once).Lines()}
 }
 
-// A specification naming nothing is refused by the Workload's constructor, so
+// A specification naming nothing is refused by the Deployment's constructor, so
 // the Given declaring it cannot be carried out.
 func aSpecificationTheConstructorRefuses() pod.Specification {
 	return pod.Specification{}
@@ -148,7 +148,7 @@ func theReadyNodesOf(t *testing.T, provisioned *cluster.SimulatedCluster) []scen
 	return ready
 }
 
-// The board observed while held shows the Workload's Pods alone, so no Pod the
+// The board observed while held shows the Deployment's Pods alone, so no Pod the
 // lab placed while provisioning the Topology stands on it.
 func TestAnInteractiveRunNamingAScenario_ShouldHoldItsClusterAsTheStepsBeforeItsFirstWhenLeftIt(t *testing.T) {
 	t.Parallel()
@@ -162,13 +162,13 @@ func TestAnInteractiveRunNamingAScenario_ShouldHoldItsClusterAsTheStepsBeforeIts
 
 	held, err := running.holdNamed(holding, theHeldScenario, func(steps *Scenario) {
 		provisioned = steps.provisioned
-		steps.Given().Topology(Zones(twoZones), theGeneralNodePool())
+		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
-		steps.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), resilientPlacement())
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
 		steps.WaitFor().AllPodsReady()
 		declared = steps.topology
 
-		steps.When().NodesFail(Nodes(oneNodeFailing))
+		steps.When().NodesFail(oneNodeFailing)
 		steps.WaitFor().AllPodsReady()
 	}, observer, func(Outcome) {
 		readyWhileHeld = theReadyNodesOf(t, provisioned)
@@ -193,7 +193,7 @@ func TestStoppingAnInteractiveRun_ShouldRemoveItsSimulatedCluster(t *testing.T) 
 
 	_, err := running.holdNamed(holding, theScenarioStoppedPartWay, func(steps *Scenario) {
 		provisioned = steps.provisioned
-		steps.Given().Topology(Zones(twoZones), theGeneralNodePool())
+		steps.Given().Zones(twoZones, theGeneralNodePool())
 		stopTheLab()
 		steps.WaitFor().AllNodesReady()
 	}, anObserverDiscardingEachBoard(), func(Outcome) {})
@@ -213,9 +213,9 @@ func TestAnInteractiveRunWhoseStepCannotBeCarriedOut_ShouldHoldTheClusterAsThatS
 
 	held, err := running.holdNamed(holding, theScenarioEndedAtARefusal, func(steps *Scenario) {
 		provisioned = steps.provisioned
-		steps.Given().Topology(Zones(twoZones), theGeneralNodePool())
+		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
-		steps.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), aSpecificationTheConstructorRefuses())
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), aSpecificationTheConstructorRefuses())
 	}, anObserverDiscardingEachBoard(), func(Outcome) {
 		readyWhileHeld = theReadyNodesOf(t, provisioned)
 		stopTheLab()

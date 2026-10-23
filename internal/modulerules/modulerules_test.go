@@ -82,7 +82,7 @@ func Scan(into *Decoded, from string) {
 	chainedSource = `package probed
 
 func Chain(step Name) {
-	step.Given().Workload(limit)
+	step.Given().Deployment(limit)
 }
 `
 
@@ -283,8 +283,8 @@ func TestAScannedMethodChain_ShouldReportEveryExpressionItsNamesAreSelectedFrom(
 			Exported:   true,
 			Parameters: []modulerules.Parameter{{Name: "step", Type: declaredType}},
 			Statements: []modulerules.Statement{{
-				Written:   "step.Given().Workload(limit)",
-				Name:      "Workload",
+				Written:   "step.Given().Deployment(limit)",
+				Name:      "Deployment",
 				On:        &theGivenCall,
 				Arguments: []modulerules.Statement{{Written: "limit", Name: "limit"}},
 				Call:      true,
@@ -292,7 +292,7 @@ func TestAScannedMethodChain_ShouldReportEveryExpressionItsNamesAreSelectedFrom(
 			Names: []modulerules.UsedName{
 				{Name: "step"},
 				{Name: declaredType},
-				{Qualifier: theGivenCall.Written, Name: "Workload"},
+				{Qualifier: theGivenCall.Written, Name: "Deployment"},
 				{Qualifier: theStep.Written, Name: "Given"},
 				{Name: "limit"},
 			},

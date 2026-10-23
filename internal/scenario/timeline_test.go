@@ -16,21 +16,21 @@ const (
 	aPodName         = "web-5d8f9b7c6-2xk4m"
 	scheduledReason  = "Scheduled"
 	scheduledMessage = "Successfully assigned default/web-5d8f9b7c6-2xk4m to zone-2-node-2"
-	aWorkloadName    = "web"
+	aDeploymentName  = "web"
 	readyReplicas    = "3 of 9 Pods ready"
 	aNodeName        = "zone-2-node-2"
 	aStreamGap       = "the Pod stream closed and could not be re-opened"
 )
 
-// The two Workload names nest, and a probe Pod belongs to provisioning rather
+// The two Deployment names nest, and a probe Pod belongs to provisioning rather
 // than to either.
 const (
-	someNodeCapacity        = "4 cpu, 16Gi memory and 10 Pods"
-	aSecondNodeName         = "zone-3-node-1"
-	aProbePodName           = "provisioning-probe-" + aNodeName
-	aSecondPodName          = "web-5d8f9b7c6-9ptwz"
-	aNestedWorkloadName     = aWorkloadName + "-cache"
-	aPodOfTheNestedWorkload = aNestedWorkloadName + "-6c8d7f5b4-mk4qv"
+	someNodeCapacity          = "4 cpu, 16Gi memory and 10 Pods"
+	aSecondNodeName           = "zone-3-node-1"
+	aProbePodName             = "provisioning-probe-" + aNodeName
+	aSecondPodName            = "web-5d8f9b7c6-9ptwz"
+	aNestedDeploymentName     = aDeploymentName + "-cache"
+	aPodOfTheNestedDeployment = aNestedDeploymentName + "-6c8d7f5b4-mk4qv"
 )
 
 const (
@@ -43,7 +43,7 @@ const (
 const (
 	whenTheFirstNodeWasReady = 120 * time.Millisecond
 	whenTheLastNodeWasReady  = 220 * time.Millisecond
-	whenTheWorkloadLanded    = 1000 * time.Millisecond
+	whenTheDeploymentLanded  = 1000 * time.Millisecond
 	whenThePodsWerePending   = 1100 * time.Millisecond
 	whenTheFirstPodWasBound  = 1200 * time.Millisecond
 	whenTheFirstPodRan       = 1300 * time.Millisecond
@@ -65,9 +65,9 @@ const (
 	aWaitLine               = "Wait for all Pods Ready"
 	aWhenLine               = "When 1 Node fails, zone-2-node-2"
 	aWhenStepNamed          = "When"
-	aPodAsTheBoardNamesIt   = aWorkloadName + "-2xk4m"
-	aSecondPodAsNamed       = aWorkloadName + "-9ptwz"
-	theNestedPodAsNamed     = aNestedWorkloadName + "-mk4qv"
+	aPodAsTheBoardNamesIt   = aDeploymentName + "-2xk4m"
+	aSecondPodAsNamed       = aDeploymentName + "-9ptwz"
+	theNestedPodAsNamed     = aNestedDeploymentName + "-mk4qv"
 	whenTheProbePodWasAdded = 150 * time.Millisecond
 	whenTheProbePodRan      = 180 * time.Millisecond
 )
@@ -76,9 +76,9 @@ func aWaitNoteAt(elapsed time.Duration) Entry {
 	return Entry{Elapsed: elapsed, Change: ChangeNoted, Kind: StepObject, Name: WaitStepNamed, Detail: aWaitLine}
 }
 
-func theWorkloadDeployed() Entry {
+func theDeploymentDeployed() Entry {
 	return Entry{
-		Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aWorkloadName,
+		Elapsed: whenTheDeploymentLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aDeploymentName,
 		Detail: oneOfOneReady,
 	}
 }
@@ -98,7 +98,7 @@ func TestAWaitNarrative_ShouldNameEachPodsNodeAndWhenItReachedRunningInOrder(t *
 			Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
 			Reason: string(NodeReady), Detail: someNodeCapacity,
 		},
-		theWorkloadDeployed(),
+		theDeploymentDeployed(),
 		{Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName, Reason: string(PodPending)},
 		{Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aSecondPodName, Reason: string(PodPending)},
 		{
@@ -137,7 +137,7 @@ func TestAWaitNarrativeAfterAFailure_ShouldNameNodesNotReadyEvictionsAndReplacem
 			Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aSecondNodeName,
 			Reason: string(NodeReady), Detail: someNodeCapacity,
 		},
-		theWorkloadDeployed(),
+		theDeploymentDeployed(),
 		{
 			Elapsed: whenTheFirstPodRan, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
 			Reason: string(PodRunning), Detail: aNodeName,
@@ -185,7 +185,7 @@ func TestAWaitNarrativeAfterAFailure_ShouldNameNodesNotReadyEvictionsAndReplacem
 
 func TestAWaitNarrative_ShouldNameEachPodLeftPendingWithTheSchedulersReason(t *testing.T) {
 	recorded := []Entry{
-		theWorkloadDeployed(),
+		theDeploymentDeployed(),
 		{Elapsed: whenThePodsWerePending, Change: ChangeAdded, Kind: PodObject, Name: aPodName, Reason: string(PodPending)},
 		{
 			Elapsed: whenTheFirstPodRan, Change: ChangeReported, Kind: PodObject, Name: aPodName,
@@ -248,7 +248,7 @@ func TestAWaitAfterWhichNothingChangedThePlacement_ShouldHaveNoNarrative(t *test
 
 func TestAPodScheduledBeforeOneWaitAndRunningBeforeTheNext_ShouldReadAsRunningUnderTheNext(t *testing.T) {
 	recorded := []Entry{
-		theWorkloadDeployed(),
+		theDeploymentDeployed(),
 		{
 			Elapsed: whenTheFirstPodWasBound, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
 			Reason: string(PodPending), Detail: aNodeName,
@@ -269,15 +269,15 @@ func TestAPodScheduledBeforeOneWaitAndRunningBeforeTheNext_ShouldReadAsRunningUn
 	}))
 }
 
-func TestAPodOfTwoNestedWorkloadNames_ShouldBeNamedForTheLongestItBeginsWith(t *testing.T) {
+func TestAPodOfTwoNestedDeploymentNames_ShouldBeNamedForTheLongestItBeginsWith(t *testing.T) {
 	recorded := []Entry{
-		theWorkloadDeployed(),
+		theDeploymentDeployed(),
 		{
-			Elapsed: whenTheWorkloadLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aNestedWorkloadName,
+			Elapsed: whenTheDeploymentLanded, Change: ChangeAdded, Kind: DeploymentObject, Name: aNestedDeploymentName,
 			Detail: oneOfOneReady,
 		},
 		{
-			Elapsed: whenTheFirstPodRan, Change: ChangeAdded, Kind: PodObject, Name: aPodOfTheNestedWorkload,
+			Elapsed: whenTheFirstPodRan, Change: ChangeAdded, Kind: PodObject, Name: aPodOfTheNestedDeployment,
 			Reason: string(PodRunning), Detail: aNodeName,
 		},
 		aWaitNoteAt(whenTheFirstWaitEnded),
@@ -313,10 +313,10 @@ func TestAnEntryOfATimeline_ShouldReadAsTheTimeTheChangeAndTheReasonGivenForIt(t
 		},
 		"a change carrying a detail and no reason": {
 			entry: Entry{
-				Elapsed: someElapsed, Change: ChangeModified, Kind: DeploymentObject, Name: aWorkloadName,
+				Elapsed: someElapsed, Change: ChangeModified, Kind: DeploymentObject, Name: aDeploymentName,
 				Detail: readyReplicas,
 			},
-			reads: elapsedAsRead + "  Deployment " + aWorkloadName + " modified, " + readyReplicas,
+			reads: elapsedAsRead + "  Deployment " + aDeploymentName + " modified, " + readyReplicas,
 		},
 		"a change carrying neither": {
 			entry: Entry{Elapsed: someElapsed, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName},

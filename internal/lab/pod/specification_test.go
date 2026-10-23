@@ -292,12 +292,12 @@ func TestTwoSpecificationsHoldingFullAccess_ShouldBeEqualOnlyWhereItStandsInTheS
 		To(expect.Equal(false))
 }
 
-func TestAPredefinedSpecificationCustomizedByOneWorkload_ShouldStayAsItWasForAnother(t *testing.T) {
-	declaredByTheFirstWorkload := resilientPlacement()
+func TestAPredefinedSpecificationCustomizedByOneDeployment_ShouldStayAsItWasForAnother(t *testing.T) {
+	declaredByTheFirstDeployment := resilientPlacement()
 
-	customized := declaredByTheFirstWorkload.Customize(aZoneSpreadAt(aWiderSkew))
+	customized := declaredByTheFirstDeployment.Customize(aZoneSpreadAt(aWiderSkew))
 
-	expect.Expect(t, declaredByTheFirstWorkload.Equal(resilientPlacement())).To(expect.Equal(true))
+	expect.Expect(t, declaredByTheFirstDeployment.Equal(resilientPlacement())).To(expect.Equal(true))
 	expect.Expect(t, customized.Equal(resilientPlacement())).To(expect.Equal(false))
 }
 
@@ -323,7 +323,7 @@ func theStartupTimeBetween(t *testing.T, shortest, longest time.Duration) scenar
 	return stated
 }
 
-func TestAStartupTimeAScenarioStates_ShouldBeTheOneItsWorkloadsPodsTake(t *testing.T) {
+func TestAStartupTimeAScenarioStates_ShouldBeTheOneItsDeploymentsPodsTake(t *testing.T) {
 	written := map[string]struct {
 		customization Customization
 		shortest      time.Duration
@@ -349,7 +349,7 @@ func TestAStartupTimeAScenarioStates_ShouldBeTheOneItsWorkloadsPodsTake(t *testi
 	}
 }
 
-func TestAStartupTimeInMilliseconds_ShouldBeTheOneItsWorkloadsPodsTake(t *testing.T) {
+func TestAStartupTimeInMilliseconds_ShouldBeTheOneItsDeploymentsPodsTake(t *testing.T) {
 	written := map[string]struct {
 		customization Customization
 		shortest      time.Duration
@@ -400,12 +400,12 @@ func TestTwoStartupTimeCustomizations_ShouldLeaveTheLaterOneStanding(t *testing.
 	}
 }
 
-func TestAStartupTimeCustomizedForOneWorkload_ShouldLeaveTheSpecificationItCustomizedUnchanged(t *testing.T) {
-	declaredByTheFirstWorkload := resilientPlacement()
+func TestAStartupTimeCustomizedForOneDeployment_ShouldLeaveTheSpecificationItCustomizedUnchanged(t *testing.T) {
+	declaredByTheFirstDeployment := resilientPlacement()
 
-	customized := declaredByTheFirstWorkload.Customize(StartupSeconds(aLongerStartup))
+	customized := declaredByTheFirstDeployment.Customize(StartupSeconds(aLongerStartup))
 
-	expect.Expect(t, declaredByTheFirstWorkload.Equal(resilientPlacement())).To(expect.Equal(true))
+	expect.Expect(t, declaredByTheFirstDeployment.Equal(resilientPlacement())).To(expect.Equal(true))
 	expect.Expect(t, customized.Equal(resilientPlacement())).To(expect.Equal(false))
-	expect.Expect(t, declaredByTheFirstWorkload.declared.StartupTime()).To(expect.Equal(resilientPlacement().declared.StartupTime()))
+	expect.Expect(t, declaredByTheFirstDeployment.declared.StartupTime()).To(expect.Equal(resilientPlacement().declared.StartupTime()))
 }

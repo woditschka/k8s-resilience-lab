@@ -1,5 +1,5 @@
 // Package scenario holds a run's description and its observed outcome as
-// immutable values: the Topology a Scenario provisions, the Workload it
+// immutable values: the Topology a Scenario provisions, the Deployment it
 // deploys, and the Placement it observes. It names no Kubernetes type; the
 // mapping to the control plane's vocabulary lives in internal/cluster.
 package scenario
@@ -15,7 +15,7 @@ import (
 // count is decided.
 const maxZones = 26
 
-// NodeCapacity is the room a Node has, which a Workload can exceed by declaring
+// NodeCapacity is the room a Node has, which a Deployment can exceed by declaring
 // more Pods, or asking for more cpu or memory, than its Topology has room for.
 type NodeCapacity struct {
 	pods   int

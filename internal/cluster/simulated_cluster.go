@@ -26,8 +26,8 @@ const (
 	kwokRelease              = "v0.8.0"
 	defaultKubernetesVersion = "v1.36.1"
 
-	// Each Workload's cluster is its own, so it needs no namespace of its own.
-	workloadNamespace = "default"
+	// Each Scenario's cluster is its own, so it needs no namespace of its own.
+	clusterNamespace = "default"
 
 	defaultServiceAccount = "default"
 )
@@ -186,7 +186,7 @@ func (c *SimulatedCluster) reportReady(ctx context.Context, declared *corev1.Nod
 }
 
 // A spread rule is evaluated when a Pod is scheduled and never again. A
-// Workload deployed over a Topology the scheduler holds only part of is spread
+// Deployment created over a Topology the scheduler holds only part of is spread
 // perfectly over the Nodes it had seen, which is a wrong answer rather than a
 // late one: nine Pods over six of nine Nodes leave a whole Zone empty, and
 // nothing rebalances them.
@@ -196,7 +196,7 @@ func (c *SimulatedCluster) reportReady(ctx context.Context, declared *corev1.Nod
 // scheduler places Pods from a snapshot no API call shows. A Running probe Pod
 // is the one observable proof that the snapshot holds its Node.
 //
-// The probe Pods are removed whether or not every one ran, so a Workload is
+// The probe Pods are removed whether or not every one ran, so a Deployment is
 // never deployed into a cluster still holding them.
 func (c *SimulatedCluster) awaitTopologyProvisioned(ctx context.Context, topology scenario.Topology) error {
 	placed := c.awaitProbePodOnEveryNode(ctx, topology)
@@ -218,7 +218,7 @@ func (c *SimulatedCluster) awaitProbePodOnEveryNode(ctx context.Context, topolog
 
 	declared := topology.Nodes()
 	for _, node := range declared {
-		if _, err := c.client.CoreV1().Pods(workloadNamespace).Create(probing, toProbePod(node), metav1.CreateOptions{}); err != nil {
+		if _, err := c.client.CoreV1().Pods(clusterNamespace).Create(probing, toProbePod(node), metav1.CreateOptions{}); err != nil {
 			return fmt.Errorf("create the probe Pod for Node %s: %w", node.Name, err)
 		}
 	}
@@ -248,7 +248,7 @@ func (c *SimulatedCluster) awaitProbePodOnEveryNode(ctx context.Context, topolog
 // provisioning creates its probe Pods directly, so the wait belongs here.
 func (c *SimulatedCluster) awaitPodAdmission(ctx context.Context) error {
 	for {
-		_, err := c.client.CoreV1().ServiceAccounts(workloadNamespace).Get(ctx, defaultServiceAccount, metav1.GetOptions{})
+		_, err := c.client.CoreV1().ServiceAccounts(clusterNamespace).Get(ctx, defaultServiceAccount, metav1.GetOptions{})
 		if err == nil {
 			return nil
 		}
@@ -256,7 +256,7 @@ func (c *SimulatedCluster) awaitPodAdmission(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("the %s namespace of %s held no %s ServiceAccount to admit a Pod against within %s: %w",
-				workloadNamespace, c.Name(), defaultServiceAccount, startTimeout, err)
+				clusterNamespace, c.Name(), defaultServiceAccount, startTimeout, err)
 		case <-time.After(pollInterval):
 		}
 	}
@@ -270,7 +270,7 @@ func (c *SimulatedCluster) removeProbePods(ctx context.Context) error {
 	defer cancel()
 
 	immediately := int64(0)
-	if err := c.client.CoreV1().Pods(workloadNamespace).DeleteCollection(removing,
+	if err := c.client.CoreV1().Pods(clusterNamespace).DeleteCollection(removing,
 		metav1.DeleteOptions{GracePeriodSeconds: &immediately},
 		metav1.ListOptions{LabelSelector: probeSelector()}); err != nil {
 		return fmt.Errorf("remove the probe Pods of %s: %w", c.Name(), err)
@@ -295,7 +295,7 @@ func (c *SimulatedCluster) removeProbePods(ctx context.Context) error {
 }
 
 func (c *SimulatedCluster) probePods(ctx context.Context) ([]corev1.Pod, error) {
-	listed, err := c.client.CoreV1().Pods(workloadNamespace).List(ctx, metav1.ListOptions{
+	listed, err := c.client.CoreV1().Pods(clusterNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: probeSelector(),
 	})
 	if err != nil {
@@ -379,12 +379,12 @@ func (c *SimulatedCluster) reportUnresponsive(ctx context.Context, name string) 
 // the Deployment.
 func (c *SimulatedCluster) Deploy(
 	ctx context.Context,
-	workload scenario.Workload,
+	deployment scenario.Deployment,
 	accesses ...PodSpecAccessInPlace,
 ) error {
-	deployed := toDeployment(workload, accesses...)
-	if _, err := c.client.AppsV1().Deployments(workloadNamespace).Create(ctx, deployed, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("deploy the Workload %s: %w", workload.Name(), err)
+	deployed := toDeployment(deployment, accesses...)
+	if _, err := c.client.AppsV1().Deployments(clusterNamespace).Create(ctx, deployed, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("deploy the Deployment %s: %w", deployment.Name(), err)
 	}
 
 	return nil
@@ -399,26 +399,26 @@ func (c *SimulatedCluster) ReadyNodes(ctx context.Context) ([]scenario.Node, err
 	return fromNodes(readyNodesIn(listed.Items))
 }
 
-func (c *SimulatedCluster) Observe(ctx context.Context, workload scenario.Workload) (scenario.Placement, error) {
+func (c *SimulatedCluster) Observe(ctx context.Context, deployment scenario.Deployment) (scenario.Placement, error) {
 	nodes, err := c.ReadyNodes(ctx)
 	if err != nil {
 		return scenario.Placement{}, err
 	}
 
-	listed, err := c.client.CoreV1().Pods(workloadNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: podSelectorOf(workload),
+	listed, err := c.client.CoreV1().Pods(clusterNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: podSelectorOf(deployment),
 	})
 	if err != nil {
-		return scenario.Placement{}, fmt.Errorf("list the Pods of the Workload %s: %w", workload.Name(), err)
+		return scenario.Placement{}, fmt.Errorf("list the Pods of the Deployment %s: %w", deployment.Name(), err)
 	}
 
 	return scenario.NewPlacement(nodes, fromPods(listed.Items)), nil
 }
 
-// ObserveEveryWorkload reads every Node, Ready or not, so a Node that stopped
+// ObserveEveryDeployment reads every Node, Ready or not, so a Node that stopped
 // responding keeps its place on a Placement board, marked NotReady. It selects
-// Pods by the Workload label being present, which a probe Pod never carries.
-func (c *SimulatedCluster) ObserveEveryWorkload(ctx context.Context) (scenario.Placement, error) {
+// Pods by the Deployment label being present, which a probe Pod never carries.
+func (c *SimulatedCluster) ObserveEveryDeployment(ctx context.Context) (scenario.Placement, error) {
 	listedNodes, err := c.client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return scenario.Placement{}, fmt.Errorf("list the Nodes of %s: %w", c.Name(), err)
@@ -428,11 +428,11 @@ func (c *SimulatedCluster) ObserveEveryWorkload(ctx context.Context) (scenario.P
 		return scenario.Placement{}, err
 	}
 
-	listedPods, err := c.client.CoreV1().Pods(workloadNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: everyWorkloadsPods(),
+	listedPods, err := c.client.CoreV1().Pods(clusterNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: everyDeploymentsPods(),
 	})
 	if err != nil {
-		return scenario.Placement{}, fmt.Errorf("list the Pods of every Workload of %s: %w", c.Name(), err)
+		return scenario.Placement{}, fmt.Errorf("list the Pods of every Deployment of %s: %w", c.Name(), err)
 	}
 
 	return scenario.NewPlacement(nodes, fromPods(listedPods.Items)).WithNodesNotReady(notReadyNodeNamesIn(listedNodes.Items)), nil
@@ -442,21 +442,21 @@ func (c *SimulatedCluster) ObserveEveryWorkload(ctx context.Context) (scenario.P
 // observation, since the control plane is eventually consistent. It is the
 // settle-only wait no Scenario writes yet, so it is kept for the first that
 // does and is not dead code.
-func (c *SimulatedCluster) AwaitSettled(ctx context.Context, workload scenario.Workload) (scenario.Placement, error) {
-	return c.await(ctx, workload, aSettledPlacement(workload))
+func (c *SimulatedCluster) AwaitSettled(ctx context.Context, deployment scenario.Deployment) (scenario.Placement, error) {
+	return c.await(ctx, deployment, aSettledPlacement(deployment))
 }
 
 // AwaitPodsReady holds for the condition kubectl rollout status waits on.
-func (c *SimulatedCluster) AwaitPodsReady(ctx context.Context, workload scenario.Workload) (scenario.Placement, error) {
-	return c.await(ctx, workload, everyPodReady(workload))
+func (c *SimulatedCluster) AwaitPodsReady(ctx context.Context, deployment scenario.Deployment) (scenario.Placement, error) {
+	return c.await(ctx, deployment, everyPodReady(deployment))
 }
 
-// AwaitNodesReady reaches a Placement that holds no Pod where no Workload has
+// AwaitNodesReady reaches a Placement that holds no Pod where no Deployment has
 // been declared yet.
 func (c *SimulatedCluster) AwaitNodesReady(
 	ctx context.Context,
 	topology scenario.Topology,
-	deployed scenario.Workload,
+	deployed scenario.Deployment,
 ) (scenario.Placement, error) {
 	return c.await(ctx, deployed, everyNodeReady(topology, deployed))
 }
@@ -470,13 +470,13 @@ type awaited struct {
 // longer.
 func (c *SimulatedCluster) await(
 	ctx context.Context,
-	workload scenario.Workload,
+	deployment scenario.Deployment,
 	holds awaited,
 ) (scenario.Placement, error) {
 	waiting, cancel := context.WithTimeout(ctx, scenario.WaitingTime)
 	defer cancel()
 
-	previous, err := c.Observe(waiting, workload)
+	previous, err := c.Observe(waiting, deployment)
 	if err != nil {
 		return scenario.Placement{}, err
 	}
@@ -488,7 +488,7 @@ func (c *SimulatedCluster) await(
 		case <-time.After(pollInterval):
 		}
 
-		current, err := c.Observe(waiting, workload)
+		current, err := c.Observe(waiting, deployment)
 		if err != nil {
 			return scenario.Placement{}, err
 		}
@@ -499,21 +499,21 @@ func (c *SimulatedCluster) await(
 	}
 }
 
-func aSettledPlacement(workload scenario.Workload) awaited {
+func aSettledPlacement(deployment scenario.Deployment) awaited {
 	return awaited{
 		reached: func(previous, current scenario.Placement) bool {
-			return hasSettled(previous, current, workload)
+			return hasSettled(previous, current, deployment)
 		},
 		expired: func(observed scenario.Placement) error {
-			return didNotSettle(workload, observed)
+			return didNotSettle(deployment, observed)
 		},
 	}
 }
 
 // An expired wait names the clause that held it open, which is the settle one
 // while a Pod is still missing.
-func everyPodReady(workload scenario.Workload) awaited {
-	settled := aSettledPlacement(workload)
+func everyPodReady(deployment scenario.Deployment) awaited {
+	settled := aSettledPlacement(deployment)
 
 	return awaited{
 		reached: func(previous, current scenario.Placement) bool {
@@ -524,14 +524,14 @@ func everyPodReady(workload scenario.Workload) awaited {
 				return settled.expired(observed)
 			}
 
-			return podsDidNotBecomeReady(workload, observed)
+			return podsDidNotBecomeReady(deployment, observed)
 		},
 	}
 }
 
 // A Node that is not Ready is in no observed Placement, so this clause reads
 // the Nodes the observation is short of.
-func everyNodeReady(topology scenario.Topology, deployed scenario.Workload) awaited {
+func everyNodeReady(topology scenario.Topology, deployed scenario.Deployment) awaited {
 	settled := aSettledPlacement(deployed)
 
 	return awaited{
@@ -554,11 +554,11 @@ func nodesNotReadyIn(topology scenario.Topology, observed scenario.Placement) []
 
 // The Pods are named rather than counted, so a reader sees which ones held the
 // Wait open.
-func podsDidNotBecomeReady(workload scenario.Workload, observed scenario.Placement) error {
+func podsDidNotBecomeReady(deployment scenario.Deployment, observed scenario.Placement) error {
 	notReady := observed.PodsNotReady()
 
-	return fmt.Errorf("the Pods of the Workload %s were not all Ready within %s; it last held %d of %d Pods Ready, and these were not: %s",
-		workload.Name(), scenario.WaitingTime, len(observed.Pods())-len(notReady), workload.Pods(),
+	return fmt.Errorf("the Pods of the Deployment %s were not all Ready within %s; it last held %d of %d Pods Ready, and these were not: %s",
+		deployment.Name(), scenario.WaitingTime, len(observed.Pods())-len(notReady), deployment.Replicas(),
 		strings.Join(podNamesOf(notReady), ", "))
 }
 
@@ -587,9 +587,9 @@ func podNamesOf(pods []scenario.Pod) []string {
 
 // didNotSettle names one count per clause of hasSettled, so a reader of an
 // expired wait can tell which clause held it open.
-func didNotSettle(workload scenario.Workload, observed scenario.Placement) error {
-	return fmt.Errorf("the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold and %d still starting",
-		workload.Name(), scenario.WaitingTime, len(observed.Pods()), workload.Pods(), len(observed.Nodes()),
+func didNotSettle(deployment scenario.Deployment, observed scenario.Placement) error {
+	return fmt.Errorf("the Placement of the Deployment %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold and %d still starting",
+		deployment.Name(), scenario.WaitingTime, len(observed.Pods()), deployment.Replicas(), len(observed.Nodes()),
 		len(observed.PodsItCannotAccountFor()), len(observed.PodsStarting()))
 }
 
@@ -607,8 +607,8 @@ func didNotSettle(workload scenario.Workload, observed scenario.Placement) error
 // A placed Pod still inside its Startup time is a third such window: it stands
 // Pending until its time passes. An unplaced Pod is no such Pod and still
 // counts.
-func hasSettled(previous, current scenario.Placement, workload scenario.Workload) bool {
-	return len(current.Pods()) >= workload.Pods() &&
+func hasSettled(previous, current scenario.Placement, deployment scenario.Deployment) bool {
+	return len(current.Pods()) >= deployment.Replicas() &&
 		len(current.PodsItCannotAccountFor()) == 0 &&
 		len(current.PodsStarting()) == 0 &&
 		current.Equal(previous)

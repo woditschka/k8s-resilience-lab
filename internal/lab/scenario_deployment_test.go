@@ -33,7 +33,7 @@ const (
 	theNodePoolsScenario       = "a-topology-of-node-pools"
 	theGpuRequestScenario      = "a-request-only-gpu-nodes-hold"
 	theLabelFailureScenario    = "a-failure-by-label"
-	theNextWorkloadScenario    = "a-next-workload"
+	theNextDeploymentScenario  = "a-next-deployment"
 	theUnreachedWaitScenario   = "a-wait-the-scenario-does-not-reach"
 	theUnobservedBoardScenario = "a-board-that-cannot-be-observed"
 	theUnreachedNarrative      = "a-narrative-of-a-wait-not-reached"
@@ -52,7 +52,7 @@ const (
 	// which makes full access the one way to reach that field.
 	theRefusedRestartPolicy = corev1.RestartPolicyNever
 
-	theDeployingCauseNames = "deploy a Workload"
+	theDeployingCauseNames = "deploy a Deployment"
 )
 
 func aFullAccessTheControlPlaneRefuses() pod.Customization {
@@ -154,14 +154,14 @@ func TestAWaitWrittenWithItsGivenAndOneWrittenOnItsOwn_ShouldReportTheSameWaitLi
 	t.Parallel()
 	forms := map[string]func(*Scenario){
 		"with the Given that declared it": func(waiting *Scenario) {
-			waiting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
-			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), resilientPlacement()).
+			waiting.Given().Zones(twoZones, theGeneralNodePool()).WaitFor().AllNodesReady()
+			waiting.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
 				WaitFor().AllPodsReady()
 		},
 		"as a Step of its own": func(waiting *Scenario) {
-			waiting.Given().Topology(Zones(twoZones), theGeneralNodePool())
+			waiting.Given().Zones(twoZones, theGeneralNodePool())
 			waiting.WaitFor().AllNodesReady()
-			waiting.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), resilientPlacement())
+			waiting.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
 			waiting.WaitFor().AllPodsReady()
 		},
 	}
@@ -180,7 +180,7 @@ func TestAWaitWrittenWithItsGivenAndOneWrittenOnItsOwn_ShouldReportTheSameWaitLi
 			expect.Expect(t, asReported(waited.Steps)).To(expect.Equal([]reportedStep{
 				reportedAtOnce(topologyStepOf(twoZones, twoNodesPerZone)),
 				reportedAsWaiting(allNodesReadyStep()),
-				reportedAtOnce(resilientPlacementWorkloadStepOf(podsOverEveryNode)),
+				reportedAtOnce(resilientPlacementDeploymentStepOf(podsOverEveryNode)),
 				reportedAsWaiting(allPodsReadyStep()),
 				reportedAtOnce(allPodsRunningStep()),
 				reportedAtOnce(podsPerNodeStepOf(podsPerNodeWhenEven)),
@@ -198,7 +198,7 @@ func TestAWaitWithNothingToWaitFor_ShouldReportAtOnceRatherThanBeRefused(t *test
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	waiting := aScenarioOnAClusterFor(t, theNothingPendingScenario)
 
-	waiting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
+	waiting.Given().Zones(twoZones, theGeneralNodePool()).WaitFor().AllNodesReady()
 	waiting.WaitFor().AllPodsReady()
 	waiting.WaitFor().AllPodsReady()
 
@@ -215,16 +215,16 @@ func TestAWaitWithNothingToWaitFor_ShouldReportAtOnceRatherThanBeRefused(t *test
 }
 
 // A Wait for every Pod Ready would be outlasted by the lab's waiting time in
-// the same world, which is why this Wait is the one a Scenario of a Workload
+// the same world, which is why this Wait is the one a Scenario of a Deployment
 // with no room writes.
 func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testing.T) {
 	t.Parallel()
 	waiting := aScenarioOnAClusterFor(t, theSettlingScenario)
 
-	waiting.Given().Topology(Zones(twoZones), node.Pool(generalNodePool, node.PerZone(twoNodesPerZone),
+	waiting.Given().Zones(twoZones, node.Pool(generalNodePool, node.PerZone(twoNodesPerZone),
 		node.Capacity{CPU: someCoresPerNode, Memory: someGibibytesPerNode * node.Gi, Pods: roomForOnePodPerNode}))
 	waiting.WaitFor().AllNodesReady()
-	waiting.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), askingForNothing(), resilientPlacement())
+	waiting.Given().Deployment(someDeploymentName, podsBeyondEveryNode, askingForNothing(), resilientPlacement())
 	waiting.WaitFor().PlacementSettled()
 
 	settled := waiting.outcome()
@@ -232,7 +232,7 @@ func TestAWaitForASettledPlacement_ShouldBeReachedWhilePodsStayPending(t *testin
 	expect.Expect(t, asReported(settled.Steps)).To(expect.Equal([]reportedStep{
 		reportedAtOnce(topologyStepHoldingOnePodOf(twoZones, twoNodesPerZone)),
 		reportedAsWaiting(allNodesReadyStep()),
-		reportedAtOnce(resilientPlacementWorkloadStepOf(podsBeyondEveryNode)),
+		reportedAtOnce(resilientPlacementDeploymentStepOf(podsBeyondEveryNode)),
 		reportedAsWaiting(settledPlacementStep()),
 	}))
 	expect.Expect(t, asJudged(settled.Findings)).To(expect.Equal([]judgedFinding{}))
@@ -273,14 +273,14 @@ func expectReachedAtOnce(t *testing.T, recorded []Step) {
 // A Given reaches no cluster, so the Wait below it is the Step that applied the
 // declaration and the Step the ending names. Full access is how a Scenario can
 // write such a value; the rule is every Customization's.
-func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTheWaitThatDeployedTheWorkload(
+func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTheWaitThatDeployedTheDeployment(
 	t *testing.T,
 ) {
 	t.Parallel()
 	ending := aScenarioOnAClusterFor(t, theRefusedSettingScenario)
 
-	ending.Given().Topology(Zones(twoZones), theGeneralNodePool())
-	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(),
+	ending.Given().Zones(twoZones, theGeneralNodePool())
+	ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(),
 		resilientPlacement().Customize(aFullAccessTheControlPlaneRefuses()))
 	ending.WaitFor().AllPodsReady()
 	ending.Then().PodsPerZone(podsPerZoneWhenEven)
@@ -289,7 +289,7 @@ func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTh
 	expect.Expect(t, ended.EndedAt).To(expect.Equal(allPodsReadyStep()))
 	expect.Expect(t, asReported(ended.Steps)).To(expect.Equal([]reportedStep{
 		reportedAtOnce(topologyStepOf(twoZones, twoNodesPerZone)),
-		reportedAtOnce(resilientPlacementWorkloadStepOf(podsOverEveryNode)),
+		reportedAtOnce(resilientPlacementDeploymentStepOf(podsOverEveryNode)),
 		reportedAtOnce(allPodsReadyStep()),
 	}))
 	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
@@ -302,7 +302,7 @@ func TestATopologyOfNodePools_ShouldProvisionEveryZoneWithEachNodePoolsNodesAndC
 	const threeZones = 3
 	provisioning := aScenarioOnAClusterFor(t, theNodePoolsScenario)
 
-	provisioning.Given().Topology(Zones(threeZones), theGeneralNodePool(), theGpuNodePool())
+	provisioning.Given().Zones(threeZones, theGeneralNodePool(), theGpuNodePool())
 	provisioning.WaitFor().AllNodesReady()
 
 	ready := provisioning.outcome()
@@ -310,7 +310,7 @@ func TestATopologyOfNodePools_ShouldProvisionEveryZoneWithEachNodePoolsNodesAndC
 	expect.Expect(t, ready.Placement.Nodes()).To(expect.Equal(aTopologyOfNodePools(t, threeZones).Nodes()))
 }
 
-// The Workload declares no spread and one Pod per gpu Node, so room alone
+// The Deployment declares no spread and one Pod per gpu Node, so room alone
 // decides where its Pods land.
 func TestARequestOnlyOneNodePoolHasRoomFor_ShouldPlacePodsOnThatNodePoolAlone(t *testing.T) {
 	t.Parallel()
@@ -319,8 +319,8 @@ func TestARequestOnlyOneNodePoolHasRoomFor_ShouldPlacePodsOnThatNodePoolAlone(t 
 	aboveRoomy := pod.Request{CPU: roomyCoresPerNode + 1, Memory: (roomyGibibytesPerNode + 1) * pod.Gi}
 	placing := aScenarioOnAClusterFor(t, theGpuRequestScenario)
 
-	placing.Given().Topology(Zones(twoZones), theGeneralNodePool(), theGpuNodePool())
-	placing.Given().Workload(someWorkloadName, Pods(podsTheGpuNodesHold), askingForNothing(), defaultPlacement().Customize(aboveRoomy))
+	placing.Given().Zones(twoZones, theGeneralNodePool(), theGpuNodePool())
+	placing.Given().Deployment(someDeploymentName, podsTheGpuNodesHold, askingForNothing(), defaultPlacement().Customize(aboveRoomy))
 	placing.WaitFor().PlacementSettled()
 
 	settled := placing.outcome()
@@ -351,12 +351,12 @@ func TestAFailureByLabel_ShouldStopEveryNodeCarryingThatValueInOneStep(t *testin
 		ninePods           = 9
 	)
 	stopping := aScenarioOnAClusterFor(t, theLabelFailureScenario)
-	stopping.Given().Topology(Zones(threeZones),
+	stopping.Given().Zones(threeZones,
 		node.Pool(onDemandCapacity, node.PerZone(twoOnDemandPerZone), roomyNodes()).
 			Labels(node.Labels{capacityTypeLabel: onDemandCapacity}),
 		theSpotNodePool())
 	stopping.WaitFor().AllNodesReady()
-	stopping.Given().Workload(someWorkloadName, Pods(ninePods), askingForNothing(), resilientPlacement())
+	stopping.Given().Deployment(someDeploymentName, ninePods, askingForNothing(), resilientPlacement())
 	stopping.WaitFor().AllPodsReady()
 	spotNodes := namesOf(nodesOfNodePool(stopping.topology, spotCapacity))
 
@@ -407,19 +407,19 @@ func aboveRoomyRequest() pod.Request {
 	return pod.Request{CPU: roomyCoresPerNode + 1, Memory: (roomyGibibytesPerNode + 1) * pod.Gi}
 }
 
-func TestALaterWorkload_ShouldBeDeployedBesideTheEarlierAndJudgedAlone(t *testing.T) {
+func TestALaterDeployment_ShouldBeDeployedBesideTheEarlierAndJudgedAlone(t *testing.T) {
 	t.Parallel()
 	gpuNodes := twoZones * oneGpuNodePerZone
 	generalPods := twoZones * twoNodesPerZone
 	const noPod = 0
-	deploying := aScenarioOnAClusterFor(t, theNextWorkloadScenario)
-	deploying.Given().Topology(Zones(twoZones), theGeneralNodePool(), theTaintedGpuNodePool())
+	deploying := aScenarioOnAClusterFor(t, theNextDeploymentScenario)
+	deploying.Given().Zones(twoZones, theGeneralNodePool(), theTaintedGpuNodePool())
 	deploying.WaitFor().AllNodesReady()
-	deploying.Given().Workload(someWorkloadName, Pods(generalPods), askingForNothing(), resilientPlacement())
+	deploying.Given().Deployment(someDeploymentName, generalPods, askingForNothing(), resilientPlacement())
 	deploying.WaitFor().AllPodsReady()
-	earlier := deploying.workload
+	earlier := deploying.deployment
 
-	deploying.Given().Workload(anotherWorkloadName, Pods(gpuNodes), askingForNothing(),
+	deploying.Given().Deployment(anotherDeploymentName, gpuNodes, askingForNothing(),
 		defaultPlacement().Customize(aboveRoomyRequest(), toleratingTheGpuTaint()))
 	deploying.WaitFor().AllPodsReady()
 	deploying.Then().AllPodsRunning()
@@ -432,7 +432,7 @@ func TestALaterWorkload_ShouldBeDeployedBesideTheEarlierAndJudgedAlone(t *testin
 	expect.Expect(t, judged.Placement.Pods()).To(expect.HaveLen[scenario.Pod](gpuNodes))
 	stillPlaced, err := deploying.provisioned.Observe(t.Context(), earlier)
 	if err != nil {
-		t.Fatalf("observe the earlier Workload: %v", err)
+		t.Fatalf("observe the earlier Deployment: %v", err)
 	}
 	expect.Expect(t, stillPlaced.PodsPerNodePool()).
 		To(expect.Equal(map[string]int{string(generalNodePool): generalPods, string(gpuNodePool): noPod}))
@@ -445,8 +445,8 @@ func TestAWaitTheScenarioDoesNotReach_ShouldStillPrintItsPlacementBoard(t *testi
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	ending := aScenarioOnAClusterFor(t, theUnreachedWaitScenario)
 
-	ending.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
-	ending.Given().Workload(someWorkloadName, Pods(podsOverEveryNode), askingForNothing(), resilientPlacement()).
+	ending.Given().Zones(twoZones, theGeneralNodePool()).WaitFor().AllNodesReady()
+	ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
 		WaitFor().AllPodsReadyWithinSeconds(noSecondsAtAll)
 
 	ended := ending.outcome()
@@ -476,7 +476,7 @@ func TestABoardThatCannotBeObserved_ShouldBeNamedOnItsWaitWithTheCause(t *testin
 	cancel()
 	waiting := newScenario(gone, shared)
 
-	waiting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
+	waiting.Given().Zones(twoZones, theGeneralNodePool()).WaitFor().AllNodesReady()
 
 	steps := waiting.outcome().Steps
 	unobserved := steps[len(steps)-1]
@@ -498,10 +498,10 @@ func TestAWaitTheScenarioDoesNotReach_ShouldStillPrintItsNarrativeUpToTheEnd(t *
 	t.Parallel()
 	ending := aRecordedScenarioOnAClusterFor(t, theUnreachedNarrative)
 
-	ending.Given().Topology(Zones(twoZones), node.Pool(generalNodePool, node.PerZone(twoNodesPerZone),
+	ending.Given().Zones(twoZones, node.Pool(generalNodePool, node.PerZone(twoNodesPerZone),
 		node.Capacity{CPU: someCoresPerNode, Memory: someGibibytesPerNode * node.Gi, Pods: roomForOnePodPerNode}))
 	ending.WaitFor().AllNodesReady()
-	ending.Given().Workload(someWorkloadName, Pods(podsBeyondEveryNode), askingForNothing(), resilientPlacement()).
+	ending.Given().Deployment(someDeploymentName, podsBeyondEveryNode, askingForNothing(), resilientPlacement()).
 		WaitFor().AllPodsReadyWithinSeconds(aTimeThePodWithNoRoomNeverMeets)
 
 	ended := ending.finish()
@@ -548,8 +548,8 @@ func TestAScenarioRecordingItsSteps_ShouldNoteEachStepAtItsMomentAmongTheEntries
 	t.Parallel()
 	noting := aRecordedScenarioOnAClusterFor(t, theNotedStepsScenario)
 
-	noting.Given().Topology(Zones(twoZones), theGeneralNodePool()).WaitFor().AllNodesReady()
-	noting.When().NodesFail(Nodes(oneNodeFailing))
+	noting.Given().Zones(twoZones, theGeneralNodePool()).WaitFor().AllNodesReady()
+	noting.When().NodesFail(oneNodeFailing)
 	noting.WaitFor().PlacementSettled()
 	noting.Then().NoPodsOnTheFailedNodes()
 

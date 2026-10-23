@@ -36,9 +36,9 @@ type Outcome struct {
 	Steps     []Step
 	Findings  []Finding
 	Placement scenario.Placement
-	// JudgedWorkload names the Workload the Placement is of, the newest the
+	// JudgedDeployment names the Deployment the Placement is of, the newest the
 	// Scenario declared; it is empty while none is declared.
-	JudgedWorkload string
+	JudgedDeployment string
 	// EndedAt and Cause are empty for a Scenario that carried out every Step.
 	EndedAt Step
 	Cause   error
@@ -54,7 +54,7 @@ func (o Outcome) Ended() bool {
 }
 
 // HoldsASettledPlacement is false after a Failure no Wait followed, since the
-// Failure discarded the Placement, and before any Workload's Pods were observed.
+// Failure discarded the Placement, and before any Deployment's Pods were observed.
 func (o Outcome) HoldsASettledPlacement() bool {
 	return !o.Ended() && len(o.Placement.Pods()) > 0
 }
@@ -65,12 +65,12 @@ func (o Outcome) Held() bool {
 
 func (s *Scenario) outcome() Outcome {
 	return Outcome{
-		Steps:          slices.Clone(s.steps),
-		Findings:       slices.Clone(s.findings),
-		Placement:      s.observed,
-		JudgedWorkload: s.workload.Name(),
-		EndedAt:        s.endedAt,
-		Cause:          s.cause,
+		Steps:            slices.Clone(s.steps),
+		Findings:         slices.Clone(s.findings),
+		Placement:        s.observed,
+		JudgedDeployment: s.deployment.Name(),
+		EndedAt:          s.endedAt,
+		Cause:            s.cause,
 	}
 }
 
@@ -342,7 +342,7 @@ func observeOnce(ctx context.Context, provisioned *cluster.SimulatedCluster) (sc
 	observing, cancel := context.WithTimeout(ctx, scenario.WaitingTime)
 	defer cancel()
 
-	placed, err := provisioned.ObserveEveryWorkload(observing)
+	placed, err := provisioned.ObserveEveryDeployment(observing)
 	if err != nil {
 		return scenario.Placement{}, fmt.Errorf("observe the Placement board: %w", err)
 	}

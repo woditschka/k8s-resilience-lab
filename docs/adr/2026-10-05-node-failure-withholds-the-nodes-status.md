@@ -67,7 +67,7 @@ A Pod carrying a deletion timestamp is in no Placement. A Pod being deleted is l
 
 Every Workload's Pod template tolerates the two Node-condition taints, not-ready and unreachable, with the NoExecute effect and the lab's own waiting time. A constant in `internal/cluster` holds that time. Every run prints it against the 300 seconds a default cluster waits, beside the heartbeat timings the lab sets, and claims no total. The lab sets one part of a run's wait, the control plane the other.
 
-A spread rule honours taints, per [ADR: A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md). The Pods tolerate the NoExecute taint for seconds and the NoSchedule taint not at all, so the unreachable Node leaves the domain set and holds no replacement.
+A spread rule honours taints, per [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md). The Pods tolerate the NoExecute taint for seconds and the NoSchedule taint not at all, so the unreachable Node leaves the domain set and holds no replacement.
 
 Where this kwokctl release refuses an argument, the same settings reach it as `KWOK_`-prefixed environment variables on the container, the precedence layer above its configuration file. Where neither takes the Node off the controller, option 5 follows and the lab owns the Stages.
 
@@ -85,5 +85,5 @@ An unresponsive Node reads NotReady wherever the lab reports a Node, and a Place
 - [ADR: Scenarios are Go functions over immutable descriptions](2026-10-03-scenarios-as-go-functions.md)
 - [ADR: The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md)
 - [ADR: The lab provisions the Simulated Cluster it drives](2026-10-03-lab-provisioned-simulated-cluster.md)
-- [ADR: A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
+- [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
 - [ADR: The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md)

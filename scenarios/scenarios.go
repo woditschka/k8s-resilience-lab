@@ -13,22 +13,22 @@ import (
 // mutable process-wide state.
 func All() []func(*lab.Scenario) {
 	return []func(*lab.Scenario){
-		AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode,
+		ADeploymentPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode,
 		ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding,
 		AZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding,
 		NoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending,
-		AWorkloadSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerCapacityType,
-		SpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNinePodsOnTheOnDemandNodes,
+		ADeploymentSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerCapacityType,
+		SpotNodesThatStopResponding_ShouldSurviveLosingThreePodsAndRestoreNinePodsOnTheOnDemandNodes,
 		GeneralPodsBesideTaintedGPUNodes_ShouldStayOffThemWhileTheTolerantPodsReachThemByTheirRequest,
 	}
 }
 
 // An even Placement over Zones and Nodes with room for more than one Pod is the
 // scheduler honouring Resilient placement.
-func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))
+func ADeploymentPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *lab.Scenario) {
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement())
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement())
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
@@ -38,70 +38,70 @@ func AWorkloadPlacedForResilience_ShouldPlaceThreePodsPerZoneAndOnePerNode(s *la
 // Capacity comes back after one Node stops responding, on the Nodes still
 // responding.
 func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosingPods(3)
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
 
-	s.When().NodesFail(lab.Nodes(1))
+	s.When().NodesFail(1)
 	s.WaitFor().AllPodsReadyWithinSeconds(30)
 
 	s.Then().PodsPerZone(3)
 	s.Then().NoPodsOnTheFailedNodes()
-	s.Then().RequiredCapacityHeld()
+	s.Then().Survived()
 }
 
 // Capacity comes back after a whole Zone stops responding, on the Zones still
 // responding.
 func AZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosingPods(3)
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
 
-	s.When().ZonesFail(lab.Zones(1))
+	s.When().ZonesFail(1)
 	s.WaitFor().AllPodsReadyWithinSeconds(30)
 
 	s.Then().NoPodsInTheFailedZones()
-	s.Then().RequiredCapacityHeld()
+	s.Then().Survived()
 }
 
 // Capacity only partly comes back after a whole Zone stops responding, where each
-// Node still responding has room for one Pod of the Workload: the Pods that no
-// longer fit anywhere stay Pending, and the capacity the Workload declared is
-// still met.
+// Node still responding has room for one Pod of the Deployment: the Pods that no
+// longer fit anywhere stay Pending, and the Deployment still loses no more than
+// its Failure tolerance.
 func NoRoomAfterAZoneStopsResponding_ShouldSettleAtSixPodsRunningAndThreePending(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3),
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3),
 		node.Capacity{CPU: 4, Memory: 16 * node.Gi, Pods: 10}))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), pod.Request{CPU: 3, Memory: 12 * pod.Gi}, ResilientPlacement()).
-		RequiredCapacity(lab.Pods(6))
+	s.Given().Deployment(Checkout, 9, pod.Request{CPU: 3, Memory: 12 * pod.Gi}, ResilientPlacement()).
+		SurvivesLosingPods(3)
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerNode(1)
 
-	s.When().ZonesFail(lab.Zones(1))
+	s.When().ZonesFail(1)
 	s.WaitFor().PlacementSettledWithinSeconds(30)
 
 	s.Then().NoPodsInTheFailedZones()
 	s.Then().PodsPending(3)
-	s.Then().RequiredCapacityHeld()
+	s.Then().Survived()
 }
 
 // Every Zone holds an on-demand and a spot Node with room for more than one Pod,
 // so an even Placement over Zones and over capacity types is the scheduler
 // honouring both spreads at once.
-func AWorkloadSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerCapacityType(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3),
+func ADeploymentSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerCapacityType(s *lab.Scenario) {
+	s.Given().Zones(3,
 		node.Pool("on-demand", node.PerZone(1), StandardNode()).Labels(node.Labels{CapacityType: "on-demand"}),
 		node.Pool("spot", node.PerZone(1), StandardNode()).Labels(node.Labels{CapacityType: "spot"}),
 	)
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(6), StandardPod(), SpreadOverOnDemandAndSpot())
+	s.Given().Deployment(Checkout, 6, StandardPod(), SpreadOverOnDemandAndSpot())
 	s.WaitFor().AllPodsReady()
 
 	s.Then().AllPodsRunning()
@@ -111,13 +111,13 @@ func AWorkloadSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerCapa
 
 // The capacity bought as spot disappears together, and the Pods it held are
 // restored on the on-demand Nodes in every Zone.
-func SpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNinePodsOnTheOnDemandNodes(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3),
+func SpotNodesThatStopResponding_ShouldSurviveLosingThreePodsAndRestoreNinePodsOnTheOnDemandNodes(s *lab.Scenario) {
+	s.Given().Zones(3,
 		node.Pool("on-demand", node.PerZone(2), StandardNode()).Labels(node.Labels{CapacityType: "on-demand"}),
 		node.Pool("spot", node.PerZone(1), StandardNode()).Labels(node.Labels{CapacityType: "spot"}),
 	)
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosingPods(3)
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerNode(1)
@@ -127,26 +127,26 @@ func SpotNodesThatStopResponding_ShouldHoldTheRequiredCapacityAndRestoreNinePods
 
 	s.Then().PodsPerZone(3)
 	s.Then().NoPodsOnTheFailedNodes()
-	s.Then().RequiredCapacityHeld()
+	s.Then().Survived()
 }
 
 // Every Zone holds two general Nodes and one larger gpu Node tainted NoSchedule.
 // The general Pods stay off the gpu Nodes, and the Pods tolerating the taint
 // reach them because only a gpu Node has room for what each asks for.
 func GeneralPodsBesideTaintedGPUNodes_ShouldStayOffThemWhileTheTolerantPodsReachThemByTheirRequest(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3),
+	s.Given().Zones(3,
 		node.Pool("general", node.PerZone(2), StandardNode()),
 		node.Pool("gpu", node.PerZone(1), GPUNode()).Taints(node.Taint{Key: GPU, Value: GPUPresent, Effect: node.NoSchedule}),
 	)
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(6), StandardPod(), ResilientPlacement())
+	s.Given().Deployment(Checkout, 6, StandardPod(), ResilientPlacement())
 	s.WaitFor().AllPodsReady()
 
 	s.Then().AllPodsRunning()
 	s.Then().PodsOnNodePool("general", 6)
 	s.Then().PodsOnNodePool("gpu", 0)
 
-	s.Given().Workload(Inference, lab.Pods(3), GPUPod(), ToleratingGPUNodes())
+	s.Given().Deployment(Inference, 3, GPUPod(), ToleratingGPUNodes())
 	s.WaitFor().AllPodsReady()
 
 	s.Then().AllPodsRunning()

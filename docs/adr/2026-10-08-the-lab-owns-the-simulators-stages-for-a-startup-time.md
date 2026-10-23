@@ -1,6 +1,6 @@
 # The lab owns the simulator's Stages to give a Pod its Startup time
 
-**Status:** Accepted 2026-10-08, option 4; amended 2026-10-09: the lab's own Startup time is a range, and a Startup time is stated in seconds or milliseconds, option 6; amended 2026-10-18: the lab's own Startup time is retired, per [ADR: A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
+**Status:** Accepted 2026-10-08, option 4; amended 2026-10-09: the lab's own Startup time is a range, and a Startup time is stated in seconds or milliseconds, option 6; amended 2026-10-18: the lab's own Startup time is retired, per [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
 
 ## Context
 
@@ -12,7 +12,7 @@ The image serves no `kwok.x-k8s.io` API group, and its controller reads its Stag
 
 On 2026-10-08 the lab held a Startup time of its own, a fixed two seconds, for a Pod whose Scenario stated none. On 2026-10-09 the owner found it slow and asked for "0.5 to 1 s", stated through "a second one ...Millis" beside the seconds forms. Whole seconds cannot state a time under one second. The lab's own Startup time became a range, a shortest and a longest both above zero, held as two constants in `internal/scenario`. Every run printed both bounds beside the other times the lab sets. A shortest of zero was declined: some Pods would then be Ready at placement, hiding the Pending-on-Node state REQ-SIM-012 exists to show.
 
-On 2026-10-18 every predefined Pod specification came to name its own Startup time, defined by the Scenarios, per [ADR: A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md). The lab's two constants and the run-start line were retired.
+On 2026-10-18 every predefined Pod specification came to name its own Startup time, defined by the Scenarios, per [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md). The lab's two constants and the run-start line were retired.
 
 ## Options Considered
 
@@ -69,4 +69,4 @@ The engine surface is unchanged: the Stages travel through the API the lab alrea
 - [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](2026-10-05-node-failure-withholds-the-nodes-status.md)
 - [ADR: The lab is a Go program on a KWOK Simulated Cluster](2026-10-03-go-program-on-a-kwok-simulated-cluster.md)
 - [ADR: The lab provisions the Simulated Cluster it drives](2026-10-03-lab-provisioned-simulated-cluster.md)
-- [ADR: A Workload declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)
+- [ADR: A Deployment declares one of the lab's predefined Pod specifications](2026-10-05-workload-declares-a-predefined-pod-specification.md)

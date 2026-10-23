@@ -2,7 +2,7 @@
 
 *Prove where your Pods land before the outage does.*
 
-Declare a Topology of Zones and Nodes, and deploy a Workload under the spread rules and tolerations its manifest would carry. Stop a Node or a whole Zone, and assert the Placement the Kubernetes control plane reaches. Each experiment is a Scenario, a short Go function. It runs on a Simulated Cluster of its own, a real control plane over fake Nodes and Pods, so a run costs seconds and needs only a container engine.
+Declare a Topology of Zones and Nodes, and a Deployment under the spread rules and tolerations its manifest would carry. Stop a Node or a whole Zone, and assert the Placement the Kubernetes control plane reaches. Each experiment is a Scenario, a short Go function. It runs on a Simulated Cluster of its own, a real control plane over fake Nodes and Pods, so a run costs seconds and needs only a container engine.
 
 **Seen, not claimed:** the lab's seven [Scenarios](scenarios/scenarios.go) run at once on seven clusters, and the whole command suite finishes in about a minute on a laptop. They judge Placement under a lost Node, a lost Zone, lost spot capacity and a tainted GPU pool.
 
@@ -16,19 +16,19 @@ Every Scenario is a Go function in [scenarios/scenarios.go](scenarios/scenarios.
 // Capacity comes back after one Node stops responding, on the Nodes still
 // responding.
 func ANodeThatStopsResponding_ShouldLeaveThePodsOnTheNodesStillResponding(s *lab.Scenario) {
-	s.Given().Topology(lab.Zones(3), node.Pool("general", node.PerZone(3), StandardNode()))
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Workload(Checkout, lab.Pods(9), StandardPod(), ResilientPlacement()).RequiredCapacity(lab.Pods(6))
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosingPods(3)
 	s.WaitFor().AllPodsReady()
 
 	s.Then().PodsPerZone(3)
 
-	s.When().NodesFail(lab.Nodes(1))
+	s.When().NodesFail(1)
 	s.WaitFor().AllPodsReadyWithinSeconds(30)
 
 	s.Then().PodsPerZone(3)
 	s.Then().NoPodsOnTheFailedNodes()
-	s.Then().RequiredCapacityHeld()
+	s.Then().Survived()
 }
 ```
 
@@ -41,7 +41,7 @@ A run reports every Scenario under its name and the Simulated Cluster it ran on,
 ```text
 ======================================================================================================================================
 Scenario a-node-that-stops-responding, on k8s-resilience-lab-a-node-that-stops-responding-b7pzswsf
-  Given a Workload checkout of 9 Pods declaring Resilient placement, each Pod starting in 500ms to 1s, keeping at least 6 Pods Running
+  Given a Deployment checkout of 9 replicas declaring Resilient placement, each Pod starting in 500ms to 1s, surviving the loss of 3 Pods
   Wait for all Pods Ready, reached in 2.2s
   +8.223s  Pod checkout-5llj7 scheduled on zone-1-node-1, Running at +9.084s
   +8.224s  Pod checkout-xdtwv scheduled on zone-2-node-1, Running at +8.800s
@@ -73,7 +73,7 @@ Scenario a-node-that-stops-responding, on k8s-resilience-lab-a-node-that-stops-r
   ----------------------------------------------------------------------------
   Then 3 Pods per Zone
   Then no Pod on the Nodes that failed
-  Then the Required Capacity held: a minimum of 6 Pods, 8 at the moment of the Failure and 9 once Settled
+  Then survives losing 3 Pods: 1 lost at the Failure, 0 once Settled
   Skew of checkout: 0 over Zones, 1 over Nodes
   --------------------------------------------------------------------------------------------------------
   Timeline, 189 entries, filed at timelines/k8s-resilience-lab-a-node-that-stops-responding-b7pzswsf.jsonl
@@ -111,11 +111,11 @@ The lab runs the genuine Kubernetes control plane against fake machines. Each Sc
 On that cluster a Scenario declares what a real team would declare, then watches what the control plane does:
 
 - **A Topology** of Zones and NodePools, each NodePool stating how many Nodes it holds per Zone, their capacity, and the labels and taints its Nodes carry.
-- **A Workload** of a given Pod count under a Pod specification: topology spread constraints, tolerations and resource requests under their Kubernetes names.
+- **A Deployment** of a given replica count under a Pod specification: topology spread constraints, tolerations and resource requests under their Kubernetes names.
 - **A Failure** that stops one Node, every Node of a Zone, or every Node of one label value. The lab withholds the Node's heartbeat, so the control plane marks it unresponsive and reschedules exactly as it would after a lost machine.
-- **Assertions** on the Placement once it has Settled: Pods per Zone, per Node and per NodePool, and the Required Capacity a Workload kept serving through the Failure.
+- **Assertions** on the Placement once it has Settled: Pods per Zone, per Node and per NodePool, and the Pods a Deployment survives losing to the Failure, its Failure tolerance.
 
-Every Scenario also leaves a Timeline, recorded from the API's own watch streams, naming each Node, Pod and Workload change, the scheduler's reason for each Placement, and each Step at its moment. A run narrates from it under every Wait and files it, so what happened inside the cluster is explainable afterwards.
+Every Scenario also leaves a Timeline, recorded from the API's own watch streams, naming each Node, Pod and Deployment change, the scheduler's reason for each Placement, and each Step at its moment. A run narrates from it under every Wait and files it, so what happened inside the cluster is explainable afterwards.
 
 The lab never touches a real cluster. It provisions and removes the Simulated Cluster it uses, reads no kubeconfig, and dials only a local engine socket. The reasons are recorded in [the non-goal ADR](docs/adr/2026-10-03-non-goal-real-cluster-runs.md).
 
@@ -123,7 +123,7 @@ The lab never touches a real cluster. It provisions and removes the Simulated Cl
 
 The lab is one Go module built as a modulith. The `scenarios` package holds the experiments and nothing else. The machinery lives under `internal/`. `scenario` holds the immutable descriptions and does no I/O, and `cluster` holds every Kubernetes call. `lab` offers Scenarios their Steps, and `timeline` records what the cluster did. Kubernetes is a boundary the project does not control, so its types stay inside `cluster`, enforced by the compiler, by `internal/` and by a lint rule. New dependencies need a justification; the standard library comes first.
 
-Every value a Scenario builds is immutable and validated by its own constructor, so a Topology or Workload that cannot exist is refused at the line that declared it. A setting of several values is a keyed struct literal under Kubernetes' own field names, so a Scenario reads as its manifest would. Each exported name sits in the package of its subject, `pod`, `node` or `lab`.
+Every value a Scenario builds is immutable and validated by its own constructor, so a Topology or Deployment that cannot exist is refused at the line that declared it. A setting of several values is a keyed struct literal under Kubernetes' own field names, so a Scenario reads as its manifest would. Each exported name sits in the package of its subject, `pod`, `node` or `lab`.
 
 Testing follows the same stance of proving rather than simulating:
 
@@ -150,7 +150,7 @@ The documents behind the code:
 
 ## Disclaimer
 
-This is a personal learning project. It documents patterns and ideas the author explored while studying how Kubernetes places and reschedules workloads, with AI coding agents doing much of the building.
+This is a personal learning project. It documents patterns and ideas the author explored while studying how Kubernetes places and reschedules Pods, with AI coding agents doing much of the building.
 
 Use anything here freely under the [MIT License](LICENSE), but at your own risk. The lab reasons about Placement on a Simulated Cluster; evaluate everything yourself before applying it to a cluster that carries real traffic.
 

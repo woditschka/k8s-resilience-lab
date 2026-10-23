@@ -33,7 +33,7 @@ const (
 	aLabelKey   = "example.com/capacity-type"
 	aLabelValue = "spot"
 
-	aWorkload       = "checkout"
+	aDeployment     = "checkout"
 	aPodPlacedFirst = "checkout-5fc87ff7c8-7vd48"
 	aPodPlacedLater = "checkout-5fc87ff7c8-q2x9z"
 	aPodLeftPending = "checkout-5fc87ff7c8-p0nd1"
@@ -123,11 +123,11 @@ func aTopologyOfTwoZones(t *testing.T) scenario.Topology {
 }
 
 func aPodOn(node scenario.Node, name string) scenario.Pod {
-	return scenario.Pod{Name: name, Workload: aWorkload, Node: node.Name, Phase: scenario.PodRunning, Ready: true}
+	return scenario.Pod{Name: name, Deployment: aDeployment, Node: node.Name, Phase: scenario.PodRunning, Ready: true}
 }
 
 func aPendingPod() scenario.Pod {
-	return scenario.Pod{Name: aPodLeftPending, Workload: aWorkload, Phase: scenario.PodPending}
+	return scenario.Pod{Name: aPodLeftPending, Deployment: aDeployment, Phase: scenario.PodPending}
 }
 
 func aBoardOf(topology scenario.Topology, pods []scenario.Pod, previous scenario.PlacementBoard) scenario.PlacementBoard {

@@ -22,9 +22,9 @@ const (
 	zoneLabel     = scenario.ZoneLabel
 	hostnameLabel = scenario.HostnameLabel
 
-	// workloadLabel lets a spread constraint and an observation each count one
-	// Workload's Pods.
-	workloadLabel = "k8s-resilience-lab/workload"
+	// deploymentLabel lets a spread constraint and an observation each count one
+	// Deployment's Pods.
+	deploymentLabel = "k8s-resilience-lab/deployment"
 
 	// Every Node carries nodePoolLabel, so one selector names one NodePool's
 	// Nodes; internal/scenario refuses a NodePool stating it.
@@ -56,10 +56,10 @@ const (
 
 	// The image is never pulled: a Simulated Cluster's Pods are fake, so the
 	// reference only has to be valid.
-	workloadImage     = "registry.k8s.io/pause:3.10"
-	workloadContainer = "workload"
+	podImage            = "registry.k8s.io/pause:3.10"
+	deploymentContainer = "pause"
 
-	// A probe Pod carries no Workload label, so an observation of a Workload
+	// A probe Pod carries no Deployment label, so an observation of a Deployment
 	// reads none of them.
 	//
 	// bytesPerMebibyte is the one place the lab's mebibytes and Kubernetes'
@@ -82,22 +82,22 @@ var observedPhases = map[corev1.PodPhase]scenario.PodPhase{
 }
 
 // The Deployment's selector, each spread constraint and an observation's
-// selector are built from this one value, so a Workload name is carried
+// selector are built from this one value, so a Deployment name is carried
 // structurally and the client renders it rather than being concatenated into a
 // selector expression.
-func workloadLabels(workloadName string) labels.Set {
-	return labels.Set{workloadLabel: workloadName}
+func deploymentLabels(deploymentName string) labels.Set {
+	return labels.Set{deploymentLabel: deploymentName}
 }
 
-func podSelectorOf(workload scenario.Workload) string {
-	return workloadLabels(workload.Name()).String()
+func podSelectorOf(deployment scenario.Deployment) string {
+	return deploymentLabels(deployment.Name()).String()
 }
 
 // The label's presence alone selects, so one list holds the Pods of every
-// Workload whatever its name.
-func everyWorkloadsPods() string {
+// Deployment whatever its name.
+func everyDeploymentsPods() string {
 	return metav1.FormatLabelSelector(&metav1.LabelSelector{
-		MatchExpressions: []metav1.LabelSelectorRequirement{{Key: workloadLabel, Operator: metav1.LabelSelectorOpExists}},
+		MatchExpressions: []metav1.LabelSelectorRequirement{{Key: deploymentLabel, Operator: metav1.LabelSelectorOpExists}},
 	})
 }
 
@@ -120,7 +120,7 @@ func toProbePod(node scenario.Node) *corev1.Pod {
 			NodeSelector: map[string]string{hostnameLabel: node.Name},
 			Tolerations:  toleratingEach(node.Taints),
 			Containers: []corev1.Container{
-				{Name: probeContainer, Image: workloadImage},
+				{Name: probeContainer, Image: podImage},
 			},
 		},
 	}
@@ -225,25 +225,25 @@ type PodSpecAccessInPlace struct {
 	AfterSettings int
 }
 
-// The container, the Workload label and the selector are the mapper's own,
+// The container, the Deployment label and the selector are the mapper's own,
 // because a specification is a package-level value and can name neither. A full
 // access reaches the Pod specification alone, so the Deployment, its selector
 // and the counted label stay beyond it.
-func toDeployment(workload scenario.Workload, accesses ...PodSpecAccessInPlace) *appsv1.Deployment {
-	replicas := int32(workload.Pods())
-	selector := workloadLabels(workload.Name())
+func toDeployment(deployment scenario.Deployment, accesses ...PodSpecAccessInPlace) *appsv1.Deployment {
+	replicas := int32(deployment.Replicas())
+	selector := deploymentLabels(deployment.Name())
 
 	return &appsv1.Deployment{
-		Name: workload.Name(), Labels: selector,
+		Name: deployment.Name(), Labels: selector,
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: selector},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels:      selector,
-					Annotations: toStartupAnnotations(workload.PodSpecification().StartupTime()),
+					Annotations: toStartupAnnotations(deployment.PodSpecification().StartupTime()),
 				},
-				Spec: toPodSpec(workload, accesses),
+				Spec: toPodSpec(deployment, accesses),
 			},
 		},
 	}
@@ -265,18 +265,18 @@ func toStartupAnnotations(startup scenario.StartupTime) map[string]string {
 // The specification's tolerations are written once more after the last full
 // access, so a toleration a full access writes does not stand and the waiting
 // time before leaving an unresponsive Node stays the lab's to decide.
-func toPodSpec(workload scenario.Workload, accesses []PodSpecAccessInPlace) corev1.PodSpec {
-	declared := workload.PodSpecification()
+func toPodSpec(deployment scenario.Deployment, accesses []PodSpecAccessInPlace) corev1.PodSpec {
+	declared := deployment.PodSpecification()
 	settings := declared.Settings()
 
 	pod := corev1.PodSpec{
 		Containers: []corev1.Container{
-			{Name: workloadContainer, Image: workloadImage},
+			{Name: deploymentContainer, Image: podImage},
 		},
 	}
 	for transcribed, setting := range settings {
 		runAccessesWrittenAfter(&pod, transcribed, accesses)
-		transcribeSetting(&pod, setting, workload.Name())
+		transcribeSetting(&pod, setting, deployment.Name())
 	}
 	runAccessesWrittenAfter(&pod, len(settings), accesses)
 	pod.Tolerations = toTolerations(declared.Tolerations())
@@ -294,11 +294,11 @@ func runAccessesWrittenAfter(pod *corev1.PodSpec, transcribed int, accesses []Po
 
 // The settings are sealed in internal/scenario, so these three are every kind
 // there is.
-func transcribeSetting(pod *corev1.PodSpec, declared scenario.Setting, workloadName string) {
+func transcribeSetting(pod *corev1.PodSpec, declared scenario.Setting, deploymentName string) {
 	switch setting := declared.(type) {
 	case scenario.TopologySpread:
 		pod.TopologySpreadConstraints = append(pod.TopologySpreadConstraints,
-			toSpreadConstraint(setting, workloadName))
+			toSpreadConstraint(setting, deploymentName))
 	case scenario.Toleration:
 		pod.Tolerations = append(pod.Tolerations, toToleration(setting))
 	case scenario.Request:
@@ -323,15 +323,15 @@ func toRequestedResources(declared scenario.Request) corev1.ResourceList {
 	}
 }
 
-// The selector is the mapper's own, so a constraint counts one Workload's Pods.
-func toSpreadConstraint(declared scenario.TopologySpread, workloadName string) corev1.TopologySpreadConstraint {
+// The selector is the mapper's own, so a constraint counts one Deployment's Pods.
+func toSpreadConstraint(declared scenario.TopologySpread, deploymentName string) corev1.TopologySpreadConstraint {
 	taintsPolicy := corev1.NodeInclusionPolicy(declared.NodeTaintsPolicy())
 
 	return corev1.TopologySpreadConstraint{
 		MaxSkew:           int32(declared.MaxSkew()),
 		TopologyKey:       declared.TopologyKey(),
 		WhenUnsatisfiable: corev1.UnsatisfiableConstraintAction(declared.WhenUnsatisfiable()),
-		LabelSelector:     &metav1.LabelSelector{MatchLabels: workloadLabels(workloadName)},
+		LabelSelector:     &metav1.LabelSelector{MatchLabels: deploymentLabels(deploymentName)},
 		NodeTaintsPolicy:  &taintsPolicy,
 	}
 }
@@ -503,12 +503,12 @@ func fromPods(observed []corev1.Pod) []scenario.Pod {
 			continue
 		}
 		pods = append(pods, scenario.Pod{
-			Name:     pod.Name,
-			Workload: pod.Labels[workloadLabel],
-			Node:     pod.Spec.NodeName,
-			Phase:    observedPhaseOf(pod),
-			Ready:    isPodReady(pod),
-			Request:  requestedOverContainers(pod.Spec.Containers),
+			Name:       pod.Name,
+			Deployment: pod.Labels[deploymentLabel],
+			Node:       pod.Spec.NodeName,
+			Phase:      observedPhaseOf(pod),
+			Ready:      isPodReady(pod),
+			Request:    requestedOverContainers(pod.Spec.Containers),
 		})
 	}
 

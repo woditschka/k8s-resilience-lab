@@ -20,11 +20,11 @@ import (
 )
 
 const (
-	deployedWorkloadName = "web"
-	somePodsPerNode      = 10
-	somePodCount         = 9
-	evenSkew             = 1
-	widerSkew            = 2
+	deployedDeploymentName = "web"
+	somePodsPerNode        = 10
+	somePodCount           = 9
+	evenSkew               = 1
+	widerSkew              = 2
 
 	someCPUPerNode      = scenario.CPU(4 * millicoresPerCore)
 	someMemoryPerNode   = scenario.Memory(16 * mebibytesPerGibibyte)
@@ -41,15 +41,15 @@ const (
 	someSpecificationName = "a Pod specification"
 )
 
-func aWorkload(t *testing.T, declaring scenario.PodSpecification) scenario.Workload {
+func aDeployment(t *testing.T, declaring scenario.PodSpecification) scenario.Deployment {
 	t.Helper()
 
-	workload, err := scenario.NewWorkload(deployedWorkloadName, somePodCount, declaring)
+	deployment, err := scenario.NewDeployment(deployedDeploymentName, somePodCount, declaring)
 	if err != nil {
-		t.Fatalf("build a Workload of %d Pods: %v", somePodCount, err)
+		t.Fatalf("build a Deployment of %d Pods: %v", somePodCount, err)
 	}
 
-	return workload
+	return deployment
 }
 
 // The predefined specifications live in the Scenarios' place, which imports
@@ -83,8 +83,8 @@ func theLabsWaitInSeconds() int64 {
 	return int64(scenario.UnresponsiveNodeWait.Seconds())
 }
 
-func workloadSelector() *metav1.LabelSelector {
-	return &metav1.LabelSelector{MatchLabels: map[string]string{workloadLabel: deployedWorkloadName}}
+func deploymentSelector() *metav1.LabelSelector {
+	return &metav1.LabelSelector{MatchLabels: map[string]string{deploymentLabel: deployedDeploymentName}}
 }
 
 // These are written in the client library's own vocabulary so each field is
@@ -96,7 +96,7 @@ func theConstraintOver(topologyKey string, maxSkew int) corev1.TopologySpreadCon
 		MaxSkew:           int32(maxSkew),
 		TopologyKey:       topologyKey,
 		WhenUnsatisfiable: corev1.DoNotSchedule,
-		LabelSelector:     workloadSelector(),
+		LabelSelector:     deploymentSelector(),
 		NodeTaintsPolicy:  &honourTaints,
 	}
 }
@@ -114,7 +114,7 @@ func theTolerationOf(taint string) corev1.Toleration {
 
 // A specification setting no spread still carries the lab's two tolerations,
 // which every specification holds.
-func TestAWorkloadDeclaringAPredefinedSpecification_ShouldBeDeployedWithTheSettingsItsDefinitionNames(t *testing.T) {
+func TestADeploymentDeclaringAPredefinedSpecification_ShouldBeDeployedWithTheSettingsItsDefinitionNames(t *testing.T) {
 	declared := map[string]struct {
 		specification scenario.PodSpecification
 		constraints   []corev1.TopologySpreadConstraint
@@ -147,7 +147,7 @@ func TestAWorkloadDeclaringAPredefinedSpecification_ShouldBeDeployedWithTheSetti
 
 	for what, mapped := range declared {
 		t.Run(what, func(t *testing.T) {
-			deployed := toDeployment(aWorkload(t, mapped.specification))
+			deployed := toDeployment(aDeployment(t, mapped.specification))
 
 			expect.Expect(t, deployed.Spec.Template.Spec.TopologySpreadConstraints).To(expect.Equal(mapped.constraints))
 			expect.Expect(t, deployed.Spec.Template.Spec.Tolerations).To(expect.Equal(mapped.tolerations))
@@ -185,7 +185,7 @@ func afterEverySettingOf(declared scenario.PodSpecification) int {
 func TestASpecificationCustomizedWithFullAccess_ShouldHoldTheSettingsTheScenarioNamed(t *testing.T) {
 	declared := aSpecificationOf(t, aNodeConditionToleration(scenario.TaintNodeNotReady))
 
-	deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
+	deployed := toDeployment(aDeployment(t, declared), PodSpecAccessInPlace{
 		Access:        namingThePriorityClass(theCriticalPriorityClass),
 		AfterSettings: afterEverySettingOf(declared),
 	})
@@ -215,7 +215,7 @@ func TestFullAccessWrittenBesideTheLabsOwnCustomizations_ShouldWinWhereItIsWritt
 
 	for order, taken := range written {
 		t.Run(order, func(t *testing.T) {
-			deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
+			deployed := toDeployment(aDeployment(t, declared), PodSpecAccessInPlace{
 				Access: droppingTheSpreadConstraints(), AfterSettings: taken.place,
 			})
 
@@ -232,7 +232,7 @@ func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHoldi
 		aNodeConditionToleration(scenario.TaintNodeUnreachable),
 	)
 
-	deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
+	deployed := toDeployment(aDeployment(t, declared), PodSpecAccessInPlace{
 		Access: droppingTheTolerations(), AfterSettings: afterEverySettingOf(declared),
 	})
 
@@ -242,17 +242,17 @@ func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHoldi
 	}))
 }
 
-func TestAWorkloadCustomizedWithFullAccess_ShouldStillHaveItsPodsCountedAsItsOwn(t *testing.T) {
+func TestADeploymentCustomizedWithFullAccess_ShouldStillHaveItsPodsCountedAsItsOwn(t *testing.T) {
 	declared := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 
-	deployed := toDeployment(aWorkload(t, declared), PodSpecAccessInPlace{
+	deployed := toDeployment(aDeployment(t, declared), PodSpecAccessInPlace{
 		Access: leavingNothingOfThePodSpecification(), AfterSettings: beforeEverySetting,
 	})
 
-	expect.Expect(t, deployed.Name).To(expect.Equal(deployedWorkloadName))
-	expect.Expect(t, deployed.Labels).To(expect.Equal(map[string]string{workloadLabel: deployedWorkloadName}))
-	expect.Expect(t, deployed.Spec.Selector).To(expect.Equal(workloadSelector()))
-	expect.Expect(t, deployed.Spec.Template.Labels).To(expect.Equal(map[string]string{workloadLabel: deployedWorkloadName}))
+	expect.Expect(t, deployed.Name).To(expect.Equal(deployedDeploymentName))
+	expect.Expect(t, deployed.Labels).To(expect.Equal(map[string]string{deploymentLabel: deployedDeploymentName}))
+	expect.Expect(t, deployed.Spec.Selector).To(expect.Equal(deploymentSelector()))
+	expect.Expect(t, deployed.Spec.Template.Labels).To(expect.Equal(map[string]string{deploymentLabel: deployedDeploymentName}))
 }
 
 // A mistyped label, taint or value would drop a spread or a toleration silently
@@ -274,17 +274,17 @@ func TestEveryKubernetesNameTheLabSpells_ShouldEqualTheClientLibrarysOwnConstant
 // a Pod Pending after a Node is lost, while a maximum Skew of one keeps every
 // Pod Running.
 func TestADeployedPodTemplate_ShouldCarryNoPodAffinityRule(t *testing.T) {
-	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
+	deployed := toDeployment(aDeployment(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
 	expect.Expect(t, deployed.Spec.Template.Spec.Affinity).To(expect.Equal[*corev1.Affinity](nil))
 }
 
 // A specification is a package-level value and cannot name the container.
 func TestADeployedPodTemplate_ShouldCarryTheContainerNoSpecificationCanName(t *testing.T) {
-	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
+	deployed := toDeployment(aDeployment(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
 	expect.Expect(t, deployed.Spec.Template.Spec.Containers).To(expect.Equal([]corev1.Container{
-		{Name: workloadContainer, Image: workloadImage},
+		{Name: deploymentContainer, Image: podImage},
 	}))
 }
 
@@ -364,13 +364,13 @@ func TestANodeTheKWOKControllerNoLongerMaintains_ShouldKeepEveryLabelButTheMarki
 	expect.Expect(t, labelled[fakeNodeLabel]).To(expect.Equal(fakeNodeLabelValue))
 }
 
-func TestADeployedWorkload_ShouldLabelAndSelectItsPodsByItsName(t *testing.T) {
-	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
+func TestADeployedDeployment_ShouldLabelAndSelectItsPodsByItsName(t *testing.T) {
+	deployed := toDeployment(aDeployment(t, aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))))
 
-	expect.Expect(t, deployed.Name).To(expect.Equal(deployedWorkloadName))
+	expect.Expect(t, deployed.Name).To(expect.Equal(deployedDeploymentName))
 	expect.Expect(t, int(*deployed.Spec.Replicas)).To(expect.Equal(somePodCount))
-	expect.Expect(t, deployed.Spec.Selector).To(expect.Equal(workloadSelector()))
-	expect.Expect(t, deployed.Spec.Template.Labels).To(expect.Equal(map[string]string{workloadLabel: deployedWorkloadName}))
+	expect.Expect(t, deployed.Spec.Selector).To(expect.Equal(deploymentSelector()))
+	expect.Expect(t, deployed.Spec.Template.Labels).To(expect.Equal(map[string]string{deploymentLabel: deployedDeploymentName}))
 }
 
 func TestAProvisionedNode_ShouldBeFakeAndCarryItsZoneAndHostnameLabels(t *testing.T) {
@@ -435,7 +435,7 @@ func TestEveryQuantityTheLabSpells_ShouldEqualTheClientLibrarysOwnSpelling(t *te
 func TestAPodSpecificationStatingARequest_ShouldDeployItsPodsWithThatRequest(t *testing.T) {
 	declared := aSpecificationOf(t, scenario.NewRequest(someRequestedCPU, someRequestedMemory))
 
-	deployed := toDeployment(aWorkload(t, declared))
+	deployed := toDeployment(aDeployment(t, declared))
 
 	expect.Expect(t, theQuantitiesRequestedIn(deployed)).To(expect.Equal([]map[corev1.ResourceName]string{{
 		corev1.ResourceCPU:    someRequestedCPU.String(),
@@ -446,7 +446,7 @@ func TestAPodSpecificationStatingARequest_ShouldDeployItsPodsWithThatRequest(t *
 func TestAPodSpecificationStatingNoRequest_ShouldDeployItsPodsAskingForNothing(t *testing.T) {
 	declared := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 
-	deployed := toDeployment(aWorkload(t, declared))
+	deployed := toDeployment(aDeployment(t, declared))
 
 	expect.Expect(t, theQuantitiesRequestedIn(deployed)).To(expect.Equal([]map[corev1.ResourceName]string{{}}))
 }
@@ -495,29 +495,29 @@ func TestOnlyAProbePodReportedRunning_ShouldCountAsItsNodeBeingHeld(t *testing.T
 	expect.Expect(t, holding).To(expect.Equal([]string{heldNode.Name}))
 }
 
-// The Workload comes from the Pod's label, so a Workload name holding a hyphen
+// The Deployment comes from the Pod's label, so a Deployment name holding a hyphen
 // is never cut at one.
-func TestAnObservedPod_ShouldBeReadWithItsWorkloadAndTheNodeItLandedOn(t *testing.T) {
-	const placedPodName, pendingPodName, aHyphenatedWorkload = "web-abc", "web-def", "web-frontend"
+func TestAnObservedPod_ShouldBeReadWithItsDeploymentAndTheNodeItLandedOn(t *testing.T) {
+	const placedPodName, pendingPodName, aHyphenatedDeployment = "web-abc", "web-def", "web-frontend"
 	placedOn := aNode(t)
 
 	observed := fromPods([]corev1.Pod{
 		{
 			Name:   placedPodName,
-			Labels: map[string]string{workloadLabel: aHyphenatedWorkload},
+			Labels: map[string]string{deploymentLabel: aHyphenatedDeployment},
 			Spec:   corev1.PodSpec{NodeName: placedOn.Name},
 			Status: corev1.PodStatus{Phase: corev1.PodRunning},
 		},
 		{
 			Name:   pendingPodName,
-			Labels: map[string]string{workloadLabel: aHyphenatedWorkload},
+			Labels: map[string]string{deploymentLabel: aHyphenatedDeployment},
 			Status: corev1.PodStatus{Phase: corev1.PodPending},
 		},
 	})
 
 	expect.Expect(t, observed).To(expect.Equal([]scenario.Pod{
-		{Name: placedPodName, Workload: aHyphenatedWorkload, Node: placedOn.Name, Phase: scenario.PodRunning},
-		{Name: pendingPodName, Workload: aHyphenatedWorkload, Phase: scenario.PodPending},
+		{Name: placedPodName, Deployment: aHyphenatedDeployment, Node: placedOn.Name, Phase: scenario.PodRunning},
+		{Name: pendingPodName, Deployment: aHyphenatedDeployment, Phase: scenario.PodPending},
 	}))
 }
 
@@ -853,13 +853,13 @@ func TestAnObservedChangeToAKindATimelineReads_ShouldBecomeOneEntryOfThatChange(
 		},
 		"a Deployment declaring how many replicas it wants": {
 			observed: watch.Event{Type: watch.Modified, Object: &appsv1.Deployment{
-				Name:   deployedWorkloadName,
+				Name:   deployedDeploymentName,
 				Spec:   appsv1.DeploymentSpec{Replicas: &declaredReplicas},
 				Status: appsv1.DeploymentStatus{ReadyReplicas: replicasRunning},
 			}},
 			recorded: scenario.Entry{
 				Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.DeploymentObject,
-				Name:   deployedWorkloadName,
+				Name:   deployedDeploymentName,
 				Detail: strconv.Itoa(replicasRunning) + " of " + strconv.Itoa(somePodCount) + " Pods ready",
 			},
 		},
@@ -1013,7 +1013,7 @@ func theStartupAnnotations(shortest, longest time.Duration) map[string]string {
 
 // The annotations sit on the template's metadata, which full access does not
 // reach.
-func TestAWorkloadsPodTemplate_ShouldCarryItsStartupTimeWhateverFullAccessNames(t *testing.T) {
+func TestADeploymentsPodTemplate_ShouldCarryItsStartupTimeWhateverFullAccessNames(t *testing.T) {
 	namingSome := aSpecificationOf(t, anEvenSpreadOver(scenario.ZoneLabel, evenSkew))
 	statingARange := namingSome.WithStartupTime(aStartupTimeBetween(t, aShortStartupMillis*time.Millisecond, aLongerStartupMillis*time.Millisecond))
 
@@ -1022,15 +1022,15 @@ func TestAWorkloadsPodTemplate_ShouldCarryItsStartupTimeWhateverFullAccessNames(
 		carries  map[string]string
 	}{
 		"the Startup time its definition names": {
-			template: toDeployment(aWorkload(t, namingSome)),
+			template: toDeployment(aDeployment(t, namingSome)),
 			carries:  theStartupAnnotations(someShortestStartup, someLongestStartup),
 		},
 		"a shortest and a longest stated after": {
-			template: toDeployment(aWorkload(t, statingARange)),
+			template: toDeployment(aDeployment(t, statingARange)),
 			carries:  theStartupAnnotations(aShortStartupMillis*time.Millisecond, aLongerStartupMillis*time.Millisecond),
 		},
 		"a full access leaving nothing of the Pod specification": {
-			template: toDeployment(aWorkload(t, statingARange), PodSpecAccessInPlace{
+			template: toDeployment(aDeployment(t, statingARange), PodSpecAccessInPlace{
 				Access: leavingNothingOfThePodSpecification(), AfterSettings: beforeEverySetting,
 			}),
 			carries: theStartupAnnotations(aShortStartupMillis*time.Millisecond, aLongerStartupMillis*time.Millisecond),
@@ -1110,7 +1110,7 @@ func TestAPodSpecificationToleratingANoScheduleTaint_ShouldDeployItsPodsTolerati
 	const noWaitingTime = 0
 	tolerating := scenario.NewToleration(gpuTaintKey, scenario.Equal, gpuTaintValue, scenario.NoSchedule, noWaitingTime)
 
-	deployed := toDeployment(aWorkload(t, aSpecificationOf(t, tolerating)))
+	deployed := toDeployment(aDeployment(t, aSpecificationOf(t, tolerating)))
 
 	expect.Expect(t, deployed.Spec.Template.Spec.Tolerations).To(expect.Equal([]corev1.Toleration{
 		{Key: gpuTaintKey, Operator: corev1.TolerationOpEqual, Value: gpuTaintValue, Effect: corev1.TaintEffectNoSchedule},

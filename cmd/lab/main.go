@@ -1,6 +1,6 @@
 // Command lab runs the k8s-resilience-lab Scenarios, each on a Simulated
 // Cluster of its own that is removed when the Scenario ends, and reports where
-// each Workload's Pods landed. With --interactive it holds one Scenario's
+// each Deployment's Pods landed. With --interactive it holds one Scenario's
 // cluster and serves its Live view until the lab is stopped.
 package main
 
@@ -234,7 +234,7 @@ func writeOutcome(part *reportPart, outcome lab.Outcome, asked runSetting) {
 	part.addf("Scenario %s, on %s", outcome.Name, outcome.Cluster)
 	writeSteps(part, outcome)
 	if outcome.HoldsASettledPlacement() {
-		part.addf("  Skew of %s: %d over Zones, %d over Nodes", outcome.JudgedWorkload,
+		part.addf("  Skew of %s: %d over Zones, %d over Nodes", outcome.JudgedDeployment,
 			outcome.Placement.Skew(scenario.SpreadOverZones), outcome.Placement.Skew(scenario.SpreadOverNodes))
 	}
 	writeTimeline(part, outcome, asked)
@@ -272,7 +272,7 @@ func notFiled(outcome lab.Outcome) error {
 	return fmt.Errorf("the Timeline of the Scenario %s was not filed: %w", outcome.Name, outcome.NotFiled)
 }
 
-// A Workload's settings are reported one level deeper, so what a Named setting
+// A Deployment's settings are reported one level deeper, so what a Named setting
 // stands for stays visible.
 func writeSteps(part *reportPart, outcome lab.Outcome) {
 	for _, step := range outcome.Steps {

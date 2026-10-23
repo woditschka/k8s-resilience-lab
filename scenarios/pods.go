@@ -1,5 +1,5 @@
 // The predefined Pod specifications and Named settings the lab's own Scenarios
-// declare. The lab defines none, so a Workload declares one of these.
+// declare. The lab defines none, so a Deployment declares one of these.
 
 package scenarios
 
@@ -8,7 +8,7 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
 )
 
-// ResilientPlacement spreads a Workload's Pods evenly over Zones and Nodes, so
+// ResilientPlacement spreads a Deployment's Pods evenly over Zones and Nodes, so
 // the loss of one Node or one Zone takes the fewest Pods with it. Each Pod
 // takes between half a second and a second to start, so the Pending-on-Node
 // state stays visible and two runs may record different Timelines.
@@ -28,7 +28,7 @@ func DefaultPlacement() pod.Specification {
 		LeaveUnresponsiveNodes())
 }
 
-// SpreadOverOnDemandAndSpot spreads a Workload's Pods evenly over Zones and
+// SpreadOverOnDemandAndSpot spreads a Deployment's Pods evenly over Zones and
 // over the CapacityType label, so losing the spot Nodes takes the fewest Pods
 // with it.
 func SpreadOverOnDemandAndSpot() pod.Specification {

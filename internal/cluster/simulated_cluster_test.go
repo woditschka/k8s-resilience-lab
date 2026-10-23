@@ -25,10 +25,10 @@ const (
 	threeNodesPerZone = 3
 	ninePods          = 9
 
-	// The second Workload has a label of its own, so each is spread over the
+	// The second Deployment has a label of its own, so each is spread over the
 	// Nodes on its own.
-	secondWorkloadName = "basket"
-	threePods          = 3
+	secondDeploymentName = "basket"
+	threePods            = 3
 
 	onePodPerNode = 1
 	onePodTooMany = 1
@@ -60,7 +60,7 @@ const (
 	twoPodsRequestingMoreThanANode = 2
 )
 
-// Each Node can hold more Pods than the Workload declares.
+// Each Node can hold more Pods than the Deployment declares.
 func anEvenSpreadTopology(t *testing.T) scenario.Topology {
 	t.Helper()
 
@@ -93,29 +93,29 @@ func defaultPlacement(t *testing.T) scenario.PodSpecification {
 	)
 }
 
-var noWorkloadDeclaredYet scenario.Workload
+var noDeploymentDeclaredYet scenario.Deployment
 
-func aWorkloadDeclaring(t *testing.T, pods int, declaring scenario.PodSpecification) scenario.Workload {
+func aDeploymentDeclaring(t *testing.T, pods int, declaring scenario.PodSpecification) scenario.Deployment {
 	t.Helper()
 
-	return aWorkloadNamed(t, deployedWorkloadName, pods, declaring)
+	return aDeploymentNamed(t, deployedDeploymentName, pods, declaring)
 }
 
-func aSecondWorkloadDeclaring(t *testing.T, pods int, declaring scenario.PodSpecification) scenario.Workload {
+func aSecondDeploymentDeclaring(t *testing.T, pods int, declaring scenario.PodSpecification) scenario.Deployment {
 	t.Helper()
 
-	return aWorkloadNamed(t, secondWorkloadName, pods, declaring)
+	return aDeploymentNamed(t, secondDeploymentName, pods, declaring)
 }
 
-func aWorkloadNamed(t *testing.T, name string, pods int, declaring scenario.PodSpecification) scenario.Workload {
+func aDeploymentNamed(t *testing.T, name string, pods int, declaring scenario.PodSpecification) scenario.Deployment {
 	t.Helper()
 
-	workload, err := scenario.NewWorkload(name, pods, declaring)
+	deployment, err := scenario.NewDeployment(name, pods, declaring)
 	if err != nil {
-		t.Fatalf("build the Workload %s of %d Pods: %v", name, pods, err)
+		t.Fatalf("build the Deployment %s of %d Pods: %v", name, pods, err)
 	}
 
-	return workload
+	return deployment
 }
 
 // On one Zone a spread over Zones is satisfied by every Placement, so the
@@ -162,17 +162,17 @@ func podsCounted(counts map[string]int) int {
 
 // Reading a Pod's own spec is this suite's call: the lab reads a Placement,
 // which names a Pod and its Node and not the settings it was deployed with.
-func aDeployedPodOf(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) corev1.PodSpec {
+func aDeployedPodOf(t *testing.T, provisioned *SimulatedCluster, deployment scenario.Deployment) corev1.PodSpec {
 	t.Helper()
 
-	held, err := provisioned.client.CoreV1().Pods(workloadNamespace).List(t.Context(), metav1.ListOptions{
-		LabelSelector: podSelectorOf(workload),
+	held, err := provisioned.client.CoreV1().Pods(clusterNamespace).List(t.Context(), metav1.ListOptions{
+		LabelSelector: podSelectorOf(deployment),
 	})
 	if err != nil {
-		t.Fatalf("read the Pods of the Workload %s: %v", workload.Name(), err)
+		t.Fatalf("read the Pods of the Deployment %s: %v", deployment.Name(), err)
 	}
 	if len(held.Items) == 0 {
-		t.Fatalf("the cluster holds a Pod of the Workload %s, but it reported none", workload.Name())
+		t.Fatalf("the cluster holds a Pod of the Deployment %s, but it reported none", deployment.Name())
 	}
 
 	return held.Items[0].Spec
@@ -361,13 +361,13 @@ func TestProvisioning_ShouldLeaveNoProbePodOnTheClusterItHandsBack(t *testing.T)
 	expect.Expect(t, left).To(expect.HaveLen[corev1.Pod](0))
 }
 
-func TestAWorkloadDeclaringResilientPlacement_ShouldPlaceOnePodOnEveryNodeOfEveryZone(t *testing.T) {
+func TestADeploymentDeclaringResilientPlacement_ShouldPlaceOnePodOnEveryNodeOfEveryZone(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
-	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+	deployment := aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
+	deployInto(t, provisioned, anEvenSpreadTopology(t), deployment)
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
 		t.Fatalf("await the Placement settling: %v", err)
 	}
@@ -378,24 +378,24 @@ func TestAWorkloadDeclaringResilientPlacement_ShouldPlaceOnePodOnEveryNodeOfEver
 		"zone-1": podsPerZone, "zone-2": podsPerZone, "zone-3": podsPerZone,
 	}))
 	expect.Expect(t, settled.Skew(scenario.SpreadOverNodes)).To(expect.Equal(0))
-	expect.Expect(t, theSettingsOf(aDeployedPodOf(t, provisioned, workload))).
-		To(expect.Equal(workload.PodSpecification().Settings()))
+	expect.Expect(t, theSettingsOf(aDeployedPodOf(t, provisioned, deployment))).
+		To(expect.Equal(deployment.PodSpecification().Settings()))
 }
 
-func TestAWorkloadDeployedFromACustomizedSpecification_ShouldCarryTheCustomizedSettings(t *testing.T) {
+func TestADeploymentDeployedFromACustomizedSpecification_ShouldCarryTheCustomizedSettings(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	theZoneSpreadTheScenarioWrote := anEvenSpreadOver(scenario.ZoneLabel, widerSkew)
-	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement(t).With(theZoneSpreadTheScenarioWrote))
-	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+	deployment := aDeploymentDeclaring(t, ninePods, resilientPlacement(t).With(theZoneSpreadTheScenarioWrote))
+	deployInto(t, provisioned, anEvenSpreadTopology(t), deployment)
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
 		t.Fatalf("await the Placement settling: %v", err)
 	}
 
 	expect.Expect(t, settled.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](ninePods))
-	expect.Expect(t, theSettingsOf(aDeployedPodOf(t, provisioned, workload))).To(expect.Equal([]scenario.Setting{
+	expect.Expect(t, theSettingsOf(aDeployedPodOf(t, provisioned, deployment))).To(expect.Equal([]scenario.Setting{
 		aNodeConditionToleration(scenario.TaintNodeNotReady),
 		aNodeConditionToleration(scenario.TaintNodeUnreachable),
 		theZoneSpreadTheScenarioWrote,
@@ -405,13 +405,13 @@ func TestAWorkloadDeployedFromACustomizedSpecification_ShouldCarryTheCustomizedS
 
 // Where Default placement puts its Pods is the scheduler's own choice, so only
 // what holds of every Placement is asserted.
-func TestAWorkloadDeclaringDefaultPlacement_ShouldPlaceEveryPodWithNoCountPromisedPerZone(t *testing.T) {
+func TestADeploymentDeclaringDefaultPlacement_ShouldPlaceEveryPodWithNoCountPromisedPerZone(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	workload := aWorkloadDeclaring(t, ninePods, defaultPlacement(t))
-	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+	deployment := aDeploymentDeclaring(t, ninePods, defaultPlacement(t))
+	deployInto(t, provisioned, anEvenSpreadTopology(t), deployment)
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
 		t.Fatalf("await the Placement settling: %v", err)
 	}
@@ -421,11 +421,11 @@ func TestAWorkloadDeclaringDefaultPlacement_ShouldPlaceEveryPodWithNoCountPromis
 	expect.Expect(t, settled.PodsItCannotAccountFor()).To(expect.HaveLen[scenario.Pod](noPodAtAll))
 }
 
-func TestTwoWorkloadsDeclaringDifferentSpecifications_ShouldEachBePlacedByTheOneItDeclares(t *testing.T) {
+func TestTwoDeploymentsDeclaringDifferentSpecifications_ShouldEachBePlacedByTheOneItDeclares(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	spreadEvenly := aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
-	spreadNowhere := aSecondWorkloadDeclaring(t, threePods, defaultPlacement(t))
+	spreadEvenly := aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
+	spreadNowhere := aSecondDeploymentDeclaring(t, threePods, defaultPlacement(t))
 	deployBoth(t, provisioned, anEvenSpreadTopology(t), spreadEvenly, spreadNowhere)
 
 	evenly, nowhere := bothSettled(t, provisioned, spreadEvenly, spreadNowhere)
@@ -435,13 +435,13 @@ func TestTwoWorkloadsDeclaringDifferentSpecifications_ShouldEachBePlacedByTheOne
 	expect.Expect(t, nowhere.PodsItCannotAccountFor()).To(expect.HaveLen[scenario.Pod](noPodAtAll))
 }
 
-// A spread constraint selects its Workload's Pods by their Workload label, so
+// A spread constraint selects its Deployment's Pods by their Deployment label, so
 // the other's Pods are not counted towards the Skew.
-func TestTwoWorkloadsDeclaringTheSameSpecification_ShouldEachBeSpreadWithoutCountingTheOthersPods(t *testing.T) {
+func TestTwoDeploymentsDeclaringTheSameSpecification_ShouldEachBeSpreadWithoutCountingTheOthersPods(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	first := aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
-	second := aSecondWorkloadDeclaring(t, ninePods, resilientPlacement(t))
+	first := aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
+	second := aSecondDeploymentDeclaring(t, ninePods, resilientPlacement(t))
 	deployBoth(t, provisioned, anEvenSpreadTopology(t), first, second)
 
 	itsOwn, theOthers := bothSettled(t, provisioned, first, second)
@@ -457,10 +457,10 @@ func TestResilientPlacementOnATopologyOfOneZone_ShouldStillPlaceOnePodPerNode(t 
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	oneZone := aTopologyOfOneZone(t)
-	workload := aWorkloadDeclaring(t, threeNodesPerZone, resilientPlacement(t))
-	deployInto(t, provisioned, oneZone, workload)
+	deployment := aDeploymentDeclaring(t, threeNodesPerZone, resilientPlacement(t))
+	deployInto(t, provisioned, oneZone, deployment)
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
 		t.Fatalf("await the Placement settling: %v", err)
 	}
@@ -473,10 +473,10 @@ func TestARunAfterAnEarlierRun_ShouldReportOnlyItsOwnNodesAndPods(t *testing.T) 
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology := anEvenSpreadTopology(t)
-	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
-	deployInto(t, provisioned, topology, workload)
+	deployment := aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
+	deployInto(t, provisioned, topology, deployment)
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
 		t.Fatalf("await the Placement settling: %v", err)
 	}
@@ -487,13 +487,13 @@ func TestARunAfterAnEarlierRun_ShouldReportOnlyItsOwnNodesAndPods(t *testing.T) 
 
 // Without spread rules the Pods the scheduler cannot place stay Pending, and
 // the control plane's own reason for each is on the Timeline.
-func TestAWorkloadWithoutSpreadRulesOnATooSmallTopology_ShouldLeaveTheUnplaceablePodsPending(t *testing.T) {
+func TestADeploymentWithoutSpreadRulesOnATooSmallTopology_ShouldLeaveTheUnplaceablePodsPending(t *testing.T) {
 	t.Parallel()
 
 	morePodsThanTheTopologyHolds := somePodsPerNode + onePodTooMany
-	workload := aWorkloadDeclaring(t, morePodsThanTheTopologyHolds, defaultPlacement(t))
+	deployment := aDeploymentDeclaring(t, morePodsThanTheTopologyHolds, defaultPlacement(t))
 
-	recorded, _, settled := aRecordedScenario(t, aTopologyOfOneNode(t), workload)
+	recorded, _, settled := aRecordedScenario(t, aTopologyOfOneNode(t), deployment)
 
 	pending := settled.PodsInPhase(scenario.PodPending)
 	expect.Expect(t, settled.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](somePodsPerNode))
@@ -501,13 +501,13 @@ func TestAWorkloadWithoutSpreadRulesOnATooSmallTopology_ShouldLeaveTheUnplaceabl
 	expectReported(t, recorded, pending[0].Name, podSchedulingFailed)
 }
 
-// Both Workloads are deployed onto one provisioned Topology, because
+// Both Deployments are deployed onto one provisioned Topology, because
 // provisioning is what this suite's time goes on.
-func TestAWorkloadRequestingMoreThanItsNodesHaveRoomFor_ShouldLeaveThePodsThatDoNotFitPending(t *testing.T) {
+func TestADeploymentRequestingMoreThanItsNodesHaveRoomFor_ShouldLeaveThePodsThatDoNotFitPending(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	fitting := aWorkloadDeclaring(t, threePodsRequestingHalfANode, requestingCPUOf(t, halfTheNodesCPU))
-	tooLarge := aSecondWorkloadDeclaring(t, twoPodsRequestingMoreThanANode, requestingCPUOf(t, moreCPUThanANodeHas))
+	fitting := aDeploymentDeclaring(t, threePodsRequestingHalfANode, requestingCPUOf(t, halfTheNodesCPU))
+	tooLarge := aSecondDeploymentDeclaring(t, twoPodsRequestingMoreThanANode, requestingCPUOf(t, moreCPUThanANodeHas))
 	deployBoth(t, provisioned, aTopologyOfOneNodeOfFourCores(t), fitting, tooLarge)
 
 	placed, refused := bothSettled(t, provisioned, fitting, tooLarge)
@@ -526,15 +526,15 @@ func TestAWorkloadRequestingMoreThanItsNodesHaveRoomFor_ShouldLeaveThePodsThatDo
 func TestANodeThatStopsResponding_ShouldLeaveNinePodsRunningThreePerZoneAndNoneOnIt(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
+	topology, deployment := anEvenSpreadTopology(t), aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
 	stopped := theFirstNodeOf(topology)
-	settleInto(t, provisioned, topology, workload)
+	settleInto(t, provisioned, topology, deployment)
 
 	if err := provisioned.FailNode(t.Context(), stopped); err != nil {
 		t.Fatalf("stop Node %s responding: %v", stopped, err)
 	}
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
 		t.Fatalf("await the Placement settling after the Failure: %v", err)
 	}
@@ -554,13 +554,13 @@ func TestANodeThatStopsResponding_ShouldLeaveNinePodsRunningThreePerZoneAndNoneO
 func TestAZoneThatStopsResponding_ShouldRestoreTheNinePodsOnTheZonesStillResponding(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
+	topology, deployment := anEvenSpreadTopology(t), aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
 	stopped := theFirstZoneOf(topology)
-	settleInto(t, provisioned, topology, workload)
+	settleInto(t, provisioned, topology, deployment)
 
 	stopEveryNodeIn(t, provisioned, topology, stopped)
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
 		t.Fatalf("await the Placement settling after the Failure: %v", err)
 	}
@@ -574,19 +574,19 @@ func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheCont
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology := aTopologyOfTwoNodesHoldingOnePod(t)
-	workload := aWorkloadDeclaring(t, twoPods, resilientPlacement(t))
+	deployment := aDeploymentDeclaring(t, twoPods, resilientPlacement(t))
 	stopped := theFirstNodeOf(topology)
 	delivered := &entriesDelivered{}
 	if err := provisioned.Record(t.Context(), delivered); err != nil {
 		t.Fatalf("record the Timeline of %s: %v", provisioned.Name(), err)
 	}
-	settleInto(t, provisioned, topology, workload)
+	settleInto(t, provisioned, topology, deployment)
 
 	if err := provisioned.FailNode(t.Context(), stopped); err != nil {
 		t.Fatalf("stop Node %s responding: %v", stopped, err)
 	}
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
 		t.Fatalf("await the Placement settling after the Failure: %v", err)
 	}
@@ -597,15 +597,15 @@ func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheCont
 	expectReported(t, recorded, pending[0].Name, podSchedulingFailed)
 }
 
-func TestAWaitForEveryPodOfADeployedWorkload_ShouldReachThePlacementWithEveryPodReady(t *testing.T) {
+func TestAWaitForEveryPodOfADeployedDeployment_ShouldReachThePlacementWithEveryPodReady(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
-	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+	deployment := aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
+	deployInto(t, provisioned, anEvenSpreadTopology(t), deployment)
 
-	ready, err := provisioned.AwaitPodsReady(t.Context(), workload)
+	ready, err := provisioned.AwaitPodsReady(t.Context(), deployment)
 	if err != nil {
-		t.Fatalf("await every Pod of the Workload reporting Ready: %v", err)
+		t.Fatalf("await every Pod of the Deployment reporting Ready: %v", err)
 	}
 
 	expect.Expect(t, ready.PodsNotReady()).To(expect.HaveLen[scenario.Pod](0))
@@ -625,14 +625,14 @@ const (
 func TestAPodSpecificationCustomizedWithOneStartupTime_ShouldHaveNoPodReadySoonerThanThatTime(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	workload := aWorkloadDeclaring(t, threePods, resilientPlacement(t).WithStartupTime(aStartupTimeBetween(t, oneStartupTime*time.Second, oneStartupTime*time.Second)))
-	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+	deployment := aDeploymentDeclaring(t, threePods, resilientPlacement(t).WithStartupTime(aStartupTimeBetween(t, oneStartupTime*time.Second, oneStartupTime*time.Second)))
+	deployInto(t, provisioned, anEvenSpreadTopology(t), deployment)
 
-	if _, err := provisioned.AwaitPodsReady(t.Context(), workload); err != nil {
-		t.Fatalf("await every Pod of the Workload reporting Ready: %v", err)
+	if _, err := provisioned.AwaitPodsReady(t.Context(), deployment); err != nil {
+		t.Fatalf("await every Pod of the Deployment reporting Ready: %v", err)
 	}
 
-	taken := theTimesTakenToBeReady(t, provisioned, workload)
+	taken := theTimesTakenToBeReady(t, provisioned, deployment)
 	expect.Expect(t, takenSoonerThan(taken, oneStartupTime*time.Second)).To(expect.HaveLen[time.Duration](0))
 	expect.Expect(t, takenLaterThan(taken, oneStartupTime*time.Second+pollInterval)).To(expect.HaveLen[time.Duration](0))
 }
@@ -640,14 +640,14 @@ func TestAPodSpecificationCustomizedWithOneStartupTime_ShouldHaveNoPodReadySoone
 func TestAPodSpecificationCustomizedWithAStartupTimeRange_ShouldHaveEachPodReadyWithinTheRange(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement(t).WithStartupTime(aStartupTimeBetween(t, shortestStartup*time.Second, longestStartup*time.Second)))
-	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+	deployment := aDeploymentDeclaring(t, ninePods, resilientPlacement(t).WithStartupTime(aStartupTimeBetween(t, shortestStartup*time.Second, longestStartup*time.Second)))
+	deployInto(t, provisioned, anEvenSpreadTopology(t), deployment)
 
-	if _, err := provisioned.AwaitPodsReady(t.Context(), workload); err != nil {
-		t.Fatalf("await every Pod of the Workload reporting Ready: %v", err)
+	if _, err := provisioned.AwaitPodsReady(t.Context(), deployment); err != nil {
+		t.Fatalf("await every Pod of the Deployment reporting Ready: %v", err)
 	}
 
-	taken := theTimesTakenToBeReady(t, provisioned, workload)
+	taken := theTimesTakenToBeReady(t, provisioned, deployment)
 	expect.Expect(t, takenSoonerThan(taken, shortestStartup*time.Second)).To(expect.HaveLen[time.Duration](0))
 	expect.Expect(t, takenLaterThan(taken, longestStartup*time.Second+pollInterval)).To(expect.HaveLen[time.Duration](0))
 }
@@ -656,18 +656,18 @@ func TestAPodSpecificationCustomizedWithAStartupTimeRange_ShouldHaveEachPodReady
 // plane records, so each Pod's time is read on this test's own clock off a
 // watch opened before the deployment. The longest is allowed one poll interval
 // for the simulator's own round trip.
-func TestAWorkloadWhosePodsStartInUnderASecond_ShouldHaveEachPodReadyWithinThatRange(t *testing.T) {
+func TestADeploymentWhosePodsStartInUnderASecond_ShouldHaveEachPodReadyWithinThatRange(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	workload := aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
-	watched := watchingTheStartupsOf(t, provisioned, workload)
-	deployInto(t, provisioned, anEvenSpreadTopology(t), workload)
+	deployment := aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
+	watched := watchingTheStartupsOf(t, provisioned, deployment)
+	deployInto(t, provisioned, anEvenSpreadTopology(t), deployment)
 
-	if _, err := provisioned.AwaitPodsReady(t.Context(), workload); err != nil {
-		t.Fatalf("await every Pod of the Workload reporting Ready: %v", err)
+	if _, err := provisioned.AwaitPodsReady(t.Context(), deployment); err != nil {
+		t.Fatalf("await every Pod of the Deployment reporting Ready: %v", err)
 	}
 
-	taken := watched.timesTaken(t, workload)
+	taken := watched.timesTaken(t, deployment)
 	expect.Expect(t, takenSoonerThan(taken, someShortestStartup)).To(expect.HaveLen[time.Duration](0))
 	expect.Expect(t, takenLaterThan(taken, someLongestStartup+pollInterval)).To(expect.HaveLen[time.Duration](0))
 }
@@ -682,14 +682,14 @@ type startupsWatched struct {
 }
 
 // The watch only records; the test waits through AwaitPodsReady alone.
-func watchingTheStartupsOf(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) *startupsWatched {
+func watchingTheStartupsOf(t *testing.T, provisioned *SimulatedCluster, deployment scenario.Deployment) *startupsWatched {
 	t.Helper()
 
-	changes, err := provisioned.client.CoreV1().Pods(workloadNamespace).Watch(t.Context(), metav1.ListOptions{
-		LabelSelector: podSelectorOf(workload),
+	changes, err := provisioned.client.CoreV1().Pods(clusterNamespace).Watch(t.Context(), metav1.ListOptions{
+		LabelSelector: podSelectorOf(deployment),
 	})
 	if err != nil {
-		t.Fatalf("watch the Pods of the Workload %s: %v", workload.Name(), err)
+		t.Fatalf("watch the Pods of the Deployment %s: %v", deployment.Name(), err)
 	}
 	stopped := make(chan struct{})
 	watched := &startupsWatched{
@@ -723,7 +723,7 @@ func (w *startupsWatched) record(pod corev1.Pod, seen time.Time) {
 
 // A Pod the watch did not see both ways fails the test by name, since its time
 // cannot be judged.
-func (w *startupsWatched) timesTaken(t *testing.T, workload scenario.Workload) []time.Duration {
+func (w *startupsWatched) timesTaken(t *testing.T, deployment scenario.Deployment) []time.Duration {
 	t.Helper()
 
 	w.stop()
@@ -731,8 +731,8 @@ func (w *startupsWatched) timesTaken(t *testing.T, workload scenario.Workload) [
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if len(w.ready) != workload.Pods() {
-		t.Fatalf("the Workload %s declares %d Pods, but the watch saw %d Ready", workload.Name(), workload.Pods(), len(w.ready))
+	if len(w.ready) != deployment.Replicas() {
+		t.Fatalf("the Deployment %s declares %d Pods, but the watch saw %d Ready", deployment.Name(), deployment.Replicas(), len(w.ready))
 	}
 	taken := make([]time.Duration, 0, len(w.ready))
 	for pod, ready := range w.ready {
@@ -746,17 +746,17 @@ func (w *startupsWatched) timesTaken(t *testing.T, workload scenario.Workload) [
 	return taken
 }
 
-func theTimesTakenToBeReady(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) []time.Duration {
+func theTimesTakenToBeReady(t *testing.T, provisioned *SimulatedCluster, deployment scenario.Deployment) []time.Duration {
 	t.Helper()
 
-	held, err := provisioned.client.CoreV1().Pods(workloadNamespace).List(t.Context(), metav1.ListOptions{
-		LabelSelector: podSelectorOf(workload),
+	held, err := provisioned.client.CoreV1().Pods(clusterNamespace).List(t.Context(), metav1.ListOptions{
+		LabelSelector: podSelectorOf(deployment),
 	})
 	if err != nil {
-		t.Fatalf("read the Pods of the Workload %s: %v", workload.Name(), err)
+		t.Fatalf("read the Pods of the Deployment %s: %v", deployment.Name(), err)
 	}
-	if len(held.Items) != workload.Pods() {
-		t.Fatalf("the Workload %s declares %d Pods, but the cluster holds %d", workload.Name(), workload.Pods(), len(held.Items))
+	if len(held.Items) != deployment.Replicas() {
+		t.Fatalf("the Deployment %s declares %d Pods, but the cluster holds %d", deployment.Name(), deployment.Replicas(), len(held.Items))
 	}
 
 	taken := make([]time.Duration, 0, len(held.Items))
@@ -788,7 +788,7 @@ func takenLaterThan(taken []time.Duration, bound time.Duration) []time.Duration 
 	return slices.DeleteFunc(slices.Clone(taken), func(took time.Duration) bool { return took <= bound })
 }
 
-func TestAWaitForEveryNodeBeforeAWorkloadIsDeployed_ShouldReachThePlacementOfThoseNodesAndNoPod(t *testing.T) {
+func TestAWaitForEveryNodeBeforeADeploymentIsDeployed_ShouldReachThePlacementOfThoseNodesAndNoPod(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology := anEvenSpreadTopology(t)
@@ -796,7 +796,7 @@ func TestAWaitForEveryNodeBeforeAWorkloadIsDeployed_ShouldReachThePlacementOfTho
 		t.Fatalf("apply the Scenario's Topology: %v", err)
 	}
 
-	ready, err := provisioned.AwaitNodesReady(t.Context(), topology, noWorkloadDeclaredYet)
+	ready, err := provisioned.AwaitNodesReady(t.Context(), topology, noDeploymentDeclaredYet)
 	if err != nil {
 		t.Fatalf("await every Node of the Topology reporting Ready: %v", err)
 	}
@@ -811,11 +811,11 @@ func TestAWaitForEveryNodeBeforeAWorkloadIsDeployed_ShouldReachThePlacementOfTho
 func TestAWaitForEveryPodTheWaitingTimeOutlasts_ShouldNameThePodsThatWereNotReady(t *testing.T) {
 	observed := aPlacementWithOnePodNotReadyYet(t)
 
-	reported := podsDidNotBecomeReady(aWorkloadDeclaring(t, ninePods, resilientPlacement(t)), observed)
+	reported := podsDidNotBecomeReady(aDeploymentDeclaring(t, ninePods, resilientPlacement(t)), observed)
 
 	expect.Expect(t, reported.Error()).To(expect.Equal(fmt.Sprintf(
-		"the Pods of the Workload %s were not all Ready within %s; it last held %d of %d Pods Ready, and these were not: %s",
-		deployedWorkloadName, scenario.WaitingTime, ninePods-onePodNotReadyYet, ninePods, observed.PodsNotReady()[0].Name)))
+		"the Pods of the Deployment %s were not all Ready within %s; it last held %d of %d Pods Ready, and these were not: %s",
+		deployedDeploymentName, scenario.WaitingTime, ninePods-onePodNotReadyYet, ninePods, observed.PodsNotReady()[0].Name)))
 }
 
 func TestAWaitForEveryNodeTheWaitingTimeOutlasts_ShouldNameTheNodesThatWereNotReady(t *testing.T) {
@@ -835,11 +835,11 @@ func TestAWaitForEveryNodeTheWaitingTimeOutlasts_ShouldNameTheNodesThatWereNotRe
 func TestAPlacementThatDoesNotSettleAfterTheFailure_ShouldReportTheObservedPlacement(t *testing.T) {
 	observed := aPlacementStillHoldingAPodOnTheFailedNode(t)
 
-	reported := didNotSettle(aWorkloadDeclaring(t, ninePods, resilientPlacement(t)), observed)
+	reported := didNotSettle(aDeploymentDeclaring(t, ninePods, resilientPlacement(t)), observed)
 
 	expect.Expect(t, reported.Error()).To(expect.Equal(fmt.Sprintf(
-		"the Placement of the Workload %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold and %d still starting",
-		deployedWorkloadName, scenario.WaitingTime, ninePods, ninePods, nodesStillResponding, onePodLeftBehind, noPodStillStarting)))
+		"the Placement of the Deployment %s did not settle within %s; it last held %d of %d Pods over %d Ready Nodes, %d of them on a Node it does not hold and %d still starting",
+		deployedDeploymentName, scenario.WaitingTime, ninePods, ninePods, nodesStillResponding, onePodLeftBehind, noPodStillStarting)))
 }
 
 // Each row meets every clause but the one it names, so the row says which
@@ -860,7 +860,7 @@ func TestAnObservedPlacement_ShouldCountAsSettledOnlyWhenItAccountsForEveryDecla
 		"an observation still holding a Pod on the Node that stopped responding": {
 			previous: stillHoldingAPodOnTheFailedNode, current: stillHoldingAPodOnTheFailedNode, settled: false,
 		},
-		"an observation holding fewer Pods than the Workload declares": {
+		"an observation holding fewer Pods than the Deployment declares": {
 			previous: shortOfOnePod, current: shortOfOnePod, settled: false,
 		},
 		"two observations that do not agree": {
@@ -873,7 +873,7 @@ func TestAnObservedPlacement_ShouldCountAsSettledOnlyWhenItAccountsForEveryDecla
 
 	for observation, taken := range observations {
 		t.Run(observation, func(t *testing.T) {
-			settled := hasSettled(taken.previous, taken.current, aWorkloadDeclaring(t, ninePods, resilientPlacement(t)))
+			settled := hasSettled(taken.previous, taken.current, aDeploymentDeclaring(t, ninePods, resilientPlacement(t)))
 
 			expect.Expect(t, settled).To(expect.Equal(taken.settled))
 		})
@@ -943,7 +943,7 @@ func onePodOnEachOf(nodes []scenario.Node) []scenario.Pod {
 	placed := make([]scenario.Pod, 0, len(nodes))
 	for at, node := range nodes {
 		placed = append(placed, scenario.Pod{
-			Name:  fmt.Sprintf("%s-%d", deployedWorkloadName, at),
+			Name:  fmt.Sprintf("%s-%d", deployedDeploymentName, at),
 			Node:  node.Name,
 			Phase: scenario.PodRunning,
 			Ready: true,
@@ -958,7 +958,7 @@ func TestAScenarioThatEnds_ShouldLeaveNoSimulatedClusterBehind(t *testing.T) {
 	endings := map[string]func(*testing.T, *SimulatedCluster){
 		"a Scenario whose steps all passed": func(t *testing.T, provisioned *SimulatedCluster) {
 			t.Helper()
-			deployInto(t, provisioned, anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement(t)))
+			deployInto(t, provisioned, anEvenSpreadTopology(t), aDeploymentDeclaring(t, ninePods, resilientPlacement(t)))
 		},
 		"a Scenario that failed part-way through its steps": func(t *testing.T, provisioned *SimulatedCluster) {
 			t.Helper()
@@ -1022,11 +1022,11 @@ func aClusterOfItsOwnInvocation(t *testing.T, engine Endpoint) *SimulatedCluster
 
 // A Scenario stops a Node responding only once everything it declared has
 // settled.
-func settleInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, workload scenario.Workload) {
+func settleInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, deployment scenario.Deployment) {
 	t.Helper()
 
-	deployInto(t, provisioned, topology, workload)
-	if _, err := provisioned.AwaitSettled(t.Context(), workload); err != nil {
+	deployInto(t, provisioned, topology, deployment)
+	if _, err := provisioned.AwaitSettled(t.Context(), deployment); err != nil {
 		t.Fatalf("await the Placement settling before the Failure: %v", err)
 	}
 }
@@ -1079,7 +1079,7 @@ func aTopologyOfTwoNodesHoldingOnePod(t *testing.T) scenario.Topology {
 	return topology
 }
 
-// The Node has room for more Pods than both Workloads declare, so the cpu their
+// The Node has room for more Pods than both Deployments declare, so the cpu their
 // Pods ask for decides the Placement.
 func aTopologyOfOneNodeOfFourCores(t *testing.T) scenario.Topology {
 	t.Helper()
@@ -1100,46 +1100,46 @@ func requestingCPUOf(t *testing.T, cpu scenario.CPU) scenario.PodSpecification {
 	return defaultPlacement(t).With(scenario.NewRequest(cpu, someRequestedMemory))
 }
 
-// A Topology is applied once per cluster, and each Workload is deployed on its
+// A Topology is applied once per cluster, and each Deployment is deployed on its
 // own.
-func deployBoth(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, workloads ...scenario.Workload) {
+func deployBoth(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, deployments ...scenario.Deployment) {
 	t.Helper()
 
 	if err := provisioned.ApplyTopology(t.Context(), topology); err != nil {
 		t.Fatalf("apply the Scenario's Topology: %v", err)
 	}
-	for _, workload := range workloads {
-		if err := provisioned.Deploy(t.Context(), workload); err != nil {
-			t.Fatalf("deploy the Workload %s: %v", workload.Name(), err)
+	for _, deployment := range deployments {
+		if err := provisioned.Deploy(t.Context(), deployment); err != nil {
+			t.Fatalf("deploy the Deployment %s: %v", deployment.Name(), err)
 		}
 	}
 }
 
-func bothSettled(t *testing.T, provisioned *SimulatedCluster, first, second scenario.Workload) (scenario.Placement, scenario.Placement) {
+func bothSettled(t *testing.T, provisioned *SimulatedCluster, first, second scenario.Deployment) (scenario.Placement, scenario.Placement) {
 	t.Helper()
 
 	return settledPlacementOf(t, provisioned, first), settledPlacementOf(t, provisioned, second)
 }
 
-func settledPlacementOf(t *testing.T, provisioned *SimulatedCluster, workload scenario.Workload) scenario.Placement {
+func settledPlacementOf(t *testing.T, provisioned *SimulatedCluster, deployment scenario.Deployment) scenario.Placement {
 	t.Helper()
 
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
-		t.Fatalf("await the Placement of the Workload %s settling: %v", workload.Name(), err)
+		t.Fatalf("await the Placement of the Deployment %s settling: %v", deployment.Name(), err)
 	}
 
 	return settled
 }
 
-func deployInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, workload scenario.Workload) {
+func deployInto(t *testing.T, provisioned *SimulatedCluster, topology scenario.Topology, deployment scenario.Deployment) {
 	t.Helper()
 
 	if err := provisioned.ApplyTopology(t.Context(), topology); err != nil {
 		t.Fatalf("apply the Scenario's Topology: %v", err)
 	}
-	if err := provisioned.Deploy(t.Context(), workload); err != nil {
-		t.Fatalf("deploy the Scenario's Workload: %v", err)
+	if err := provisioned.Deploy(t.Context(), deployment); err != nil {
+		t.Fatalf("deploy the Scenario's Deployment: %v", err)
 	}
 }
 
@@ -1194,30 +1194,30 @@ func TestANodePoolStatingANoScheduleTaint_ShouldProvisionNodesCarryingIt(t *test
 	expect.Expect(t, ready).To(expect.Equal(topology.Nodes()))
 }
 
-func TestAWorkloadNotToleratingATaint_ShouldKeepItsPodsOffTheTaintedNodes(t *testing.T) {
+func TestADeploymentNotToleratingATaint_ShouldKeepItsPodsOffTheTaintedNodes(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
-	workload := aWorkloadDeclaring(t, threePodsRequestingHalfANode, requestingCPUOf(t, halfTheNodesCPU))
-	deployInto(t, provisioned, aTopologyOfAGeneralAndATaintedNode(t), workload)
+	deployment := aDeploymentDeclaring(t, threePodsRequestingHalfANode, requestingCPUOf(t, halfTheNodesCPU))
+	deployInto(t, provisioned, aTopologyOfAGeneralAndATaintedNode(t), deployment)
 
-	settled := settledPlacementOf(t, provisioned, workload)
+	settled := settledPlacementOf(t, provisioned, deployment)
 
 	expect.Expect(t, settled.PodsInPhase(scenario.PodPending)).To(expect.HaveLen[scenario.Pod](onePodThatDoesNotFit))
 	expect.Expect(t, settled.PodsPerNodePool()).
 		To(expect.Equal(map[string]int{generalNodePool: twoPodsThatFit, gpuNodePool: noPodAtAll}))
 }
 
-// A probe Pod is created here beside the Workloads, since provisioning removes
+// A probe Pod is created here beside the Deployments, since provisioning removes
 // its own before it returns and an observation would otherwise find none to
 // leave out. A Node is failed after both settle, and the observation follows
 // before any Pod could move off it.
-func TestAnObservationOfEveryWorkload_ShouldReadEachNodesReadinessAndEachPodsRequestButNoProbePod(t *testing.T) {
+func TestAnObservationOfEveryDeployment_ShouldReadEachNodesReadinessAndEachPodsRequestButNoProbePod(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)
 	topology := anEvenSpreadTopology(t)
-	spreadEvenly := aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
+	spreadEvenly := aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
 	declaredRequest := scenario.NewRequest(halfTheNodesCPU, someRequestedMemory)
-	requestingHalfANode := aSecondWorkloadDeclaring(t, threePods, requestingCPUOf(t, halfTheNodesCPU))
+	requestingHalfANode := aSecondDeploymentDeclaring(t, threePods, requestingCPUOf(t, halfTheNodesCPU))
 	deployBoth(t, provisioned, topology, spreadEvenly, requestingHalfANode)
 	bothSettled(t, provisioned, spreadEvenly, requestingHalfANode)
 	aProbePodBeside(t, provisioned, topology.Nodes()[0])
@@ -1226,10 +1226,10 @@ func TestAnObservationOfEveryWorkload_ShouldReadEachNodesReadinessAndEachPodsReq
 		t.Fatalf("fail the Node %s: %v", failed, err)
 	}
 
-	observed, err := provisioned.ObserveEveryWorkload(t.Context())
+	observed, err := provisioned.ObserveEveryDeployment(t.Context())
 
 	expect.Expect(t, err).To(expect.Equal[error](nil))
-	expect.Expect(t, podsPerWorkloadIn(observed)).To(expect.Equal(map[string]int{
+	expect.Expect(t, podsPerDeploymentIn(observed)).To(expect.Equal(map[string]int{
 		spreadEvenly.Name():        ninePods,
 		requestingHalfANode.Name(): threePods,
 	}))
@@ -1241,15 +1241,15 @@ func TestAnObservationOfEveryWorkload_ShouldReadEachNodesReadinessAndEachPodsReq
 func aProbePodBeside(t *testing.T, provisioned *SimulatedCluster, on scenario.Node) {
 	t.Helper()
 
-	if _, err := provisioned.client.CoreV1().Pods(workloadNamespace).Create(t.Context(), toProbePod(on), metav1.CreateOptions{}); err != nil {
+	if _, err := provisioned.client.CoreV1().Pods(clusterNamespace).Create(t.Context(), toProbePod(on), metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create a probe Pod on Node %s: %v", on.Name, err)
 	}
 }
 
-func requestsOf(observed scenario.Placement, workload scenario.Workload) map[scenario.Request]int {
+func requestsOf(observed scenario.Placement, deployment scenario.Deployment) map[scenario.Request]int {
 	counted := make(map[scenario.Request]int)
 	for _, pod := range observed.Pods() {
-		if pod.Workload == workload.Name() {
+		if pod.Deployment == deployment.Name() {
 			counted[pod.Request]++
 		}
 	}
@@ -1257,10 +1257,10 @@ func requestsOf(observed scenario.Placement, workload scenario.Workload) map[sce
 	return counted
 }
 
-func podsPerWorkloadIn(observed scenario.Placement) map[string]int {
+func podsPerDeploymentIn(observed scenario.Placement) map[string]int {
 	counted := make(map[string]int)
 	for _, pod := range observed.Pods() {
-		counted[pod.Workload]++
+		counted[pod.Deployment]++
 	}
 
 	return counted

@@ -18,8 +18,8 @@ const (
 	firstSpotNode       = "zone-1-node-2"
 	secondOnDemandNode  = "zone-2-node-1"
 	secondSpotNode      = "zone-2-node-2"
-	webWorkload         = "web"
-	batchWorkload       = "batch"
+	webDeployment       = "web"
+	batchDeployment     = "batch"
 	someReplicaSetHash  = "5d8f9b7c6"
 	firstWebSuffix      = "2xk4m"
 	secondWebSuffix     = "8qz7p"
@@ -32,25 +32,25 @@ const (
 	theBoardsNodeIndent = "  "
 )
 
-func aPodOf(workload, suffix, node string) scenario.Pod {
+func aPodOf(deployment, suffix, node string) scenario.Pod {
 	return scenario.Pod{
-		Name:     workload + "-" + someReplicaSetHash + "-" + suffix,
-		Workload: workload,
-		Node:     node,
-		Phase:    scenario.PodRunning,
+		Name:       deployment + "-" + someReplicaSetHash + "-" + suffix,
+		Deployment: deployment,
+		Node:       node,
+		Phase:      scenario.PodRunning,
 	}
 }
 
-func anUnplacedPodOf(workload, suffix string) scenario.Pod {
-	return scenario.Pod{Name: workload + "-" + someReplicaSetHash + "-" + suffix, Workload: workload, Phase: scenario.PodPending}
+func anUnplacedPodOf(deployment, suffix string) scenario.Pod {
+	return scenario.Pod{Name: deployment + "-" + someReplicaSetHash + "-" + suffix, Deployment: deployment, Phase: scenario.PodPending}
 }
 
-func read(workload, suffix string) string {
-	return workload + "-" + suffix
+func read(deployment, suffix string) string {
+	return deployment + "-" + suffix
 }
 
-func readAsNew(workload, suffix string) string {
-	return theNewcomerMark + read(workload, suffix)
+func readAsNew(deployment, suffix string) string {
+	return theNewcomerMark + read(deployment, suffix)
 }
 
 // A board after one holding the same Pods marks none of them new, so only the
@@ -80,7 +80,7 @@ func readied(pod scenario.Pod) scenario.Pod {
 }
 
 func shownAs(pod scenario.Pod, newcomer bool) scenario.BoardPod {
-	return scenario.BoardPod{Name: pod.Name, Workload: pod.Workload, Ready: pod.Ready, Request: pod.Request, Newcomer: newcomer}
+	return scenario.BoardPod{Name: pod.Name, Deployment: pod.Deployment, Ready: pod.Ready, Request: pod.Request, Newcomer: newcomer}
 }
 
 // A Node left out of the observation is one the control plane does not hold,
@@ -92,10 +92,10 @@ func TestAPlacementBoard_ShouldGiveEachNodeItsNodePoolLabelsReadinessAndRoomCapa
 	const theTwoPodsOnIt, theOnePodOnIt = 2, 1
 	webRequest := scenario.NewRequest(halfACore, aGibibyte)
 	batchRequest := scenario.NewRequest(aCore, twoGibibytes)
-	keptWeb := readied(requesting(aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode), webRequest))
-	startingBatch := requesting(aPodOf(batchWorkload, firstBatchSuffix, firstOnDemandNode), batchRequest)
-	movedWeb := readied(requesting(aPodOf(webWorkload, secondWebSuffix, secondSpotNode), webRequest))
-	pendingWeb := requesting(anUnplacedPodOf(webWorkload, pendingWebSuffix), webRequest)
+	keptWeb := readied(requesting(aPodOf(webDeployment, firstWebSuffix, firstOnDemandNode), webRequest))
+	startingBatch := requesting(aPodOf(batchDeployment, firstBatchSuffix, firstOnDemandNode), batchRequest)
+	movedWeb := readied(requesting(aPodOf(webDeployment, secondWebSuffix, secondSpotNode), webRequest))
+	pendingWeb := requesting(anUnplacedPodOf(webDeployment, pendingWebSuffix), webRequest)
 	everyNodeButTheSecondOnDemand := slices.DeleteFunc(declared.Nodes(),
 		func(node scenario.Node) bool { return node.Name == secondOnDemandNode })
 	observed := scenario.NewPlacement(everyNodeButTheSecondOnDemand, []scenario.Pod{keptWeb, startingBatch, movedWeb, pendingWeb}).
@@ -150,18 +150,18 @@ func TestAPlacementBoard_ShouldGiveEachNodeItsNodePoolLabelsReadinessAndRoomCapa
 	expect.Expect(t, board.Unplaced()).To(expect.Equal([]scenario.BoardPod{shownAs(pendingWeb, markedNew)}))
 }
 
-func TestAPodOnAPlacementBoard_ShouldBeNamedByItsWorkloadAndOwnSuffix(t *testing.T) {
-	pod := shownAs(aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode), notMarkedNew)
+func TestAPodOnAPlacementBoard_ShouldBeNamedByItsDeploymentAndOwnSuffix(t *testing.T) {
+	pod := shownAs(aPodOf(webDeployment, firstWebSuffix, firstOnDemandNode), notMarkedNew)
 
-	expect.Expect(t, pod.BoardName()).To(expect.Equal(read(webWorkload, firstWebSuffix)))
+	expect.Expect(t, pod.BoardName()).To(expect.Equal(read(webDeployment, firstWebSuffix)))
 }
 
-func TestAPlacementBoardOfTwoWorkloads_ShouldListEveryPodOnItsNodeGroupedByZoneAndNodePool(t *testing.T) {
+func TestAPlacementBoardOfTwoDeployments_ShouldListEveryPodOnItsNodeGroupedByZoneAndNodePool(t *testing.T) {
 	declared := aTopologyOfOnDemandAndSpotNodes(t)
 	observed := []scenario.Pod{
-		aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode),
-		aPodOf(webWorkload, secondWebSuffix, secondSpotNode),
-		aPodOf(batchWorkload, firstBatchSuffix, firstOnDemandNode),
+		aPodOf(webDeployment, firstWebSuffix, firstOnDemandNode),
+		aPodOf(webDeployment, secondWebSuffix, secondSpotNode),
+		aPodOf(batchDeployment, firstBatchSuffix, firstOnDemandNode),
 	}
 
 	board := aBoardAfterOneHoldingTheSame(declared, observed)
@@ -169,11 +169,11 @@ func TestAPlacementBoardOfTwoWorkloads_ShouldListEveryPodOnItsNodeGroupedByZoneA
 	expect.Expect(t, board.Lines()).To(expect.Equal([]string{
 		firstZone,
 		theBoardsNodeIndent + firstOnDemandNode + "  " + onDemand + "  " +
-			read(batchWorkload, firstBatchSuffix) + ", " + read(webWorkload, firstWebSuffix),
+			read(batchDeployment, firstBatchSuffix) + ", " + read(webDeployment, firstWebSuffix),
 		theBoardsNodeIndent + firstSpotNode + "  " + spot,
 		secondZone,
 		theBoardsNodeIndent + secondOnDemandNode + "  " + onDemand,
-		theBoardsNodeIndent + secondSpotNode + "  " + spot + "       " + read(webWorkload, secondWebSuffix),
+		theBoardsNodeIndent + secondSpotNode + "  " + spot + "       " + read(webDeployment, secondWebSuffix),
 	}))
 }
 
@@ -183,27 +183,27 @@ func TestAPlacementBoard_ShouldBeAsWideAsItsWidestLine(t *testing.T) {
 		theWidestLine string
 	}{
 		"the first Node line widest": {
-			observed:      []scenario.Pod{aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode)},
-			theWidestLine: theBoardsNodeIndent + firstOnDemandNode + "  " + onDemand + "  " + readAsNew(webWorkload, firstWebSuffix),
+			observed:      []scenario.Pod{aPodOf(webDeployment, firstWebSuffix, firstOnDemandNode)},
+			theWidestLine: theBoardsNodeIndent + firstOnDemandNode + "  " + onDemand + "  " + readAsNew(webDeployment, firstWebSuffix),
 		},
 		"a later Node line widest": {
 			observed: []scenario.Pod{
-				aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode),
-				aPodOf(webWorkload, secondWebSuffix, secondSpotNode),
-				aPodOf(batchWorkload, firstBatchSuffix, secondSpotNode),
+				aPodOf(webDeployment, firstWebSuffix, firstOnDemandNode),
+				aPodOf(webDeployment, secondWebSuffix, secondSpotNode),
+				aPodOf(batchDeployment, firstBatchSuffix, secondSpotNode),
 			},
 			theWidestLine: theBoardsNodeIndent + secondSpotNode + "  " + spot + "       " +
-				readAsNew(batchWorkload, firstBatchSuffix) + ", " + readAsNew(webWorkload, secondWebSuffix),
+				readAsNew(batchDeployment, firstBatchSuffix) + ", " + readAsNew(webDeployment, secondWebSuffix),
 		},
 		"the Pending line widest": {
 			observed: []scenario.Pod{
-				aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode),
-				anUnplacedPodOf(webWorkload, pendingWebSuffix),
-				anUnplacedPodOf(webWorkload, replacementSuffix),
-				anUnplacedPodOf(batchWorkload, firstBatchSuffix),
+				aPodOf(webDeployment, firstWebSuffix, firstOnDemandNode),
+				anUnplacedPodOf(webDeployment, pendingWebSuffix),
+				anUnplacedPodOf(webDeployment, replacementSuffix),
+				anUnplacedPodOf(batchDeployment, firstBatchSuffix),
 			},
-			theWidestLine: "Pending  " + readAsNew(batchWorkload, firstBatchSuffix) + ", " +
-				readAsNew(webWorkload, replacementSuffix) + ", " + readAsNew(webWorkload, pendingWebSuffix),
+			theWidestLine: "Pending  " + readAsNew(batchDeployment, firstBatchSuffix) + ", " +
+				readAsNew(webDeployment, replacementSuffix) + ", " + readAsNew(webDeployment, pendingWebSuffix),
 		},
 	}
 
@@ -218,52 +218,52 @@ func TestAPlacementBoard_ShouldBeAsWideAsItsWidestLine(t *testing.T) {
 	}
 }
 
-func TestTheFirstBoardHoldingAWorkload_ShouldMarkEveryOneOfItsPodsNew(t *testing.T) {
+func TestTheFirstBoardHoldingADeployment_ShouldMarkEveryOneOfItsPodsNew(t *testing.T) {
 	declared := aTopologyOfOnDemandAndSpotNodes(t)
 	observed := []scenario.Pod{
-		aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode),
-		aPodOf(webWorkload, secondWebSuffix, secondSpotNode),
-		anUnplacedPodOf(webWorkload, pendingWebSuffix),
+		aPodOf(webDeployment, firstWebSuffix, firstOnDemandNode),
+		aPodOf(webDeployment, secondWebSuffix, secondSpotNode),
+		anUnplacedPodOf(webDeployment, pendingWebSuffix),
 	}
 
 	board := scenario.NewPlacementBoard(declared, observedOn(declared, observed), scenario.PlacementBoard{})
 
 	expect.Expect(t, board.Lines()).To(expect.Equal([]string{
 		firstZone,
-		theBoardsNodeIndent + firstOnDemandNode + "  " + onDemand + "  " + readAsNew(webWorkload, firstWebSuffix),
+		theBoardsNodeIndent + firstOnDemandNode + "  " + onDemand + "  " + readAsNew(webDeployment, firstWebSuffix),
 		theBoardsNodeIndent + firstSpotNode + "  " + spot,
 		secondZone,
 		theBoardsNodeIndent + secondOnDemandNode + "  " + onDemand,
-		theBoardsNodeIndent + secondSpotNode + "  " + spot + "       " + readAsNew(webWorkload, secondWebSuffix),
-		"Pending  " + readAsNew(webWorkload, pendingWebSuffix),
+		theBoardsNodeIndent + secondSpotNode + "  " + spot + "       " + readAsNew(webDeployment, secondWebSuffix),
+		"Pending  " + readAsNew(webDeployment, pendingWebSuffix),
 	}))
 }
 
 // A Pod is new where the previous board did not hold it on that Node, so an
 // evicted Pod is gone and its replacement reads as new, as does the first Pod
-// of a Workload deployed since.
+// of a Deployment deployed since.
 func TestAPlacementBoard_ShouldMarkThePodsNewSinceThePreviousBoardAndListPendingPodsBeneath(t *testing.T) {
 	declared := aTopologyOfOnDemandAndSpotNodes(t)
-	kept := aPodOf(webWorkload, firstWebSuffix, firstOnDemandNode)
-	evicted := aPodOf(webWorkload, secondWebSuffix, secondOnDemandNode)
+	kept := aPodOf(webDeployment, firstWebSuffix, firstOnDemandNode)
+	evicted := aPodOf(webDeployment, secondWebSuffix, secondOnDemandNode)
 	previous := scenario.NewPlacementBoard(declared, observedOn(declared, []scenario.Pod{kept, evicted}), scenario.PlacementBoard{})
 	observed := []scenario.Pod{
 		kept,
-		aPodOf(webWorkload, replacementSuffix, firstSpotNode),
-		aPodOf(batchWorkload, firstBatchSuffix, secondSpotNode),
-		anUnplacedPodOf(webWorkload, pendingWebSuffix),
+		aPodOf(webDeployment, replacementSuffix, firstSpotNode),
+		aPodOf(batchDeployment, firstBatchSuffix, secondSpotNode),
+		anUnplacedPodOf(webDeployment, pendingWebSuffix),
 	}
 
 	board := scenario.NewPlacementBoard(declared, observedOn(declared, observed), previous)
 
 	expect.Expect(t, board.Lines()).To(expect.Equal([]string{
 		firstZone,
-		theBoardsNodeIndent + firstOnDemandNode + "  " + onDemand + "  " + read(webWorkload, firstWebSuffix),
-		theBoardsNodeIndent + firstSpotNode + "  " + spot + "       " + readAsNew(webWorkload, replacementSuffix),
+		theBoardsNodeIndent + firstOnDemandNode + "  " + onDemand + "  " + read(webDeployment, firstWebSuffix),
+		theBoardsNodeIndent + firstSpotNode + "  " + spot + "       " + readAsNew(webDeployment, replacementSuffix),
 		secondZone,
 		theBoardsNodeIndent + secondOnDemandNode + "  " + onDemand,
-		theBoardsNodeIndent + secondSpotNode + "  " + spot + "       " + readAsNew(batchWorkload, firstBatchSuffix),
-		"Pending  " + readAsNew(webWorkload, pendingWebSuffix),
+		theBoardsNodeIndent + secondSpotNode + "  " + spot + "       " + readAsNew(batchDeployment, firstBatchSuffix),
+		"Pending  " + readAsNew(webDeployment, pendingWebSuffix),
 	}))
 }
 

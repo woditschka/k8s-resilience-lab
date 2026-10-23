@@ -7,7 +7,7 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-// No test here turns on these numbers; the Workload tests are where a capacity
+// No test here turns on these numbers; the Deployment tests are where a capacity
 // matters.
 const (
 	somePodsPerNode   = 10

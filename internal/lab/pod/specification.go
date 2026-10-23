@@ -18,11 +18,11 @@ import (
 )
 
 // Specification carries the immutable domain value and, beside it, the full
-// accesses its Workload line wrote, because the domain keeps no Kubernetes type
+// accesses its Deployment line wrote, because the domain keeps no Kubernetes type
 // and no function value.
 //
 // A Customization carries no error of its own, so a refusal travels here, and
-// the Given declaring the Workload ends the Scenario with it.
+// the Given declaring the Deployment ends the Scenario with it.
 type Specification struct {
 	written  SpecificationName
 	declared scenario.PodSpecification
@@ -109,7 +109,7 @@ func (s StartupTime) customize(specification Specification) Specification {
 
 // StartupSeconds states one time for every Pod, where StartupSecondsBetween
 // draws each Pod's own time between the two bounds. A refused Startup time ends
-// the Scenario at the Given declaring the Workload.
+// the Scenario at the Given declaring the Deployment.
 func StartupSeconds(seconds int) StartupTime {
 	return StartupSecondsBetween(seconds, seconds)
 }
@@ -156,9 +156,9 @@ func FullAccess(change cluster.PodSpecAccess) Customization {
 	return fullAccess{change: change}
 }
 
-// Customize leaves the receiver unchanged, so the next Workload declaring the
+// Customize leaves the receiver unchanged, so the next Deployment declaring the
 // predefined specification gets it as defined. A value only the control plane
-// refuses ends the Scenario at the Wait that deployed the Workload, because the
+// refuses ends the Scenario at the Wait that created the Deployment, because the
 // lab does not own Kubernetes' admissible values.
 func (s Specification) Customize(customizations ...Customization) Specification {
 	customized := s

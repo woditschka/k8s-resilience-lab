@@ -15,7 +15,7 @@ const (
 )
 
 // PlacementBoard is one observation's view of the whole Simulated Cluster
-// across every Workload. It is derived from what was declared and observed, so
+// across every Deployment. It is derived from what was declared and observed, so
 // it carries no invariant of its own; its zero value is the board before the
 // first Wait.
 type PlacementBoard struct {
@@ -61,9 +61,9 @@ type RoomLeft struct {
 
 // BoardPod is one Pod as an observation found it.
 type BoardPod struct {
-	Name     string
-	Workload string
-	Ready    bool
+	Name       string
+	Deployment string
+	Ready      bool
 	// Request is the zero Request where the Pod declares none.
 	Request Request
 	// Newcomer marks a Pod the previous board did not hold on that Node.
@@ -127,7 +127,7 @@ func boardNodeOf(node Node, readiness NodeReadiness, placed []Pod, heldBefore ma
 func shownOnBoard(pod Pod, heldBefore map[podOnNode]struct{}) BoardPod {
 	_, held := heldBefore[podOnNode{pod: pod.Name, node: pod.Node}]
 
-	return BoardPod{Name: pod.Name, Workload: pod.Workload, Ready: pod.Ready, Request: pod.Request, Newcomer: !held}
+	return BoardPod{Name: pod.Name, Deployment: pod.Deployment, Ready: pod.Ready, Request: pod.Request, Newcomer: !held}
 }
 
 // Zones are copies, so a reader changes no board.
@@ -150,21 +150,21 @@ func (b PlacementBoard) Unplaced() []BoardPod {
 
 func inBoardOrder(one, other Pod) int {
 	return cmp.Or(
-		cmp.Compare(one.Workload, other.Workload),
+		cmp.Compare(one.Deployment, other.Deployment),
 		cmp.Compare(ownSuffixOf(one.Name), ownSuffixOf(other.Name)),
 		cmp.Compare(one.Name, other.Name))
 }
 
 // The own suffix is the part the ReplicaSet controller generates for each Pod,
-// which tells one Pod of a Workload from another.
+// which tells one Pod of a Deployment from another.
 func ownSuffixOf(podName string) string {
 	return podName[strings.LastIndex(podName, "-")+1:]
 }
 
-// boardNameOf is how a board and a Wait narrative name a Pod: its Workload
+// boardNameOf is how a board and a Wait narrative name a Pod: its Deployment
 // name and its own suffix.
-func boardNameOf(workload, podName string) string {
-	return workload + "-" + ownSuffixOf(podName)
+func boardNameOf(deployment, podName string) string {
+	return deployment + "-" + ownSuffixOf(podName)
 }
 
 func (b PlacementBoard) held() map[podOnNode]struct{} {
@@ -242,10 +242,10 @@ func (p BoardPod) read() string {
 	return p.BoardName()
 }
 
-// BoardName is how a board and a Wait narrative name a Pod: its Workload name
+// BoardName is how a board and a Wait narrative name a Pod: its Deployment name
 // and its own suffix.
 func (p BoardPod) BoardName() string {
-	return boardNameOf(p.Workload, p.Name)
+	return boardNameOf(p.Deployment, p.Name)
 }
 
 // Equal is what go-cmp compares a board through, since its fields are

@@ -59,7 +59,7 @@ func aTopologyOfOneNodeHoldingOnePod(t *testing.T) scenario.Topology {
 
 // The recording starts before the first Node is created and stops after the
 // Placement settles, the sequence the runner follows.
-func aRecordedScenario(t *testing.T, topology scenario.Topology, workload scenario.Workload) (scenario.Timeline, []scenario.Entry, scenario.Placement) {
+func aRecordedScenario(t *testing.T, topology scenario.Topology, deployment scenario.Deployment) (scenario.Timeline, []scenario.Entry, scenario.Placement) {
 	t.Helper()
 
 	provisioned, _ := aProvisionedCluster(t)
@@ -68,8 +68,8 @@ func aRecordedScenario(t *testing.T, topology scenario.Topology, workload scenar
 		t.Fatalf("record the Timeline of %s: %v", provisioned.Name(), err)
 	}
 
-	deployInto(t, provisioned, topology, workload)
-	settled, err := provisioned.AwaitSettled(t.Context(), workload)
+	deployInto(t, provisioned, topology, deployment)
+	settled, err := provisioned.AwaitSettled(t.Context(), deployment)
 	if err != nil {
 		t.Fatalf("await the Placement settling: %v", err)
 	}
@@ -77,33 +77,33 @@ func aRecordedScenario(t *testing.T, topology scenario.Topology, workload scenar
 	return provisioned.StopRecording(), delivered.entries, settled
 }
 
-func TestAScenarioWithATopologyAndAWorkload_ShouldRecordEveryNodePodAndWorkloadChange(t *testing.T) {
+func TestAScenarioWithATopologyAndADeployment_ShouldRecordEveryNodePodAndDeploymentChange(t *testing.T) {
 	t.Parallel()
-	topology, workload := anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement(t))
+	topology, deployment := anEvenSpreadTopology(t), aDeploymentDeclaring(t, ninePods, resilientPlacement(t))
 
-	recorded, delivered, settled := aRecordedScenario(t, topology, workload)
+	recorded, delivered, settled := aRecordedScenario(t, topology, deployment)
 
 	expect.Expect(t, namesRecorded(recorded, scenario.NodeObject)).To(expect.Equal(nodesOf(topology)))
 	expect.Expect(t, namesRecorded(recorded, scenario.PodObject)).
 		To(expect.Equal(everyPodNameOf(topology, podsOf(settled))))
 	expect.Expect(t, namesRecorded(recorded, scenario.DeploymentObject)).
-		To(expect.Equal([]string{deployedWorkloadName}))
+		To(expect.Equal([]string{deployedDeploymentName}))
 	expect.Expect(t, namesRecorded(recorded, scenario.ReplicaSetObject)).To(expect.HaveLen[string](theOneReplicaSet))
 	expect.Expect(t, delivered).To(expect.Equal(recorded.Entries()))
 }
 
 func TestARecordedTimeline_ShouldHoldItsEntriesInTheOrderTheLabReceivedThem(t *testing.T) {
 	t.Parallel()
-	recorded, _, _ := aRecordedScenario(t, anEvenSpreadTopology(t), aWorkloadDeclaring(t, ninePods, resilientPlacement(t)))
+	recorded, _, _ := aRecordedScenario(t, anEvenSpreadTopology(t), aDeploymentDeclaring(t, ninePods, resilientPlacement(t)))
 
 	expect.Expect(t, slices.IsSortedFunc(recorded.Entries(), byReceipt)).To(expect.Equal(true))
 }
 
 func TestAPlacedPodAndAPendingPod_ShouldCarryTheReasonTheControlPlaneGave(t *testing.T) {
 	t.Parallel()
-	workload := aWorkloadDeclaring(t, twoPods, resilientPlacement(t))
+	deployment := aDeploymentDeclaring(t, twoPods, resilientPlacement(t))
 
-	recorded, _, settled := aRecordedScenario(t, aTopologyOfOneNodeHoldingOnePod(t), workload)
+	recorded, _, settled := aRecordedScenario(t, aTopologyOfOneNodeHoldingOnePod(t), deployment)
 
 	placed, pending := settled.PodsInPhase(scenario.PodRunning), settled.PodsInPhase(scenario.PodPending)
 	expect.Expect(t, placed).To(expect.HaveLen[scenario.Pod](roomForOnePod))
@@ -190,13 +190,13 @@ func podsOf(settled scenario.Placement) []string {
 	return names
 }
 
-func everyPodNameOf(topology scenario.Topology, workloadPods []string) []string {
-	named := make([]string, 0, len(workloadPods))
+func everyPodNameOf(topology scenario.Topology, deploymentPods []string) []string {
+	named := make([]string, 0, len(deploymentPods))
 	for _, node := range topology.Nodes() {
 		named = append(named, probePodNamePrefix+node.Name)
 	}
 
-	return slices.Sorted(slices.Values(append(named, workloadPods...)))
+	return slices.Sorted(slices.Values(append(named, deploymentPods...)))
 }
 
 func byReceipt(one, next scenario.Entry) int {

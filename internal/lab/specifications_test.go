@@ -70,12 +70,12 @@ const (
 	oneCorePerPod      = 1
 	twoGibibytesPerPod = 2
 
-	// A Request the Workload line's own stands over.
+	// A Request the Deployment line's own stands over.
 	overriddenCoresPerPod     = 3
 	overriddenGibibytesPerPod = 6
 )
 
-// askingForNothing is the Workload line's Request where the test asserts none,
+// askingForNothing is the Deployment line's Request where the test asserts none,
 // so its Pods ask for no cpu and no memory.
 func askingForNothing() pod.Customization {
 	return pod.Settings()

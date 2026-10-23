@@ -98,7 +98,7 @@ Tests describe behavior, not implementation. The name should read as a specifica
 | Test method/function names | `Test<Condition>_Should<Outcome>`: the condition under test, one underscore, then `Should` and the outcome the test asserts |
 | Parameterized tests | Same method name, data-driven via table or CSV source |
 
-The underscore is the only one in the name, and each part stays in mixed caps. Fuzz functions take the same shape. The condition is the subject under test (`ARun…`, `AWorkload…`) or a situation opening with `When`, whichever makes the name read as a sentence: `TestWhenNoSocketAnswers_ShouldNameEveryPathTried`. The outcome is a result a reader can observe, never a step the code takes on the way. `TestADockerHostThatIsNotAURL_ShouldBeSkippedWithAWarningAndTheLiveCandidateUsed` states its outcome. `TestADockerHostThatIsNotAURLIsNamedAsTriedAndTheCandidatesProbed` names two steps and leaves the outcome out.
+The underscore is the only one in the name, and each part stays in mixed caps. Fuzz functions take the same shape. The condition is the subject under test (`ARun…`, `ADeployment…`) or a situation opening with `When`, whichever makes the name read as a sentence: `TestWhenNoSocketAnswers_ShouldNameEveryPathTried`. The outcome is a result a reader can observe, never a step the code takes on the way. `TestADockerHostThatIsNotAURL_ShouldBeSkippedWithAWarningAndTheLiveCandidateUsed` states its outcome. `TestADockerHostThatIsNotAURLIsNamedAsTriedAndTheCandidatesProbed` names two steps and leaves the outcome out.
 
 ## Three-Tier Data Naming Convention
 
