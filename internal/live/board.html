@@ -44,5 +44,5 @@
 {{- end -}}
 
 {{- define "pod" -}}
-<li class="pod {{.Readiness.Class}}{{if .Fade}} newcomer{{end}}" id="{{.ID}}"{{if .Fade}} data-fade="{{.Fade}}"{{end}}><span class="pod-name">{{.Name}}</span> <span class="readiness">{{.Readiness.Word}}</span> <span class="pod-requests">requests cpu {{.CPU}} memory {{.Memory}}</span></li>
+<li class="pod {{.Readiness.Class}}{{if .Fade}} newcomer{{end}}" id="{{.ID}}"{{if .Fade}} data-fade="{{.Fade}}"{{end}}><header class="pod-header"><span class="pod-name">{{.Name}}</span><span class="readiness">{{.Readiness.Word}}</span></header><span class="pod-requests">requests cpu {{.CPU}} memory {{.Memory}}</span></li>
 {{- end -}}

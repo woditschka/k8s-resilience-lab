@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -33,6 +34,7 @@ const (
 	aLabelKey   = "example.com/capacity-type"
 	aLabelValue = "spot"
 
+	someScenario    = "a-scenario"
 	aDeployment     = "checkout"
 	aPodPlacedFirst = "checkout-5fc87ff7c8-7vd48"
 	aPodPlacedLater = "checkout-5fc87ff7c8-q2x9z"
@@ -60,15 +62,16 @@ const (
 	aBanOnTypeSniffing                = "nosniff"
 	aBanOnCaching                     = "no-store"
 
-	aCauseCarryingMarkup = "refused by <script>alert(1)</script>"
-	theFailureNamedAfter = "no Placement board: "
-	aRequestedCPU        = scenario.CPU(4000)
-	aRequestedMemory     = scenario.Memory(8192)
-	theRequestsWord      = "requests"
-	thePodCountsRow      = "Pods"
-	theCPURow            = "cpu"
-	theMemoryRow         = "memory"
-	theOnePodPlacedOnIt  = 1
+	aCauseCarryingMarkup        = "refused by <script>alert(1)</script>"
+	aScenarioNameCarryingMarkup = "<b>checkout</b>"
+	theFailureNamedAfter        = "no Placement board: "
+	aRequestedCPU               = scenario.CPU(4000)
+	aRequestedMemory            = scenario.Memory(8192)
+	theRequestsWord             = "requests"
+	thePodCountsRow             = "Pods"
+	theCPURow                   = "cpu"
+	theMemoryRow                = "memory"
+	theOnePodPlacedOnIt         = 1
 
 	// An absolute or scheme-relative address is how a page loads from another
 	// host.
@@ -147,7 +150,7 @@ func aBoardOfOnePod(t *testing.T) scenario.PlacementBoard {
 func aServerShowing(t *testing.T, view *View) *Server {
 	t.Helper()
 
-	served, err := Listen(t.Context(), view)
+	served, err := Listen(t.Context(), view, someScenario)
 	if err != nil {
 		t.Fatalf("listen for the Live view: %v", err)
 	}
@@ -577,6 +580,75 @@ func readinessOf(t *testing.T, fragment, id string) readiness {
 	return readiness{Class: class, Word: box.first(t, "readiness").text()}
 }
 
+// podBox is how a Pod's box orders its parts: what stands in each, top to
+// bottom.
+type podBox struct {
+	Parts         []string
+	HeaderHolds   []string
+	ReadinessWord string
+}
+
+func podBoxOf(t *testing.T, fragment, id string) podBox {
+	t.Helper()
+
+	box := decoded(t, fragment).byID(t, id)
+	var parts, header []string
+	for _, part := range box.Children {
+		parts = append(parts, part.attr("class"))
+	}
+	for _, held := range box.first(t, "pod-header").Children {
+		header = append(header, held.attr("class"))
+	}
+
+	return podBox{Parts: parts, HeaderHolds: header, ReadinessWord: box.first(t, "pod-header").first(t, "readiness").text()}
+}
+
+// aPodHeaderDeclaration matches the declaration block of the rule that lays
+// out a Pod box's first line.
+var aPodHeaderDeclaration = regexp.MustCompile(`\.pod-header\s*\{([^}]*)\}`)
+
+func TestAPodsBoxInTheLiveView_ShouldGiveItsNameAndWhetherItIsReadyOnItsFirstLineAboveItsRequests(t *testing.T) {
+	topology := aTopologyOfTwoZones(t)
+	view := NewView()
+	served := aServerShowing(t, view)
+
+	view.Observed(aBoardOf(topology, []scenario.Pod{aPodOn(topology.Nodes()[0], aPodPlacedFirst)}, scenario.PlacementBoard{}), nil)
+	fragment := theFragmentShownTo(t, aBrowser(), served)
+	_, stylesheet := answerTo(t, aBrowser(), aRequestTo(t, served, http.MethodGet, stylesheetPath))
+
+	declaration := aPodHeaderDeclaration.FindStringSubmatch(stylesheet)
+	putsWordAtRight := len(declaration) == 2 && strings.Contains(declaration[1], "justify-content: space-between")
+
+	expect.Expect(t, podBoxOf(t, fragment, podID(aPodPlacedFirst))).To(expect.Equal(podBox{
+		Parts:         []string{"pod-header", "pod-requests"},
+		HeaderHolds:   []string{"pod-name", "readiness"},
+		ReadinessWord: readyWord,
+	}))
+	expect.Expect(t, putsWordAtRight).To(expect.Equal(true))
+}
+
+// aNodesPodsDeclaration matches the declaration block of the rule that scopes
+// Pods to a Node's box.
+var aNodesPodsDeclaration = regexp.MustCompile(`\.node\s*>\s*\.pods\s*\{([^}]*)\}`)
+
+func TestAPodsBoxInTheLiveView_ShouldSpanTheWidthOfItsNodesBox(t *testing.T) {
+	topology := aTopologyOfTwoZones(t)
+	node := topology.Nodes()[0]
+	view := NewView()
+	served := aServerShowing(t, view)
+	view.Observed(aBoardOf(topology, []scenario.Pod{aPodOn(node, aPodPlacedFirst)}, scenario.PlacementBoard{}), nil)
+	fragment := theFragmentShownTo(t, aBrowser(), served)
+	_, stylesheet := answerTo(t, aBrowser(), aRequestTo(t, served, http.MethodGet, stylesheetPath))
+
+	nodesPods := decoded(t, fragment).byID(t, nodeID(node.Name)).first(t, "pods")
+	_, standsInNodesPods := nodesPods.find(podID(aPodPlacedFirst))
+
+	declaration := aNodesPodsDeclaration.FindStringSubmatch(stylesheet)
+	stacksItsPods := len(declaration) == 2 && strings.Contains(declaration[1], "flex-direction: column")
+
+	expect.Expect(t, []bool{standsInNodesPods, stacksItsPods}).To(expect.Equal([]bool{true, true}))
+}
+
 func TestANodeOrPodInTheLiveView_ShouldStateWhetherItIsReadyByColourAndWord(t *testing.T) {
 	topology := aTopologyOfTwoZones(t)
 	responding, failed := topology.Nodes()[0], topology.Nodes()[1]
@@ -741,6 +813,33 @@ func TestTheLiveView_ShouldListenOnTheLoopbackAddressAlone(t *testing.T) {
 	expect.Expect(t, strings.HasPrefix(served.Address(), theLoopbackAddress)).To(expect.Equal(true))
 }
 
+// pageHeaderNaming is how the page header names the Scenario: the lab's name,
+// a hyphen, then the Scenario's in its own element.
+var pageHeaderNaming = regexp.MustCompile(`<h1>k8s-resilience-lab - <span class="scenario">([^<]*)</span></h1>`)
+
+func TestTheLiveViewsPageHeader_ShouldNameTheLabAndTheScenarioByItsScenarioName(t *testing.T) {
+	cases := map[string]struct {
+		named string
+		want  string
+	}{
+		"a plain name":           {named: someScenario, want: someScenario},
+		"a name carrying markup": {named: aScenarioNameCarryingMarkup, want: "&lt;b&gt;checkout&lt;/b&gt;"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			served, err := Listen(t.Context(), NewView(), tc.named)
+			if err != nil {
+				t.Fatalf("listen for the Live view: %v", err)
+			}
+			t.Cleanup(func() { _ = served.Close() })
+
+			_, body := answerTo(t, aBrowser(), aRequestTo(t, served, http.MethodGet, pagePath))
+
+			expect.Expect(t, pageHeaderNaming.FindStringSubmatch(body)).To(expect.Equal([]string{pageHeaderNaming.FindString(body), tc.want}))
+		})
+	}
+}
+
 func TestTheLiveViewsPageScriptStylesheetAndBoard_ShouldEachBeServedUnderTheirOwnType(t *testing.T) {
 	typePerPath := map[string]string{
 		pagePath:       anHTMLDocument,
@@ -879,7 +978,7 @@ func TestAStreamBeyondTheOpenStreamCap_ShouldBeRefused(t *testing.T) {
 }
 
 func TestClosingTheLiveView_ShouldEndEveryOpenStreamWithinItsBound(t *testing.T) {
-	served, err := Listen(t.Context(), NewView())
+	served, err := Listen(t.Context(), NewView(), someScenario)
 	if err != nil {
 		t.Fatalf("listen for the Live view: %v", err)
 	}

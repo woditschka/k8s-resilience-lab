@@ -105,17 +105,17 @@ h1 {
   font-weight: 600;
 }
 
-.ready > .readiness,
-.ready > .node-header > .readiness {
+.ready > .node-header > .readiness,
+.ready > .pod-header > .readiness {
   color: var(--ready);
 }
 
-.not-ready > .readiness,
-.not-ready > .node-header > .readiness {
+.not-ready > .node-header > .readiness,
+.not-ready > .pod-header > .readiness {
   color: var(--not-ready);
 }
 
-.pending > .readiness {
+.pending > .pod-header > .readiness {
   color: var(--pending);
 }
 
@@ -169,16 +169,25 @@ h1 {
   list-style: none;
 }
 
+.node > .pods {
+  flex-direction: column;
+}
+
 .pod {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 0.1rem;
   border: 1px solid var(--border);
   border-left: 0.3rem solid var(--not-ready);
   border-radius: 0.4rem;
   padding: 0.15rem 0.4rem;
   font-size: 0.85rem;
+}
+
+.pod-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .pod.ready {
@@ -198,6 +207,11 @@ h1 {
 .pod-name {
   font-family: ui-monospace, monospace;
   overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.pod-header > .readiness {
+  flex-shrink: 0;
 }
 
 /* One rule per step of the newcomer fade the lab counts, highest first. */

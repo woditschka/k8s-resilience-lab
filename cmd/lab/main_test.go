@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"slices"
@@ -1378,4 +1379,24 @@ func TestAnInteractiveRunNamingAScenario_ShouldReportItsStepsBeforeItsFirstWhenA
 	reportShows(t, reported, nodeStopsRespondingReported)
 	reportShows(t, reported, threePodsPerZoneJudged)
 	reportLacks(t, reported, oneNodeFailsReported)
+}
+
+func TestArgumentsNamingOneScenarioWithInteractive_ShouldCarryTheScenarioNameIntoTheSetting(t *testing.T) {
+	cases := map[string]struct {
+		arguments []string
+		want      string
+	}{
+		"a Scenario held":  {arguments: []string{interactive, theFirstScenarioOfTheLab}, want: theFirstScenarioOfTheLab},
+		"no Scenario held": {arguments: nil, want: ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			setting, err := resolveSetting(tc.arguments, io.Discard)
+			if err != nil {
+				t.Fatalf("resolve the setting of %v: %v", tc.arguments, err)
+			}
+
+			expect.Expect(t, setting.heldName).To(expect.Equal(tc.want))
+		})
+	}
 }

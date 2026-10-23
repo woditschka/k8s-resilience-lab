@@ -115,7 +115,7 @@ func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, r
 	}
 
 	view := live.NewView()
-	server, err := live.Listen(ctx, view)
+	server, err := live.Listen(ctx, view, asked.heldName)
 	if err != nil {
 		return err
 	}
@@ -143,6 +143,8 @@ type runSetting struct {
 	// held is the Scenario an Interactive run holds; a run of every Scenario
 	// has none.
 	held func(*lab.Scenario)
+	// heldName is the name the engineer gave for it.
+	heldName string
 }
 
 func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) {
@@ -166,7 +168,12 @@ func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) 
 		return runSetting{}, err
 	}
 
-	return runSetting{version: version, wholeTimeline: *whole, held: held}, nil
+	heldName := ""
+	if held != nil {
+		heldName = flags.Arg(0)
+	}
+
+	return runSetting{version: version, wholeTimeline: *whole, held: held, heldName: heldName}, nil
 }
 
 // A refusal names every Scenario, so the engineer reads what can be asked for.

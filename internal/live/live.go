@@ -60,7 +60,10 @@ const contentSecurityPolicy = "default-src 'none'; script-src 'self'; style-src 
 //go:embed page.html live.js live.css board.html
 var assets embed.FS
 
-var boardMarkup = template.Must(template.ParseFS(assets, "board.html"))
+var (
+	boardMarkup = template.Must(template.ParseFS(assets, "board.html"))
+	pageMarkup  = template.Must(template.ParseFS(assets, "page.html"))
+)
 
 // View holds the fragment every open stream shows: the latest Placement board
 // rendered, or the cause the last observation failed.
@@ -295,9 +298,14 @@ type Server struct {
 	stopped chan error
 }
 
-// Listen serves view until Close; the server reads every request but changes
-// nothing.
-func Listen(ctx context.Context, view *View) (*Server, error) {
+// Listen serves view until Close, its page headed by the name of the Scenario
+// held; the server reads every request but changes nothing.
+func Listen(ctx context.Context, view *View, scenarioName string) (*Server, error) {
+	var page bytes.Buffer
+	if err := pageMarkup.Execute(&page, struct{ Scenario string }{Scenario: scenarioName}); err != nil {
+		return nil, fmt.Errorf("render the Live view's page for Scenario %s: %w", scenarioName, err)
+	}
+
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", loopback)
 	if err != nil {
 		return nil, fmt.Errorf("listen for the Live view on %s: %w", loopback, err)
@@ -308,7 +316,7 @@ func Listen(ctx context.Context, view *View) (*Server, error) {
 	server := &Server{
 		http: &http.Server{
 			Handler: routes{
-				view: view, host: host, origin: "http://" + host,
+				view: view, page: page.Bytes(), host: host, origin: "http://" + host,
 				streams: make(chan struct{}, maxStreams), closing: closing,
 			},
 			ReadHeaderTimeout: readHeaderTimeout,
@@ -356,7 +364,9 @@ func (s *Server) Close() error {
 // routes answers a GET of the page, its script, its stylesheet or the board's
 // stream, and refuses everything else before reading anything of the request.
 type routes struct {
-	view   *View
+	view *View
+	// page is rendered once, since the Scenario held never changes.
+	page   []byte
 	host   string
 	origin string
 	// streams holds one token per open stream.
@@ -387,7 +397,8 @@ func (r routes) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 
 	switch request.URL.Path {
 	case pagePath:
-		serveAsset(w, "page.html", "text/html; charset=utf-8")
+		secured(w, "text/html; charset=utf-8")
+		_, _ = w.Write(r.page)
 	case scriptPath:
 		serveAsset(w, "live.js", "text/javascript; charset=utf-8")
 	case stylesheetPath:
