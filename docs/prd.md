@@ -492,7 +492,7 @@ It draws each Zone, Node and Pod as a box, and every open Live view follows each
 ### Injecting a Failure from the Live view
 
 <a id="req-sim-028"></a>
-An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inject a Failure and watch the cluster react, and the terminal reports it as a When `[REQ-SIM-028]`. A second click on a stopped Node or Zone makes it respond again, and a lost Pod has no recovery `[REQ-SIM-028]`.
+An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inject a Failure and watch the cluster react, and the terminal reports it as a When `[REQ-SIM-028]`. A second click on a stopped Node, or on a Zone whose every Node stopped, makes it respond again, and a lost Pod has no recovery `[REQ-SIM-028]`.
 
 **Done when:**
 

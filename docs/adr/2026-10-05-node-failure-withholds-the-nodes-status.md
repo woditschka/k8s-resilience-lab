@@ -4,7 +4,7 @@
 
 ## Context
 
-REQ-SIM-008 stops a Node responding and watches the control plane move its Pods away. REQ-SIM-028 later lets an engineer's click make a stopped Node respond again. The owner chose that shape over a removed Node: "The Node stays in the cluster but goes NotReady, as when a machine hangs or loses network." The owner also chose who sets the wait: "The lab deploys Workloads so Pods leave an unresponsive Node after a few seconds."
+REQ-SIM-008 stops a Node responding and watches the control plane move its Pods away. REQ-SIM-028 also lets an engineer's click make a stopped Node respond again. The owner chose that shape over a removed Node: "The Node stays in the cluster but goes NotReady, as when a machine hangs or loses network." The owner also chose who sets the wait: "The lab deploys Workloads so Pods leave an unresponsive Node after a few seconds."
 
 Three things stand in the way, each measured on the pinned image, KWOK v0.8.0 with Kubernetes v1.36.1:
 
