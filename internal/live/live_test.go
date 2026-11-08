@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -145,12 +146,52 @@ func aBoardOfOnePod(t *testing.T) scenario.PlacementBoard {
 	return aBoardOf(topology, []scenario.Pod{aPodOn(topology.Nodes()[0], aPodPlacedFirst)}, scenario.PlacementBoard{})
 }
 
+// injectingNothing stands for a held run in a test whose clicks do not matter.
+func injectingNothing(Failure) error { return nil }
+
+// heldRun records each Failure the write hands over, standing for the held run
+// in internal/lab, which internal/live may not import.
+type heldRun struct {
+	mu     sync.Mutex
+	handed []Failure
+	// refusing is the error every injection answers, none when it succeeds.
+	refusing error
+}
+
+func (h *heldRun) inject(failure Failure) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.handed = append(h.handed, failure)
+
+	return h.refusing
+}
+
+func (h *heldRun) injected() []Failure {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return slices.Clone(h.handed)
+}
+
+func aServerInjectingInto(t *testing.T, held *heldRun) *Server {
+	t.Helper()
+
+	served, err := Listen(t.Context(), NewView(), someScenario, held.inject)
+	if err != nil {
+		t.Fatalf("listen for the Live view: %v", err)
+	}
+	t.Cleanup(func() { _ = served.Close() })
+
+	return served
+}
+
 // aServerShowing closes its server when the test ends, within the server's own
 // bound.
 func aServerShowing(t *testing.T, view *View) *Server {
 	t.Helper()
 
-	served, err := Listen(t.Context(), view, someScenario)
+	served, err := Listen(t.Context(), view, someScenario, injectingNothing)
 	if err != nil {
 		t.Fatalf("listen for the Live view: %v", err)
 	}
@@ -827,7 +868,7 @@ func TestTheLiveViewsPageHeader_ShouldNameTheLabAndTheScenarioByItsScenarioName(
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			served, err := Listen(t.Context(), NewView(), tc.named)
+			served, err := Listen(t.Context(), NewView(), tc.named, injectingNothing)
 			if err != nil {
 				t.Fatalf("listen for the Live view: %v", err)
 			}
@@ -978,7 +1019,7 @@ func TestAStreamBeyondTheOpenStreamCap_ShouldBeRefused(t *testing.T) {
 }
 
 func TestClosingTheLiveView_ShouldEndEveryOpenStreamWithinItsBound(t *testing.T) {
-	served, err := Listen(t.Context(), NewView(), someScenario)
+	served, err := Listen(t.Context(), NewView(), someScenario, injectingNothing)
 	if err != nil {
 		t.Fatalf("listen for the Live view: %v", err)
 	}
@@ -991,4 +1032,161 @@ func TestClosingTheLiveView_ShouldEndEveryOpenStreamWithinItsBound(t *testing.T)
 	_, ended := open.events.ReadString('\n')
 	expect.Expect(t, closed).To(expect.Equal[error](nil))
 	expect.Expect(t, []bool{took < shutdownTimeout, errors.Is(ended, io.EOF)}).To(expect.Equal([]bool{true, true}))
+}
+
+// failureOfEachBox maps each box's id to the Failure its click posts, empty
+// where it posts none.
+func failureOfEachBox(t *testing.T, fragment string, ids ...string) map[string]string {
+	t.Helper()
+
+	root := decoded(t, fragment)
+	posted := make(map[string]string, len(ids))
+	for _, id := range ids {
+		posted[id] = root.byID(t, id).attr("data-failure")
+	}
+
+	return posted
+}
+
+func TestEachBoxInTheLiveView_ShouldCarryTheFailureAClickOnItInjectsAndAPendingPodsBoxNone(t *testing.T) {
+	topology := aTopologyOfTwoZones(t)
+	first := topology.Nodes()[0]
+	view := NewView()
+	served := aServerShowing(t, view)
+
+	view.Observed(aBoardOf(topology, []scenario.Pod{aPodOn(first, aPodPlacedFirst), aPendingPod()}, scenario.PlacementBoard{}), nil)
+	fragment := theFragmentShownTo(t, aBrowser(), served)
+
+	expect.Expect(t, failureOfEachBox(t, fragment, zoneID(first.Zone), nodeID(first.Name), podID(aPodPlacedFirst), podID(aPodLeftPending))).
+		To(expect.Equal(map[string]string{
+			zoneID(first.Zone):     failurePath + string(ZoneFailure) + "/" + first.Zone,
+			nodeID(first.Name):     failurePath + string(NodeFailure) + "/" + first.Name,
+			podID(aPodPlacedFirst): failurePath + string(PodFailure) + "/" + aPodPlacedFirst,
+			podID(aPodLeftPending): noFailure,
+		}))
+}
+
+// aClickFromTheLiveViewsOwnPage carries what a browser sends with the page's
+// own fetch.
+func aClickFromTheLiveViewsOwnPage(t *testing.T, served *Server, path string) *http.Request {
+	t.Helper()
+
+	request := withOrigin(aRequestTo(t, served, http.MethodPost, path), strings.TrimSuffix(served.Address(), "/"))
+	request.Header.Set(fetchSite, aFetchFromTheSameOrigin)
+
+	return request
+}
+
+const (
+	noFailure               = ""
+	fetchSite               = "Sec-Fetch-Site"
+	aFetchFromTheSameOrigin = "same-origin"
+	aFetchFromAnotherSite   = "cross-site"
+
+	aNodeClicked = "zone-1-node-1"
+	aZoneClicked = "zone-2"
+	aPodClicked  = aPodPlacedFirst
+)
+
+func TestAClickOnABoxOfTheLiveView_ShouldHandItsFailureToTheHeldRun(t *testing.T) {
+	held := &heldRun{}
+	served := aServerInjectingInto(t, held)
+	browser := aBrowser()
+
+	answered := []int{
+		statusAnswering(t, browser, aClickFromTheLiveViewsOwnPage(t, served, failurePath+string(NodeFailure)+"/"+aNodeClicked)),
+		statusAnswering(t, browser, aClickFromTheLiveViewsOwnPage(t, served, failurePath+string(ZoneFailure)+"/"+aZoneClicked)),
+		statusAnswering(t, browser, aClickFromTheLiveViewsOwnPage(t, served, failurePath+string(PodFailure)+"/"+aPodClicked)),
+	}
+
+	expect.Expect(t, answered).To(expect.Equal([]int{http.StatusNoContent, http.StatusNoContent, http.StatusNoContent}))
+	expect.Expect(t, held.injected()).To(expect.Equal([]Failure{
+		{Kind: NodeFailure, Name: aNodeClicked},
+		{Kind: ZoneFailure, Name: aZoneClicked},
+		{Kind: PodFailure, Name: aPodClicked},
+	}))
+}
+
+func statusAnswering(t *testing.T, browser *http.Client, request *http.Request) int {
+	t.Helper()
+
+	answered, _ := answerTo(t, browser, request)
+
+	return answered.StatusCode
+}
+
+const (
+	aKindOfFailureTheLiveViewDoesNotInject = "rack"
+	noFailureHanded                        = 0
+)
+
+func TestAWriteTheLiveViewDoesNotAccept_ShouldBeRefusedAndHandNothingToTheHeldRun(t *testing.T) {
+	aNodesFailure := failurePath + string(NodeFailure) + "/" + aNodeClicked
+	refusals := map[string]struct {
+		request func(*testing.T, *Server) *http.Request
+		status  int
+	}{
+		"a Host other than the address served": {
+			request: func(t *testing.T, served *Server) *http.Request {
+				return withHost(aClickFromTheLiveViewsOwnPage(t, served, aNodesFailure), aHostReboundToLoopback)
+			},
+			status: http.StatusMisdirectedRequest,
+		},
+		"an Origin other than the address served": {
+			request: func(t *testing.T, served *Server) *http.Request {
+				return withOrigin(aClickFromTheLiveViewsOwnPage(t, served, aNodesFailure), anotherSitesOrigin)
+			},
+			status: http.StatusForbidden,
+		},
+		"a browser request from another site": {
+			request: func(t *testing.T, served *Server) *http.Request {
+				request := aClickFromTheLiveViewsOwnPage(t, served, aNodesFailure)
+				request.Header.Set(fetchSite, aFetchFromAnotherSite)
+
+				return request
+			},
+			status: http.StatusForbidden,
+		},
+		"a GET, which only reads": {
+			request: func(t *testing.T, served *Server) *http.Request {
+				return aRequestTo(t, served, http.MethodGet, aNodesFailure)
+			},
+			status: http.StatusMethodNotAllowed,
+		},
+		"a kind of Failure it does not inject": {
+			request: func(t *testing.T, served *Server) *http.Request {
+				return aClickFromTheLiveViewsOwnPage(t, served, failurePath+aKindOfFailureTheLiveViewDoesNotInject+"/"+aNodeClicked)
+			},
+			status: http.StatusNotFound,
+		},
+		"a Failure naming nothing": {
+			request: func(t *testing.T, served *Server) *http.Request {
+				return aClickFromTheLiveViewsOwnPage(t, served, failurePath+string(NodeFailure)+"/")
+			},
+			status: http.StatusNotFound,
+		},
+	}
+
+	for named, refused := range refusals {
+		t.Run(named, func(t *testing.T) {
+			held := &heldRun{}
+			served := aServerInjectingInto(t, held)
+
+			answered, _ := answerTo(t, aBrowser(), refused.request(t, served))
+
+			expect.Expect(t, []any{answered.StatusCode, len(held.injected())}).To(expect.Equal([]any{refused.status, noFailureHanded}))
+		})
+	}
+}
+
+const whyTheHeldRunCouldNotInject = "stop Node zone-1-node-1 responding: the API server is gone"
+
+func TestAClickTheHeldRunCouldNotInject_ShouldBeAnsweredNamingWhy(t *testing.T) {
+	held := &heldRun{refusing: errors.New(whyTheHeldRunCouldNotInject)}
+	served := aServerInjectingInto(t, held)
+
+	answered, body := answerTo(t, aBrowser(), aClickFromTheLiveViewsOwnPage(t, served, failurePath+string(NodeFailure)+"/"+aNodeClicked))
+
+	expect.Expect(t, []any{answered.StatusCode, strings.Contains(body, whyTheHeldRunCouldNotInject)}).
+		To(expect.Equal([]any{http.StatusInternalServerError, true}))
 }

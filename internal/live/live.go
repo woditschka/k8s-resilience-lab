@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -49,7 +50,39 @@ const (
 	scriptPath     = "/live.js"
 	stylesheetPath = "/live.css"
 	boardPath      = "/board"
+	// failurePath is followed by the kind of Failure and the name it is of.
+	failurePath = "/failure/"
 )
+
+// FailureKind is what a click on a box stops or loses, one of a closed set.
+type FailureKind string
+
+const (
+	NodeFailure FailureKind = "node"
+	ZoneFailure FailureKind = "zone"
+	PodFailure  FailureKind = "pod"
+)
+
+// Failure is what one click names. Its name is the request's alone, unresolved
+// until the held run resolves it against its own cluster.
+type Failure struct {
+	Kind FailureKind
+	Name string
+}
+
+func failureKindOf(kind string) (FailureKind, bool) {
+	switch named := FailureKind(kind); named {
+	case NodeFailure, ZoneFailure, PodFailure:
+		return named, true
+	}
+
+	return "", false
+}
+
+// failureOf is the path a click on a box posts to.
+func failureOf(kind FailureKind, name string) string {
+	return failurePath + string(kind) + "/" + url.PathEscape(name)
+}
 
 // The page runs only its own script and stylesheet, served from the binary,
 // and connects only to the lab, so an injected name could neither run nor send
@@ -155,15 +188,19 @@ type shownBoard struct {
 	Unplaced    []shownPod
 }
 
+// Failure, on every box, is the path a click on it posts to, none where a click
+// injects nothing.
 type shownZone struct {
-	ID    string
-	Name  string
-	Nodes []shownNode
+	ID      string
+	Name    string
+	Failure string
+	Nodes   []shownNode
 }
 
 type shownNode struct {
 	ID        string
 	Name      string
+	Failure   string
 	NodePool  string
 	Labels    []string
 	Readiness shownReadiness
@@ -186,6 +223,7 @@ type shownRoom struct {
 type shownPod struct {
 	ID        string
 	Name      string
+	Failure   string
 	Readiness shownReadiness
 	CPU       string
 	Memory    string
@@ -214,7 +252,9 @@ func toShown(board scenario.PlacementBoard, fading map[podOnNode]int, notObserve
 		for _, node := range zone.Nodes {
 			nodes = append(nodes, toShownNode(node, fading))
 		}
-		shown.Zones = append(shown.Zones, shownZone{ID: zoneID(zone.Name), Name: zone.Name, Nodes: nodes})
+		shown.Zones = append(shown.Zones, shownZone{
+			ID: zoneID(zone.Name), Name: zone.Name, Failure: failureOf(ZoneFailure, zone.Name), Nodes: nodes,
+		})
 	}
 	for _, pod := range board.Unplaced() {
 		shown.Unplaced = append(shown.Unplaced, toShownPod(pod, pending, fading[podOnNode{pod: pod.Name}]))
@@ -238,11 +278,13 @@ func toShownNode(node scenario.BoardNode, fading map[podOnNode]int) shownNode {
 		if pod.Ready {
 			podReadiness = ready
 		}
-		pods = append(pods, toShownPod(pod, podReadiness, fading[podOnNode{pod: pod.Name, node: node.Name}]))
+		placed := toShownPod(pod, podReadiness, fading[podOnNode{pod: pod.Name, node: node.Name}])
+		placed.Failure = failureOf(PodFailure, pod.Name)
+		pods = append(pods, placed)
 	}
 
 	return shownNode{
-		ID: nodeID(node.Name), Name: node.Name, NodePool: node.NodePool, Labels: labels, Readiness: readiness,
+		ID: nodeID(node.Name), Name: node.Name, Failure: failureOf(NodeFailure, node.Name), NodePool: node.NodePool, Labels: labels, Readiness: readiness,
 		// The Pod count comes first, since it is the room a Node runs out of first in
 		// most Scenarios.
 		Room: []shownRoom{
@@ -299,8 +341,9 @@ type Server struct {
 }
 
 // Listen serves view until Close, its page headed by the name of the Scenario
-// held; the server reads every request but changes nothing.
-func Listen(ctx context.Context, view *View, scenarioName string) (*Server, error) {
+// held. Its one write hands a clicked Failure to inject, whose error is the
+// Failure not injected; a Failure resolving to nothing is inject's to ignore.
+func Listen(ctx context.Context, view *View, scenarioName string, inject func(Failure) error) (*Server, error) {
 	var page bytes.Buffer
 	if err := pageMarkup.Execute(&page, struct{ Scenario string }{Scenario: scenarioName}); err != nil {
 		return nil, fmt.Errorf("render the Live view's page for Scenario %s: %w", scenarioName, err)
@@ -318,6 +361,7 @@ func Listen(ctx context.Context, view *View, scenarioName string) (*Server, erro
 			Handler: routes{
 				view: view, page: page.Bytes(), host: host, origin: "http://" + host,
 				streams: make(chan struct{}, maxStreams), closing: closing,
+				inject: inject, crossOrigin: http.NewCrossOriginProtection(),
 			},
 			ReadHeaderTimeout: readHeaderTimeout,
 			ReadTimeout:       readTimeout,
@@ -362,7 +406,8 @@ func (s *Server) Close() error {
 }
 
 // routes answers a GET of the page, its script, its stylesheet or the board's
-// stream, and refuses everything else before reading anything of the request.
+// stream, and a POST of a clicked Failure, and refuses everything else before
+// reading anything of the request.
 type routes struct {
 	view *View
 	// page is rendered once, since the Scenario held never changes.
@@ -372,6 +417,10 @@ type routes struct {
 	// streams holds one token per open stream.
 	streams chan struct{}
 	closing <-chan struct{}
+	inject  func(Failure) error
+	// crossOrigin refuses a browser's cross-site write by its Fetch metadata,
+	// which a page from another site cannot forge.
+	crossOrigin *http.CrossOriginProtection
 }
 
 // A Host other than the address served is a page from another site whose name
@@ -385,6 +434,11 @@ func (r routes) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	}
 	if origin := request.Header.Get("Origin"); origin != "" && origin != r.origin {
 		http.Error(w, "the Live view answers its own page alone", http.StatusForbidden)
+
+		return
+	}
+	if clicked, isAWrite := strings.CutPrefix(request.URL.Path, failurePath); isAWrite {
+		r.injectClicked(w, request, clicked)
 
 		return
 	}
@@ -408,6 +462,36 @@ func (r routes) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	default:
 		http.NotFound(w, request)
 	}
+}
+
+// injectClicked runs the Failure to its end before answering, so a browser's
+// next click finds it injected; the terminal, not the answer, reports it.
+func (r routes) injectClicked(w http.ResponseWriter, request *http.Request, clicked string) {
+	if request.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		http.Error(w, "the Live view takes a Failure by POST alone", http.StatusMethodNotAllowed)
+
+		return
+	}
+	if err := r.crossOrigin.Check(request); err != nil {
+		http.Error(w, "the Live view takes a Failure from its own page alone", http.StatusForbidden)
+
+		return
+	}
+	kind, name, named := strings.Cut(clicked, "/")
+	failureKind, known := failureKindOf(kind)
+	if !named || !known || name == "" || strings.Contains(name, "/") {
+		http.NotFound(w, request)
+
+		return
+	}
+
+	if err := r.inject(Failure{Kind: failureKind, Name: name}); err != nil {
+		http.Error(w, "the Live view could not inject the Failure: "+err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func serveAsset(w http.ResponseWriter, name, contentType string) {

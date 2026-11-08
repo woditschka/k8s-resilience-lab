@@ -248,28 +248,205 @@ type Observer struct {
 
 // Hold carries out the Scenario up to its first When, or every Step where it
 // has none, and hands its Outcome to reported. It then holds the cluster as the
-// Steps left it until ctx ends, and removes it. From provisioning until removal
-// observer is handed the cluster's board.
-func (r *Runner) Hold(ctx context.Context, steps func(*Scenario), observer Observer, reported func(Outcome)) (Outcome, error) {
+// Steps left it until ctx ends, injecting each Failure injector is handed, and
+// removes it. From provisioning until removal observer is handed the cluster's
+// board.
+func (r *Runner) Hold(ctx context.Context, steps func(*Scenario), observer Observer, injector *Injector,
+	reported func(Outcome),
+) (Outcome, error) {
 	name, err := scenarioNameOfFunction(steps)
 	if err != nil {
 		return Outcome{}, err
 	}
 
-	return r.holdNamed(ctx, name, steps, observer, reported)
+	return r.holdNamed(ctx, name, steps, observer, injector, reported)
 }
 
 func (r *Runner) holdNamed(ctx context.Context, name string, steps func(*Scenario), observer Observer,
-	reported func(Outcome),
+	injector *Injector, reported func(Outcome),
 ) (Outcome, error) {
-	return r.carryOut(ctx, name, steps, &holding{observer: observer, reported: reported})
+	return r.carryOut(ctx, name, steps, &holding{observer: observer, injector: injector, reported: reported})
 }
 
 // holding is what sets a held run apart from a run: the halt at the first
-// When, the observer and the wait for the lab to stop.
+// When, the observer, the clicked Failures and the wait for the lab to stop.
 type holding struct {
 	observer Observer
+	injector *Injector
 	reported func(Outcome)
+}
+
+// Injector takes the clicks an engineer makes in the Live view into a held
+// run's cluster, one at a time, from its Outcome being reported until the lab
+// stops: each stops a Node or Zone responding, makes it respond again, or loses
+// a Pod. Before and after, a click changes nothing.
+//
+// Each Failure is resolved against what the Steps declared and the latest
+// board, and runs under the held run's context rather than a request's, so a
+// closed browser tab leaves no Zone stopped part-way.
+type Injector struct {
+	mu sync.Mutex
+	// held is set while the held run takes Failures, and nil otherwise.
+	held *heldCluster
+	// reportWhen is called under mu, so the When of one Failure prints whole
+	// before the next is taken.
+	reportWhen func(Step)
+	// latest is written by the observer while a click reads it.
+	latest atomic.Pointer[scenario.PlacementBoard]
+}
+
+// heldCluster is the cluster a held run's Failures reach and the Nodes stopped
+// in it so far.
+type heldCluster struct {
+	ctx         context.Context
+	provisioned *cluster.SimulatedCluster
+	topology    scenario.Topology
+	stopped     []string
+}
+
+// NewInjector reports each click it takes as a When to reportWhen.
+func NewInjector(reportWhen func(Step)) *Injector {
+	return &Injector{reportWhen: reportWhen}
+}
+
+// takeFailures reports the Outcome under the lock, so a click arriving as the
+// Steps end is taken once its Outcome is on the terminal, never before.
+func (i *Injector) takeFailures(held *heldCluster, report func()) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	i.held = held
+	report()
+}
+
+// stopTakingFailures waits for a Failure under way to end, so none reaches a
+// cluster being removed.
+func (i *Injector) stopTakingFailures() {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	i.held = nil
+}
+
+func (i *Injector) observed(board scenario.PlacementBoard) {
+	i.latest.Store(&board)
+}
+
+// ClickNode stops the Node named responding, or makes it respond again where it
+// stopped. A name the Topology does not derive changes nothing.
+func (i *Injector) ClickNode(name string) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if i.held == nil {
+		return nil
+	}
+	failure, err := scenario.NewNodeFailureNaming(i.held.topology, name)
+	if err != nil {
+		return nil
+	}
+
+	if slices.Contains(i.held.stopped, name) {
+		return i.restoring(failure.Names(), "Node "+name)
+	}
+
+	return i.stopping(failure.Names(), "Node "+name)
+}
+
+// ClickZone stops the Nodes of the Zone named that still respond, in the
+// Topology's order, or makes every Node of it respond again where all of them
+// stopped. A name the Topology does not derive changes nothing.
+func (i *Injector) ClickZone(name string) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if i.held == nil {
+		return nil
+	}
+	failure, err := scenario.NewZoneFailureNaming(i.held.topology, name)
+	if err != nil {
+		return nil
+	}
+
+	stillResponding := failure.NodeNamesStillResponding(i.held.stopped)
+	if len(stillResponding) == 0 {
+		return i.restoring(failure.NodeNames(), "Zone "+name)
+	}
+
+	return i.stopping(stillResponding, "Zone "+name)
+}
+
+// LosePod loses the placed Pod named, its Deployment replacing it. A Pod the
+// latest board holds unplaced or not at all, or one already gone, changes
+// nothing.
+func (i *Injector) LosePod(name string) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	board := i.latest.Load()
+	if i.held == nil || board == nil {
+		return nil
+	}
+	failure, err := scenario.NewPodFailure(*board, name)
+	if err != nil {
+		return nil
+	}
+
+	lost, err := i.held.provisioned.LosePod(i.held.ctx, failure.Name())
+	if err != nil {
+		return fmt.Errorf("lose the Pod %s clicked: %w", name, err)
+	}
+	if lost {
+		i.reportWhen(Step{Kind: WhenStep, Name: "Pod " + failure.BoardName() + " is lost"})
+	}
+
+	return nil
+}
+
+// stopping and restoring are called under mu, and clicked names the Node or
+// Zone as its When does.
+func (i *Injector) stopping(nodes []string, clicked string) error {
+	if err := i.held.stop(nodes); err != nil {
+		return err
+	}
+	i.reportWhen(Step{Kind: WhenStep, Name: clicked + " stops responding"})
+
+	return nil
+}
+
+func (i *Injector) restoring(nodes []string, clicked string) error {
+	if err := i.held.restore(nodes); err != nil {
+		return err
+	}
+	i.reportWhen(Step{Kind: WhenStep, Name: clicked + " responds again"})
+
+	return nil
+}
+
+// stop keeps every Node it stopped among the stopped, even where a later one
+// fails, so a further click makes it respond again rather than stopping it.
+func (h *heldCluster) stop(nodes []string) error {
+	for _, node := range nodes {
+		if err := h.provisioned.FailNode(h.ctx, node); err != nil {
+			return fmt.Errorf("stop Node %s responding: %w", node, err)
+		}
+		h.stopped = append(h.stopped, node)
+	}
+
+	return nil
+}
+
+// restore takes every Node it made respond again out of the stopped, even
+// where a later one fails, so a further click stops it rather than restoring it.
+func (h *heldCluster) restore(nodes []string) error {
+	for _, node := range nodes {
+		if err := h.provisioned.RestoreNode(h.ctx, node); err != nil {
+			return fmt.Errorf("make Node %s respond again: %w", node, err)
+		}
+		h.stopped = slices.DeleteFunc(h.stopped, func(stopped string) bool { return stopped == node })
+	}
+
+	return nil
 }
 
 func (r *Runner) runNamed(ctx context.Context, name string, steps func(*Scenario)) (Outcome, error) {
@@ -312,7 +489,7 @@ func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario
 		running.haltsAtTheFirstWhen = true
 		// Deferred after the removal, so it runs before it: no observation
 		// reaches a removed cluster.
-		defer held.observer.observe(ctx, provisioned, &running.published)()
+		defer held.observer.observe(ctx, provisioned, &running.published, held.injector.observed)()
 	}
 	steps(running)
 
@@ -323,8 +500,11 @@ func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario
 	reported.FiledAt, reported.NotFiled = filed.Path(), filed.Err()
 
 	if held != nil {
-		held.reported(reported)
+		held.injector.takeFailures(
+			&heldCluster{ctx: ctx, provisioned: provisioned, topology: running.topology, stopped: slices.Clone(running.failed)},
+			func() { held.reported(reported) })
 		<-ctx.Done()
+		held.injector.stopTakingFailures()
 	}
 
 	return reported, nil
@@ -335,7 +515,7 @@ func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario
 // Topology is declared nothing is handed over, and each board marks its
 // newcomers against the one before.
 func (o Observer) observe(ctx context.Context, provisioned *cluster.SimulatedCluster,
-	declared *atomic.Pointer[scenario.Topology],
+	declared *atomic.Pointer[scenario.Topology], latest func(scenario.PlacementBoard),
 ) (stop func()) {
 	observing, stopObserving := context.WithCancel(ctx)
 	var ended sync.WaitGroup
@@ -365,6 +545,7 @@ func (o Observer) observe(ctx context.Context, provisioned *cluster.SimulatedClu
 				continue
 			}
 			previous = scenario.NewPlacementBoard(*topology, placed, previous)
+			latest(previous)
 			o.Observed(previous, nil)
 		}
 	})

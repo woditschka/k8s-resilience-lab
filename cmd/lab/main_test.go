@@ -20,6 +20,7 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab"
+	"github.com/woditschka/k8s-resilience-lab/internal/live"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 	"github.com/woditschka/k8s-resilience-lab/scenarios"
 )
@@ -1399,4 +1400,31 @@ func TestArgumentsNamingOneScenarioWithInteractive_ShouldCarryTheScenarioNameInt
 			expect.Expect(t, setting.heldName).To(expect.Equal(tc.want))
 		})
 	}
+}
+
+const aKindOfFailureTheLabDoesNotInject live.FailureKind = "rack"
+
+const anyNameClicked = "zone-1-node-1"
+
+// The Live view hands over its closed set alone, so a kind beyond it is a
+// defect that names itself rather than a click silently dropped.
+func TestAClickedFailureOfAKindTheLabDoesNotInject_ShouldBeRefusedNamingTheKind(t *testing.T) {
+	notHolding := lab.NewInjector(func(lab.Step) {})
+
+	err := injected(notHolding, live.Failure{Kind: aKindOfFailureTheLabDoesNotInject, Name: anyNameClicked})
+
+	expect.Expect(t, err != nil && strings.Contains(err.Error(), string(aKindOfFailureTheLabDoesNotInject))).To(expect.Equal(true))
+}
+
+// A run prints its When inside the Scenario's part, so the clicked When is
+// held to the line that part gives the same Step.
+func TestAClickedWhenInTheTerminal_ShouldStandIndentedAsARunsWhenDoes(t *testing.T) {
+	clicked := lab.Step{Kind: lab.WhenStep, Name: "Node " + anyNameClicked + " stops responding"}
+	var asARunPrintsIt reportPart
+	writeSteps(&asARunPrintsIt, lab.Outcome{Steps: []lab.Step{clicked}})
+	var reported bytes.Buffer
+
+	(&runReport{to: &reported}).printWhen(clicked)
+
+	expect.Expect(t, reported.String()).To(expect.Equal(asARunPrintsIt[0] + "\n"))
 }

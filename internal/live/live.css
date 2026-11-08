@@ -230,3 +230,8 @@ h1 {
 .not-observed {
   color: var(--not-ready);
 }
+
+/* A click on a box injects its Failure, so the box shows it takes one. */
+[data-failure] {
+  cursor: pointer;
+}

@@ -114,8 +114,13 @@ func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, r
 		return err
 	}
 
+	// The When of a click prints under the Injector's lock, so it never
+	// interleaves with the Outcome or another When.
+	injector := lab.NewInjector(reported.printWhen)
 	view := live.NewView()
-	server, err := live.Listen(ctx, view, asked.heldName)
+	server, err := live.Listen(ctx, view, asked.heldName, func(clicked live.Failure) error {
+		return injected(injector, clicked)
+	})
 	if err != nil {
 		return err
 	}
@@ -123,7 +128,7 @@ func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, r
 	opening.addf("Live view:          %s", server.Address())
 	reported.printPart(opening)
 
-	held, err := runner.Hold(ctx, asked.held, lab.Observer{Every: live.RefreshInterval, Observed: view.Observed},
+	held, err := runner.Hold(ctx, asked.held, lab.Observer{Every: live.RefreshInterval, Observed: view.Observed}, injector,
 		func(outcome lab.Outcome) {
 			var part reportPart
 			writeOutcome(&part, outcome, asked)
@@ -135,6 +140,21 @@ func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, r
 	}
 
 	return errors.Join(notFiled(held), didNotHold(held), closed, reported.err)
+}
+
+// injected hands a click the Live view took to the held run by its kind, which
+// the Live view's closed set guarantees is one of the three.
+func injected(injector *lab.Injector, clicked live.Failure) error {
+	switch clicked.Kind {
+	case live.NodeFailure:
+		return injector.ClickNode(clicked.Name)
+	case live.ZoneFailure:
+		return injector.ClickZone(clicked.Name)
+	case live.PodFailure:
+		return injector.LosePod(clicked.Name)
+	}
+
+	return fmt.Errorf("the Live view handed over a Failure of the kind %q, which the lab does not inject", clicked.Kind)
 }
 
 type runSetting struct {
@@ -385,6 +405,12 @@ func (r *runReport) printPart(part reportPart) {
 func (r *runReport) printBelowAHeavierSeparator(part reportPart) {
 	r.printf("%s\n", strings.Repeat(heavierSeparatorRune, max(r.lastWidth, part.width())))
 	r.printPart(part)
+}
+
+// printWhen prints a clicked When with the indent writeSteps gives a run's, so
+// it reads as one more Step of the held Scenario.
+func (r *runReport) printWhen(when lab.Step) {
+	r.printf("  %s\n", when)
 }
 
 func (r *runReport) printf(format string, args ...any) {

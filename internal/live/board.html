@@ -3,11 +3,11 @@
 {{- else -}}
 <div class="board">
   {{- range .Zones -}}
-  <section class="zone" id="{{.ID}}">
+  <section class="zone" id="{{.ID}}" data-failure="{{.Failure}}">
     <h2 class="zone-name">{{.Name}}</h2>
     <div class="nodes">
       {{- range .Nodes -}}
-      <article class="node {{.Readiness.Class}}" id="{{.ID}}">
+      <article class="node {{.Readiness.Class}}" id="{{.ID}}" data-failure="{{.Failure}}">
         <header class="node-header">
           <h3 class="node-name">{{.Name}}</h3>
           <span class="readiness">{{.Readiness.Word}}</span>
@@ -44,5 +44,5 @@
 {{- end -}}
 
 {{- define "pod" -}}
-<li class="pod {{.Readiness.Class}}{{if .Fade}} newcomer{{end}}" id="{{.ID}}"{{if .Fade}} data-fade="{{.Fade}}"{{end}}><header class="pod-header"><span class="pod-name">{{.Name}}</span><span class="readiness">{{.Readiness.Word}}</span></header><span class="pod-requests">requests cpu {{.CPU}} memory {{.Memory}}</span></li>
+<li class="pod {{.Readiness.Class}}{{if .Fade}} newcomer{{end}}" id="{{.ID}}"{{with .Failure}} data-failure="{{.}}"{{end}}{{if .Fade}} data-fade="{{.Fade}}"{{end}}><header class="pod-header"><span class="pod-name">{{.Name}}</span><span class="readiness">{{.Readiness.Word}}</span></header><span class="pod-requests">requests cpu {{.CPU}} memory {{.Memory}}</span></li>
 {{- end -}}
