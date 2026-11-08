@@ -450,9 +450,9 @@ Each name a Scenario writes shows its subject, a Pod, a Node, or the Scenario wi
 ### Watching a Scenario live
 
 <a id="req-sim-022"></a>
-An engineer starts an Interactive run naming one Scenario and opens its Live view in a browser `[REQ-SIM-022]`. Its Steps run up to its first When, reporting as in a run, and its Simulated Cluster is then held until the lab stops `[REQ-SIM-022]`. The Live view shows that cluster alone and changes nothing in it `[REQ-SIM-022]`.
+An engineer starts an Interactive run naming one Scenario and opens its Live view in a browser `[REQ-SIM-022]`. Its Steps run up to its first When, reporting as in a run, and its Simulated Cluster is then held until the lab stops `[REQ-SIM-022]`. The Live view shows that cluster alone, and changes it only by a Failure an engineer injects there `[REQ-SIM-022]`.
 
-The Live view draws each Zone as a box of its Nodes and each Node as a box of its Pods, Pending Pods apart `[REQ-SIM-022]`. A Node shows its NodePool, Node labels, capacity, requests and what is left, and a Pod its Request `[REQ-SIM-022]`. A Node's or Pod's box gives its name and whether it is Ready on its first line, and the page header names k8s-resilience-lab and the Scenario `[REQ-SIM-022]`. Every open Live view follows each change as the lab observes it `[REQ-SIM-022]`.
+It draws each Zone, Node and Pod as a box, and every open Live view follows each change as the lab observes it `[REQ-SIM-022]`.
 
 **Done when:**
 
@@ -464,7 +464,7 @@ The Live view draws each Zone as a box of its Nodes and each Node as a box of it
 - `[REQ-SIM-022]` given an Interactive run naming a Scenario, when the page header is read, then it names k8s-resilience-lab, a separator such as a hyphen, then the Scenario name.
 - `[REQ-SIM-022]` given a Node or a placed Pod, when its box is read, then its first line gives its name and, at the top right, whether it is Ready by colour and word. A Pod's requests stand beneath, its box as wide as its Node's. A Pod new on its Node is marked as a Placement board marks it, and the mark fades.
 - `[REQ-SIM-022]` given a narrow window, or a system set to light or dark, when the Live view is read, then it fits the window and follows that setting, loading nothing from another host.
-- `[REQ-SIM-022]` given those Steps have run, when the engineer watches, then the cluster stays as they left it until the engineer stops the lab, removing it.
+- `[REQ-SIM-022]` given those Steps have run and no Failure is injected, when the engineer watches, then the cluster stays as they left it until the engineer stops the lab, removing it.
 - `[REQ-SIM-022]` given every Scenario of the lab, when a run carries it out, then it reaches the outcome it asserted before.
 
 <a id="req-sim-023"></a>
@@ -489,6 +489,31 @@ The Live view draws each Zone as a box of its Nodes and each Node as a box of it
 
 **Design:** [system-design.md](system-design.md)
 
+### Injecting a Failure from the Live view
+
+<a id="req-sim-028"></a>
+An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inject a Failure and watch the cluster react, and the terminal reports it as a When `[REQ-SIM-028]`. A second click on a stopped Node or Zone makes it respond again, and a lost Pod has no recovery `[REQ-SIM-028]`.
+
+**Done when:**
+
+- `[REQ-SIM-028]` given a held cluster, when a Node's box is clicked, then that Node stops responding as in a Node Failure, with no confirmation asked.
+- `[REQ-SIM-028]` given a held cluster, when a Zone's box is clicked, then all its Nodes stop responding at once, as in a Zone Failure.
+- `[REQ-SIM-028]` given a held cluster, when a placed Pod's box is clicked, then that Pod is gone and its Deployment replaces it.
+- `[REQ-SIM-028]` given a click, when the terminal is read, then one When names what changed, such as "When Node worker-2 stops responding", "When Zone zone-a stops responding" or "When Pod checkout-abc12 is lost".
+- `[REQ-SIM-028]` given a click, when its When is read, then it stands indented as a run's When does, and names a Pod as the Live view shows it.
+- `[REQ-SIM-028]` given a held cluster, when a Pending Pod or any other part of the page is clicked, then the cluster and the terminal are unchanged.
+- `[REQ-SIM-028]` given a stopped Node, or a Zone whose every Node stopped, when its box is clicked, then they respond again. The When reads, for example, "When Node worker-2 responds again" or "When Zone zone-a responds again".
+- `[REQ-SIM-028]` given one Node of a stopped Zone, when its box is clicked, then it alone responds again.
+
+**Edge cases:**
+
+1. A click while the Steps still run changes nothing.
+2. A Zone with only some Nodes stopped. A click stops the others.
+3. A placed Pod on a stopped Node. A click loses it all the same.
+4. A Node that responds again after a click. A further click stops it once more.
+
+**Design:** [system-design.md](system-design.md)
+
 ## Superseded
 
 <!-- Retired requirements: each ID maps to its successor (or to the reason it was withdrawn) so existing links still resolve. Keep this a list, so every retired ID stays in a list item. -->
@@ -500,7 +525,7 @@ The Live view draws each Zone as a box of its Nodes and each Node as a box of it
 <!-- Unresolved product questions. Each resolves into a requirement, a non-goal, or an ADR. -->
 
 - Whether the lab scripts a Failure over time, such as a Pod dying after a delay, at the cost of a second injection surface.
-- What an engineer's action on a Node or Pod in the Live view means, and whether a Failure injected there joins the Timeline as a When does.
+- Whether a Failure injected from the Live view joins the Timeline as a When does.
 - Whether the Live view's Timeline sets a Wait narrative's moments apart from other Entries.
 - Whether the Live view is reachable from another machine.
 - How long a Timeline file is kept, and whether the lab ever removes one.
