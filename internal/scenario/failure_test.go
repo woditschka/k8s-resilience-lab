@@ -171,3 +171,112 @@ func TestAZoneFailure_ShouldRefuseACountItsTopologyCannotSatisfy(t *testing.T) {
 		})
 	}
 }
+
+const (
+	aNameTheTopologyDoesNotDerive = "zone-9-node-9"
+	// onAnyNode is irrelevant to a Pod's name, which is all a Pod Failure reads.
+	onAnyNode = ""
+)
+
+func TestANodeFailureNamingANodeOfItsTopology_ShouldStopThatNodeAlone(t *testing.T) {
+	declared := aTopologyOfTwoZones(t)
+	named := declared.Nodes()[everyNode-1].Name
+
+	failure, err := scenario.NewNodeFailureNaming(declared, named)
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, failure.Names()).To(expect.Equal([]string{named}))
+}
+
+func TestAZoneFailureNamingAZoneOfItsTopology_ShouldStopEveryNodeOfThatZoneAlone(t *testing.T) {
+	declared := aTopologyOfTwoZones(t)
+	named := declared.Zones()[everyZone-1]
+
+	failure, err := scenario.NewZoneFailureNaming(declared, named)
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, [][]string{failure.Names(), failure.NodeNames()}).
+		To(expect.Equal([][]string{{named}, nodeNamesOfZone(declared, named)}))
+}
+
+func TestAFailureNamingANodeOrZoneItsTopologyDoesNotDerive_ShouldBeRefusedNamingWhatItHolds(t *testing.T) {
+	declared := aTopologyOfTwoZones(t)
+	_, nodeRefused := scenario.NewNodeFailureNaming(declared, aNameTheTopologyDoesNotDerive)
+	_, zoneRefused := scenario.NewZoneFailureNaming(declared, aNameTheTopologyDoesNotDerive)
+
+	expect.Expect(t, []bool{
+		nodeRefused != nil && strings.Contains(nodeRefused.Error(), declared.Nodes()[0].Name),
+		zoneRefused != nil && strings.Contains(zoneRefused.Error(), declared.Zones()[0]),
+	}).To(expect.Equal([]bool{true, true}))
+}
+
+// A Zone some of whose Nodes already stopped still has the others to stop.
+func TestAZoneFailure_ShouldGiveTheNodesOfItsZoneNotYetStoppedInTopologyOrder(t *testing.T) {
+	declared := aTopologyOfTwoZones(t)
+	zone := declared.Zones()[0]
+	ofTheZone := nodeNamesOfZone(declared, zone)
+	failure, err := scenario.NewZoneFailureNaming(declared, zone)
+	if err != nil {
+		t.Fatalf("build a Failure of the Zone %s: %v", zone, err)
+	}
+
+	stillResponding := failure.NodeNamesStillResponding(ofTheZone[:1])
+
+	expect.Expect(t, stillResponding).To(expect.Equal(ofTheZone[1:]))
+}
+
+func nodeNamesOfZone(topology scenario.Topology, zone string) []string {
+	var names []string
+	for _, node := range topology.Nodes() {
+		if node.Zone == zone {
+			names = append(names, node.Name)
+		}
+	}
+
+	return names
+}
+
+func aBoardOfOnePlacedAndOnePendingPod(t *testing.T) scenario.PlacementBoard {
+	t.Helper()
+
+	declared := aTopologyOfTwoZones(t)
+	pods := []scenario.Pod{
+		aPodOf(webDeployment, firstWebSuffix, declared.Nodes()[0].Name),
+		anUnplacedPodOf(webDeployment, pendingWebSuffix),
+	}
+
+	return scenario.NewPlacementBoard(declared, observedOn(declared, pods), scenario.PlacementBoard{})
+}
+
+func TestAPodFailureNamingAPlacedPodOfTheBoard_ShouldLoseThatPod(t *testing.T) {
+	placed := aPodOf(webDeployment, firstWebSuffix, onAnyNode).Name
+
+	failure, err := scenario.NewPodFailure(aBoardOfOnePlacedAndOnePendingPod(t), placed)
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, failure.Name()).To(expect.Equal(placed))
+}
+
+func TestAClickedPodFailuresWhen_ShouldNameThePodByDeploymentNameAndOwnSuffix(t *testing.T) {
+	placed := aPodOf(webDeployment, firstWebSuffix, onAnyNode).Name
+
+	failure, err := scenario.NewPodFailure(aBoardOfOnePlacedAndOnePendingPod(t), placed)
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, failure.BoardName()).To(expect.Equal(webDeployment + "-" + firstWebSuffix))
+}
+
+func TestAPodFailureNamingAPendingPodOrOneTheBoardDoesNotHold_ShouldBeRefused(t *testing.T) {
+	refusals := map[string]string{
+		"a Pending Pod":                 anUnplacedPodOf(webDeployment, pendingWebSuffix).Name,
+		"a Pod the board does not hold": aPodOf(batchDeployment, firstBatchSuffix, onAnyNode).Name,
+	}
+
+	for refused, named := range refusals {
+		t.Run(refused, func(t *testing.T) {
+			_, err := scenario.NewPodFailure(aBoardOfOnePlacedAndOnePendingPod(t), named)
+
+			expect.Expect(t, err != nil && strings.Contains(err.Error(), named)).To(expect.Equal(true))
+		})
+	}
+}

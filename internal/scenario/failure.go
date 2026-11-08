@@ -29,6 +29,20 @@ func NewNodeFailure(topology Topology, count int) (NodeFailure, error) {
 	return NodeFailure{nodes: slices.Clone(derived[:count])}, nil
 }
 
+// NewNodeFailureNaming stops the one Node named, as an engineer points at it in
+// the Live view. A name the Topology does not derive is refused, naming the
+// Nodes it does hold.
+func NewNodeFailureNaming(topology Topology, name string) (NodeFailure, error) {
+	derived := topology.Nodes()
+	at := slices.IndexFunc(derived, func(node Node) bool { return node.Name == name })
+	if at < 0 {
+		return NodeFailure{}, fmt.Errorf("the Topology holds the Nodes %s, so a Failure of the Node %q is refused",
+			strings.Join(namesOf(derived), ", "), name)
+	}
+
+	return NodeFailure{nodes: []Node{derived[at]}}, nil
+}
+
 func (f NodeFailure) Names() []string {
 	return namesOf(f.nodes)
 }
@@ -130,6 +144,19 @@ func NewZoneFailure(topology Topology, count int) (ZoneFailure, error) {
 	return ZoneFailure{zones: slices.Clone(stopping), nodes: nodesIn(topology, stopping)}, nil
 }
 
+// NewZoneFailureNaming stops every Node of the one Zone named, as an engineer
+// points at it in the Live view. A name the Topology does not derive is
+// refused, naming the Zones it does hold.
+func NewZoneFailureNaming(topology Topology, zone string) (ZoneFailure, error) {
+	derived := topology.Zones()
+	if !slices.Contains(derived, zone) {
+		return ZoneFailure{}, fmt.Errorf("the Topology holds the Zones %s, so a Failure of the Zone %q is refused",
+			strings.Join(derived, ", "), zone)
+	}
+
+	return ZoneFailure{zones: []string{zone}, nodes: nodesIn(topology, []string{zone})}, nil
+}
+
 func (f ZoneFailure) Names() []string {
 	return slices.Clone(f.zones)
 }
@@ -138,10 +165,51 @@ func (f ZoneFailure) NodeNames() []string {
 	return namesOf(f.nodes)
 }
 
+// NodeNamesStillResponding leaves out the Nodes already stopped, since a Zone
+// stops responding once every Node of it has, whichever stopped first.
+func (f ZoneFailure) NodeNamesStillResponding(stopped []string) []string {
+	return slices.DeleteFunc(namesOf(f.nodes), func(name string) bool { return slices.Contains(stopped, name) })
+}
+
 // Equal is the equality go-cmp compares through, since the type's fields are
 // unexported.
 func (f ZoneFailure) Equal(other ZoneFailure) bool {
 	return slices.Equal(f.zones, other.zones) && slices.EqualFunc(f.nodes, other.nodes, Node.Equal)
+}
+
+// PodFailure is the one placed Pod a Failure loses, resolved against the board
+// an engineer clicked, since a Pod's name is the control plane's and only an
+// observation holds it.
+type PodFailure struct {
+	pod BoardPod
+}
+
+// NewPodFailure refuses a Pod the board holds unplaced, or not at all, naming
+// it, since only a placed Pod's box takes a click.
+func NewPodFailure(board PlacementBoard, name string) (PodFailure, error) {
+	named := func(pod BoardPod) bool { return pod.Name == name }
+	for _, zone := range board.Zones() {
+		for _, node := range zone.Nodes {
+			if at := slices.IndexFunc(node.Pods, named); at >= 0 {
+				return PodFailure{pod: node.Pods[at]}, nil
+			}
+		}
+	}
+	if slices.ContainsFunc(board.Unplaced(), named) {
+		return PodFailure{}, fmt.Errorf("the Pod %s is Pending on no Node, so a Failure of it is refused", name)
+	}
+
+	return PodFailure{}, fmt.Errorf("the Placement board holds no Pod %s, so a Failure of it is refused", name)
+}
+
+// Name is the control plane's name of the Pod, which a delete takes.
+func (f PodFailure) Name() string {
+	return f.pod.Name
+}
+
+// BoardName is how the Live view and a board name the Pod lost.
+func (f PodFailure) BoardName() string {
+	return f.pod.BoardName()
 }
 
 func nodesIn(topology Topology, zones []string) []Node {
