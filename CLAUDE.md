@@ -1,4 +1,4 @@
-<!-- harness: 2026-10-08 -->
+<!-- harness: 2026-11-04 -->
 # CLAUDE.md
 
 This file provides guidance to Claude Code when working with code in this repository.
@@ -30,7 +30,7 @@ For the harness shape — the four nested loops, the slice definition, agent rol
 
 Mid-slice, run `python3 scripts/handoff.py route` after each dispatch returns and follow its decision. A dispatch returns when the agent's completion arrives, never when the tool call does: a background agent still running means the turn is not over. The JSON names the decision kind (`dispatch`, `blocked`, `escalate`), the next agent(s), the matched `rule`, and the context to relay; `blocked` always halts for a human. Dispatch the `pipeline-coordinator` only for `escalate` decisions and for classifying an untriaged fresh request — never for a transition `route` already decided. A pick the `next` skill already triaged — `route`'s `no-active-slice` escalate included — records its `intake-decision` and follows the `intake-ready` dispatch. A recovery dispatch assembles its prompt from the section the `handoff-routing` skill § Handoff Conditions maps to the decision's `rule`; a reviewer dispatch carries a paste-ready `prompt_note` — append it verbatim as the prompt's final sentence, composing no round context. A `process-findings` decision with `halt_after: true` halts after the dispatch returns (`handoff-routing` § Blocking). For direct invocation when the target agent is known, use the agent selection table in the `handoff-routing` skill.
 
-**Discussions run in root.** A feature or architecture discussion is a conversation, and subagents cannot converse — root conducts it per `agentic-harness.md` § Conversations Stay in Root (the `handoff-routing` skill). Slice intake runs under the `intake` skill and exits by recording an `intake-decision` — the owner's request and decisions, quoted verbatim. `route` then dispatches the product expert on the record, even when recorded non-goals make the outcome look foregone. Root relays and quotes; it never authors a product or design statement. A specialist can open one mid-dispatch: a `consultation-request` targeting `human` halts the pipeline (`human-consultation`) until root records the human's answer as the `consultation-response`. A scope question never ends the session in prose. When no reply can arrive — or when unsure — record and proceed: fresh intake seeds an `intake-decision` from the request as stated; a mid-slice question dispatches the owning expert with the question as stated. A conflict pauses as its recorded `consultation-request`, never an unrecorded refusal. The shortcut covers questions, never answers: root never authors a `consultation-response`, and `author: "human"` marks a human's actual words. Absent a reply, the recorded pause is the session's correct end. The seed license lapses while a `consultation-request` targeting `human` is pending: that pause resolves only through the human's reply, never through a re-seeded intake. An answer that only restates the request decides nothing — the request is never the override.
+**Discussions run in root.** A feature or architecture discussion is a conversation, and subagents cannot converse — root conducts it per `agentic-harness.md` § Conversations Stay in Root (the `handoff-routing` skill). Slice intake runs under the `intake` skill and exits by recording an `intake-decision` — the owner's request and decisions, quoted verbatim. A design discussion loads `design-validation` directly. `route` then dispatches the product expert on the record, even when recorded non-goals make the outcome look foregone. Root relays and quotes; it never authors a product or design statement. A specialist can open one mid-dispatch: a `consultation-request` targeting `human` halts the pipeline (`human-consultation`) until root records the human's answer as the `consultation-response`. When the intake recorded the owner absent (`owner_present: false`), `route` resumes the requester on the recorded decisions instead (`owner-absent`), once; root relays the decisions and composes no answer. A scope question never ends the session in prose. When no reply can arrive — or when unsure — record and proceed: fresh intake seeds an `intake-decision` from the request as stated; a mid-slice question dispatches the owning expert with the question as stated. A conflict pauses as its recorded `consultation-request`, never an unrecorded refusal. The shortcut covers questions, never answers: root never authors a `consultation-response`, and `author: "human"` marks a human's actual words. Absent a reply, the recorded pause is the session's correct end. The seed license lapses while a `consultation-request` targeting `human` is pending: that pause resolves only through the human's reply, never through a re-seeded intake. An answer that only restates the request decides nothing — the request is never the override.
 
 **Skip agents for** work that leaves no pipeline artifact to audit: git operations, one-off commands, answering questions about the codebase. A scope decline is never artifact-less: the expert's `consultation-request` is the deliverable, so the conflict dispatches rather than ends the session. **Use review agents for** formal code reviews: "review changes" or "review code" triggers the review agents, never direct implementation.
 
@@ -46,7 +46,7 @@ Orchestrator prose is cache-written once, then cache-read on every later turn �
 - **One line per routine hop.** Name the dispatch and its reason, take it, report the result.
 - **Drop the filler.** Cut preambles ("Now let me…") and recaps of state already visible in the transcript.
 
-Trimming covers connective prose, never content a hop exists to deliver. The human-facing surface stays in full: every non-`approved` verdict with its findings, the verbatim change-grade relay, the implementation plan, decision rationale, and `AskUserQuestion` gates.
+Trimming covers connective prose, never content a hop exists to deliver. The human-facing surface stays in full: every non-`approved` verdict with its findings, the verbatim change-grade relay, decision rationale, and `AskUserQuestion` gates.
 
 ### Confirmation Discipline
 
@@ -60,6 +60,8 @@ CLAUDE.md is the legitimate channel for pre-authorizing routine activity, and pi
 - A second consecutive review failure on the same slice.
 - Edits to durable instructions (`CLAUDE.md`, `docs/`, the harness's agents and skills) that are *not* the active slice's declared implementation target.
 - The user's previous message contains a question, doubt, or disagreement — answer it before proceeding.
+
+The pipeline-verdict and review-failure pauses wait for a present owner. When the slice's `intake-decision` carries `owner_present: false`, they do not pause: the engine's ceilings decide (three fix rounds, the critical-only bar, non-convergence), and the run records its open points. The pauses on outward-facing actions, destructive git, and durable instructions stand regardless.
 
 **Do not pause for:**
 
@@ -75,7 +77,7 @@ CLAUDE.md is the legitimate channel for pre-authorizing routine activity, and pi
 The Claude Code SDK caps assistant messages at a fixed number of tool calls per dispatch. A dispatch that reaches the cap **truncates and stops**. A cap-hit is a length signal, not a scope verdict: recovery continues the same slice, cheapest first:
 
 - A bare `continue` resume of the stopped subagent (§ Agent teams and the continue hook) — context intact; the fast-path when the runtime offers it.
-- A fresh re-dispatch from the partial-artifact checkpoint.
+- A fresh re-dispatch from a red checkpoint's partial-artifact record.
 - A fresh re-dispatch with no checkpoint — the dispatch re-derives progress from the working tree and the inbound records.
 
 Do not narrate "Truncated at N tool calls. Continuing." — recovery runs through these mechanisms, not prose. Re-split is reserved for a slice that spans more than one behavior; non-convergent continuation escalates to re-triage.
@@ -83,7 +85,7 @@ Do not narrate "Truncated at N tool calls. Continuing." — recovery runs throug
 **Rule:** When a task plausibly needs many tool calls in one turn, dispatch a subagent up front. Prefer the most specific persona that fits: `Explore` for code search beyond a couple of targeted lookups, or a specialist from the `handoff-routing` table. `general-purpose` is dispatched only when **both** hold:
 
 1. **No named persona fits.** Walk the built-ins and the project agents (the `handoff-routing` skill's `agentic-harness.md` § Specialist Agents). A recurring `general-purpose` shape signals extracting a dedicated agent, not re-use.
-2. **The Scoping Pre-Check is written into the dispatch prompt** — the tool-call estimate and one named checkpoint milestone.
+2. **The Scoping Pre-Check is written into the dispatch prompt** — the tool-call estimate and, where the role's contract names one, the checkpoint milestone.
 
 Per-role budgets and the Scoping Pre-Check / Partial-Artifact Contract are owned elsewhere: each agent's `toolCallBudget` front-matter, and the `tdd-workflow` and `review-workflow` skills. Do not restate the numbers or record shapes here.
 
@@ -119,7 +121,8 @@ Pipeline logic lives in skills, not in agent definitions. All three tools read t
 | `derive-briefs` | Draft the `docs/` briefs by surveying an existing codebase, marking every statement derived, confirmed, or not recoverable |
 | `audit-docs` | Audit `docs/` against the high bar — runs the doctor (structure) then the advisory judgment review, each doc individually and cross-document |
 | `ship` | Run quality gate, commit, and push in one step |
-| `next` | Reset scratch and recommend the next PRD requirement to tackle |
+| `prepare-ship` | Close a feature before it ships. Draft ADRs, those not yet on the default branch, fold into one per decision; unpushed commits regroup into one per concern after one confirmation; the whole-feature review closes it. Never rewrites a commit a remote holds, never pushes |
+| `next` | Reset scratch and rank the next requirement from the PRD, git history, and the tracker connector |
 
 This table is the stack-agnostic core. When a stack ships its own skills (for example an IDE oracle), the project CLAUDE.md catalogues them in a **Stack-specific skills** chapter; they sit in the same skill directory.
 
@@ -225,6 +228,8 @@ Before code review, run `make ci`. All checks (tidy-check, fmt-check, vet, lint,
 ## Documentation Updates
 
 When changing the codebase, follow the Maintenance Rules in the `doc-sync` skill and the Prohibited Patterns in the `document-writing` skill.
+
+## Project Documentation Rules
 
 **Decision log.** An ADR records one architectural decision: the options weighed, the one taken and why. A small decision, such as the wording or layout of one element, updates a sentence or two in the document that owns it and gets no ADR. The log stays at or below 20 ADRs. When a later decision supersedes or amends an earlier one, it is folded into the ADR that holds the final decision rather than filed beside it: the final state stands in Decision and the options set aside stay listed, with no trail of the forms that never shipped. A separate ADR is for a new decision, never for a change to an existing one. ADRs are read by people deciding, not by code: no source file, test or config cites one.
 
