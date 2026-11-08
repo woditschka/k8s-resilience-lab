@@ -597,6 +597,90 @@ func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheCont
 	expectReported(t, recorded, pending[0].Name, podSchedulingFailed)
 }
 
+// Each Node has room for one Pod, so the Pod the Failure left Pending can run
+// on the restored Node alone. Its running there proves the Node Ready,
+// untainted and maintained again: the scheduler places no Pod on a Node
+// tainted unreachable, and only the KWOK controller starts a Pod on a Node.
+func TestANodeRestoredAfterItStoppedResponding_ShouldBeReadyUntaintedAndMaintainedAgain(t *testing.T) {
+	t.Parallel()
+	provisioned, _ := aProvisionedCluster(t)
+	topology := aTopologyOfTwoNodesHoldingOnePod(t)
+	deployment := aDeploymentDeclaring(t, twoPods, resilientPlacement(t))
+	restored := theFirstNodeOf(topology)
+	settleInto(t, provisioned, topology, deployment)
+	if err := provisioned.FailNode(t.Context(), restored); err != nil {
+		t.Fatalf("stop Node %s responding: %v", restored, err)
+	}
+	if _, err := provisioned.AwaitSettled(t.Context(), deployment); err != nil {
+		t.Fatalf("await the Placement settling after the Failure: %v", err)
+	}
+
+	if err := provisioned.RestoreNode(t.Context(), restored); err != nil {
+		t.Fatalf("make Node %s respond again: %v", restored, err)
+	}
+
+	ready, err := provisioned.AwaitPodsReady(t.Context(), deployment)
+	if err != nil {
+		t.Fatalf("await the Pod left Pending running on the restored Node %s: %v", restored, err)
+	}
+	expect.Expect(t, readinessOf(theNodeNamed(t, provisioned, restored))).To(expect.Equal(scenario.NodeReady))
+	expect.Expect(t, ready.PodsPerNode()[restored]).To(expect.Equal(roomForOnePod))
+}
+
+// A Pod on a Node that stopped responding is the case a graceful delete would
+// leave Terminating, since no kubelet confirms it stopped.
+func TestAPodLostOnANodeThatStoppedResponding_ShouldBeGoneAndReplacedByItsDeployment(t *testing.T) {
+	t.Parallel()
+	provisioned, _ := aProvisionedCluster(t)
+	topology, deployment := aTopologyOfOneZone(t), aDeploymentDeclaring(t, threePods, resilientPlacement(t))
+	stopped := theFirstNodeOf(topology)
+	settleInto(t, provisioned, topology, deployment)
+	lost := thePodPlacedOn(t, provisioned, deployment, stopped)
+	if err := provisioned.FailNode(t.Context(), stopped); err != nil {
+		t.Fatalf("stop Node %s responding: %v", stopped, err)
+	}
+
+	gone, err := provisioned.LosePod(t.Context(), lost)
+	if err != nil {
+		t.Fatalf("lose the Pod %s: %v", lost, err)
+	}
+
+	replaced, err := provisioned.AwaitPodsReady(t.Context(), deployment)
+	if err != nil {
+		t.Fatalf("await the Deployment %s replacing the Pod %s: %v", deployment.Name(), lost, err)
+	}
+	expect.Expect(t, gone).To(expect.Equal(true))
+	expect.Expect(t, replaced.Pods()).To(expect.HaveLen[scenario.Pod](threePods))
+	expect.Expect(t, slices.Contains(podNamesOf(replaced.Pods()), lost)).To(expect.Equal(false))
+}
+
+const aPodTheClusterNeverHeld = "checkout-5fc87ff7c8-n0n3x"
+
+func TestLosingAPodTheClusterDoesNotHold_ShouldLoseNothing(t *testing.T) {
+	t.Parallel()
+	provisioned, _ := aProvisionedCluster(t)
+
+	gone, err := provisioned.LosePod(t.Context(), aPodTheClusterNeverHeld)
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, gone).To(expect.Equal(false))
+}
+
+func thePodPlacedOn(t *testing.T, provisioned *SimulatedCluster, deployment scenario.Deployment, node string) string {
+	t.Helper()
+
+	observed, err := provisioned.Observe(t.Context(), deployment)
+	if err != nil {
+		t.Fatalf("observe the Deployment %s: %v", deployment.Name(), err)
+	}
+	at := slices.IndexFunc(observed.Pods(), func(pod scenario.Pod) bool { return pod.Node == node })
+	if at < 0 {
+		t.Fatalf("no Pod of the Deployment %s is placed on Node %s", deployment.Name(), node)
+	}
+
+	return observed.Pods()[at].Name
+}
+
 func TestAWaitForEveryPodOfADeployedDeployment_ShouldReachThePlacementWithEveryPodReady(t *testing.T) {
 	t.Parallel()
 	provisioned, _ := aProvisionedCluster(t)

@@ -402,6 +402,32 @@ func withoutTheKWOKMarking(labelled map[string]string) map[string]string {
 	return unmarked
 }
 
+func withTheKWOKMarking(labelled map[string]string) map[string]string {
+	marked := maps.Clone(labelled)
+	if marked == nil {
+		marked = make(map[string]string, 1)
+	}
+	marked[fakeNodeLabel] = fakeNodeLabelValue
+
+	return marked
+}
+
+// The heartbeat is fresh, so the node-lifecycle controller reads the Node as
+// heard from now rather than at its last heartbeat before the Failure. Every
+// other condition is left as reported, as toUnresponsive leaves it.
+func toResponding(reported corev1.NodeStatus, heard metav1.Time) corev1.NodeStatus {
+	responding := reported
+	responding.Conditions = append(conditionsOtherThanReady(reported.Conditions), corev1.NodeCondition{
+		Type:               corev1.NodeReady,
+		Status:             corev1.ConditionTrue,
+		Reason:             nodeReadyReason,
+		LastHeartbeatTime:  heard,
+		LastTransitionTime: heard,
+	})
+
+	return responding
+}
+
 // Only a Ready Node can hold a Pod, so a Placement is read against these alone.
 func readyNodesIn(observed []corev1.Node) []corev1.Node {
 	ready := make([]corev1.Node, 0, len(observed))

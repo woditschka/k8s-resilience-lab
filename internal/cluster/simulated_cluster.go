@@ -9,7 +9,9 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/retry"
 
@@ -373,6 +375,94 @@ func (c *SimulatedCluster) reportUnresponsive(ctx context.Context, name string) 
 	}
 
 	return nil
+}
+
+// RestoreNode makes a Node that stopped responding respond again. The marking
+// goes back first, so the KWOK controller maintains the Node from the Ready
+// status on rather than leaving it to turn Unknown once more. The
+// node-lifecycle controller then lifts the unreachable taint of its own accord.
+func (c *SimulatedCluster) RestoreNode(ctx context.Context, name string) error {
+	if err := c.resumeMaintaining(ctx, name); err != nil {
+		return err
+	}
+
+	return c.reportResponding(ctx, name)
+}
+
+// The write is retried on a conflict for the reason reportReady's is.
+func (c *SimulatedCluster) resumeMaintaining(ctx context.Context, name string) error {
+	marked := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest, err := c.client.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		latest.Labels = withTheKWOKMarking(latest.Labels)
+		_, err = c.client.CoreV1().Nodes().Update(ctx, latest, metav1.UpdateOptions{})
+
+		return err
+	})
+	if marked != nil {
+		return fmt.Errorf("put Node %s back among the Nodes the KWOK controller maintains: %w", name, marked)
+	}
+
+	return nil
+}
+
+// The write is retried on a conflict for the reason reportReady's is.
+func (c *SimulatedCluster) reportResponding(ctx context.Context, name string) error {
+	reported := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest, err := c.client.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		latest.Status = toResponding(latest.Status, metav1.Now())
+		_, err = c.client.CoreV1().Nodes().UpdateStatus(ctx, latest, metav1.UpdateOptions{})
+
+		return err
+	})
+	if reported != nil {
+		return fmt.Errorf("report Node %s Ready again: %w", name, reported)
+	}
+
+	return nil
+}
+
+// LosePod reports false where no Pod of a Deployment carries the name, since a
+// Pod the control plane already deleted is lost already. The Deployment label
+// confines it to a Deployment's Pods, which its ReplicaSet replaces.
+//
+// The delete names a zero grace period for the reason removeProbePods does: on
+// a Node that stopped responding a graceful delete would leave the Pod
+// Terminating for good.
+func (c *SimulatedCluster) LosePod(ctx context.Context, name string) (bool, error) {
+	pods := c.client.CoreV1().Pods(clusterNamespace)
+	listed, err := pods.List(ctx, metav1.ListOptions{
+		LabelSelector: everyDeploymentsPods(),
+		FieldSelector: fields.OneTermEqualSelector("metadata.name", name).String(),
+	})
+	if err != nil {
+		return false, fmt.Errorf("find the Pod %s of %s: %w", name, c.Name(), err)
+	}
+	if len(listed.Items) == 0 {
+		return false, nil
+	}
+
+	immediately := int64(0)
+	uid := listed.Items[0].UID
+	err = pods.Delete(ctx, name, metav1.DeleteOptions{
+		GracePeriodSeconds: &immediately,
+		Preconditions:      &metav1.Preconditions{UID: &uid},
+	})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("lose the Pod %s of %s: %w", name, c.Name(), err)
+	}
+
+	return true, nil
 }
 
 // Deploy lets the control plane's own controllers produce the Placement from

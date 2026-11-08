@@ -4,7 +4,7 @@
 
 ## Context
 
-REQ-SIM-008 stops a Node responding and watches the control plane move its Pods away. The owner chose that shape over a removed Node: "The Node stays in the cluster but goes NotReady, as when a machine hangs or loses network." The owner also chose who sets the wait: "The lab deploys Workloads so Pods leave an unresponsive Node after a few seconds."
+REQ-SIM-008 stops a Node responding and watches the control plane move its Pods away. REQ-SIM-028 later lets an engineer's click make a stopped Node respond again. The owner chose that shape over a removed Node: "The Node stays in the cluster but goes NotReady, as when a machine hangs or loses network." The owner also chose who sets the wait: "The lab deploys Workloads so Pods leave an unresponsive Node after a few seconds."
 
 Three things stand in the way, each measured on the pinned image, KWOK v0.8.0 with Kubernetes v1.36.1:
 
@@ -43,12 +43,20 @@ How fast a whole Zone's Pods leave:
 17. **A shorter monitor period** — leaves stock Kubernetes behind on a timing every Node shares.
 18. **A longer settle wait** — every Scenario waits out the pacing.
 
+How a stopped Node responds again:
+
+19. **Mark the Node again and leave its status to the KWOK controller** — Ready returns when the controller next applies a Stage, a delay the lab does not own.
+20. **Mark the Node again, then report it Ready** — Ready at once, and the controller keeps its heartbeat from then on.
+21. **Report it Ready without the marking** — nothing renews the heartbeat, so the Node turns Unknown again after the grace period.
+22. **Delete the Node and create it anew** — a new Node rather than a hung machine coming back, and its Terminating Pods lose their Node.
+
 ## Decision
 
-Options 4, 12, 13 and 16. The Stage CRD of option 5 is enabled for another reason, per [ADR: The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md).
+Options 4, 12, 13, 16 and 20. The Stage CRD of option 5 is enabled for another reason, per [ADR: The lab owns the simulator's Stages to give a Pod its Startup time](2026-10-08-the-lab-owns-the-simulators-stages-for-a-startup-time.md).
 
 - The cluster container carries the lab's own arguments, composed from constants alone. The KWOK controller manages Nodes carrying the lab's `type=kwok` label alone. The control plane keeps Kubernetes' own heartbeat timings and a lifted per-Zone eviction rate.
 - A Failure removes that label from its Node, then writes Ready Unknown with a lost heartbeat's reason. The Node keeps its KWOK annotation.
+- A Node responding again gets the label back, then a written Ready, retried on a conflict. The node-lifecycle controller lifts its unreachable taint.
 - The node-lifecycle controller taints the Node unreachable, and the taint-eviction controller deletes the Pods; the ReplicaSet replaces them.
 - Every Deployment's Pod template tolerates the not-ready and unreachable taints, NoExecute, for the lab's waiting time.
 - A Pod carrying a deletion timestamp is in no Placement.
@@ -56,13 +64,13 @@ Options 4, 12, 13 and 16. The Stage CRD of option 5 is enabled for another reaso
 
 ## Consequences
 
-Pods leave about four seconds after the Failure rather than minutes. The lab owns a failed Node's status from then on, so a Pod deleted there stays Terminating, in no Placement. A Zone Failure's Pods are back on the surviving Zones within seconds, one Pod skewed rather than even.
+Pods leave about four seconds after the Failure rather than minutes. The lab owns a failed Node's status until it responds again, so a Pod deleted there stays Terminating meanwhile, in no Placement. Where the control plane places Pods once it responds again is Kubernetes' own doing. A Zone Failure's Pods are back on the surviving Zones within seconds, one Pod skewed rather than even.
 
 The Node-condition taints carry NoSchedule too, and a spread honours taints, so the unreachable Node leaves the domain set. A Failure of three or more Nodes leaving one Ready in their Zone stops the controller tainting that Zone; no Topology the lab runs reaches it.
 
 ## Implementation
 
-**Requirements:** REQ-SIM-008
+**Requirements:** REQ-SIM-008, REQ-SIM-028
 
 ## References
 
