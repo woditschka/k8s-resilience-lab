@@ -280,3 +280,139 @@ func TestAPodFailureNamingAPendingPodOrOneTheBoardDoesNotHold_ShouldBeRefused(t 
 		})
 	}
 }
+
+const (
+	aNodeAfterTheFirst = 1
+	// The refusal of no Node stopped names it so, whichever Whens refuse it.
+	noNodeStopped = "no Node"
+)
+
+// The Nodes stopped are given out of the Topology's order, as two Whens may
+// stop them, so the order resolved is the Topology's own.
+func TestNodesRespondingAgain_ShouldBeEveryStoppedNodeInTheTopologysOrder(t *testing.T) {
+	declared := aTopologyOfTwoZones(t)
+	nodes := theNodeNamesOf(declared)
+	earlier, later := nodes[aNodeAfterTheFirst], nodes[everyNode-1]
+
+	responding, err := scenario.NewNodesRespondingAgain(declared, []string{later, earlier})
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, responding.Names()).To(expect.Equal([]string{earlier, later}))
+}
+
+func TestZonesRespondingAgain_ShouldBeEveryZoneWhoseNodesAllStoppedWithItsNodesInTheTopologysOrder(t *testing.T) {
+	declared := aTopologyOfTwoZones(t)
+	zones := declared.Zones()
+	stopped := slices.Concat(nodeNamesOfZone(declared, zones[1]), nodeNamesOfZone(declared, zones[0]))
+
+	responding, err := scenario.NewZonesRespondingAgain(declared, stopped)
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, [][]string{responding.Names(), responding.NodeNames()}).
+		To(expect.Equal([][]string{zones, theNodeNamesOf(declared)}))
+}
+
+func TestRespondingAgainWithNoNodeStoppedOrAStoppedNodeBesideOneStillResponding_ShouldBeRefusedNamingIt(t *testing.T) {
+	declared := aTopologyOfTwoZones(t)
+	ofTheFirstZone := nodeNamesOfZone(declared, declared.Zones()[0])
+	stoppedAlone, stillResponding := ofTheFirstZone[0], ofTheFirstZone[1]
+	refusals := map[string]struct {
+		resolve func() error
+		named   []string
+	}{
+		"the Nodes with no Node stopped": {
+			resolve: func() error {
+				_, err := scenario.NewNodesRespondingAgain(declared, nil)
+				return err
+			},
+			named: []string{noNodeStopped},
+		},
+		"the Zones with no Node stopped": {
+			resolve: func() error {
+				_, err := scenario.NewZonesRespondingAgain(declared, nil)
+				return err
+			},
+			named: []string{noNodeStopped},
+		},
+		"the Zones with a stopped Node sharing its Zone with one still responding": {
+			resolve: func() error {
+				_, err := scenario.NewZonesRespondingAgain(declared, []string{stoppedAlone})
+				return err
+			},
+			named: []string{stoppedAlone, stillResponding},
+		},
+	}
+
+	for refused, refusal := range refusals {
+		t.Run(refused, func(t *testing.T) {
+			err := refusal.resolve()
+
+			expect.Expect(t, namedIn(err, refusal.named)).To(expect.Equal(true))
+		})
+	}
+}
+
+func namedIn(err error, named []string) bool {
+	return err != nil && !slices.ContainsFunc(named, func(name string) bool { return !strings.Contains(err.Error(), name) })
+}
+
+const (
+	aSecondPlacedWebPod = 2
+	aCountBelowOne      = 0
+)
+
+// The Pods sit on the Nodes out of name order, so the pick follows the board's
+// order of Zones, Nodes and Pods rather than the order the Pods were observed.
+func aBoardOfThreePlacedWebPodsAndOneBatchPod(t *testing.T) scenario.PlacementBoard {
+	t.Helper()
+
+	declared := aTopologyOfTwoZones(t)
+	nodes := theNodeNamesOf(declared)
+	pods := []scenario.Pod{
+		aPodOf(webDeployment, secondWebSuffix, nodes[1]),
+		aPodOf(batchDeployment, firstBatchSuffix, nodes[0]),
+		aPodOf(webDeployment, firstWebSuffix, nodes[1]),
+		aPodOf(webDeployment, replacementSuffix, nodes[0]),
+		anUnplacedPodOf(webDeployment, pendingWebSuffix),
+	}
+
+	return scenario.NewPlacementBoard(declared, observedOn(declared, pods), scenario.PlacementBoard{})
+}
+
+func TestAFailureOfSomePodsOfADeployment_ShouldLoseItsFirstPlacedPodsInTheBoardsOrderAndNoOtherDeploymentsPod(t *testing.T) {
+	board := aBoardOfThreePlacedWebPodsAndOneBatchPod(t)
+
+	failure, err := scenario.NewPodsFailure(board, aDeployment(t), aSecondPlacedWebPod)
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+	expect.Expect(t, failure.BoardNames()).To(expect.Equal([]string{
+		webDeployment + "-" + replacementSuffix, webDeployment + "-" + firstWebSuffix,
+	}))
+}
+
+func TestAFailureOfPodsOfADeploymentDeclaringAFailureToleranceOrOfACountBelowOneOrAbovePlaced_ShouldBeRefusedNamingIt(t *testing.T) {
+	declaring, err := aDeployment(t).WithFailureTolerance(
+		scenario.FailureTolerance{Lost: scenario.NodesLost, Count: oneLost}, aTopologyOfTwoZones(t))
+	if err != nil {
+		t.Fatalf("declare a Failure tolerance: %v", err)
+	}
+	board := aBoardOfThreePlacedWebPodsAndOneBatchPod(t)
+	refusals := map[string]struct {
+		deployment scenario.Deployment
+		count      int
+		named      string
+	}{
+		"a Failure tolerance declared": {deployment: declaring, count: oneLost, named: "Failure tolerance"},
+		"a count below one":            {deployment: aDeployment(t), count: aCountBelowOne, named: strconv.Itoa(aCountBelowOne)},
+		"a count above those placed":   {deployment: aDeployment(t), count: everyNode, named: strconv.Itoa(everyNode)},
+	}
+
+	for refused, one := range refusals {
+		t.Run(refused, func(t *testing.T) {
+			_, err := scenario.NewPodsFailure(board, one.deployment, one.count)
+
+			expect.Expect(t, err != nil && strings.Contains(err.Error(), webDeployment) && strings.Contains(err.Error(), one.named)).
+				To(expect.Equal(true))
+		})
+	}
+}

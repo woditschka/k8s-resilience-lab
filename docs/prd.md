@@ -272,6 +272,48 @@ A Failure may stop, in one Step, every Node carrying one value of a label a Node
 
 **Design:** [system-design.md](system-design.md)
 
+### A stopped Node or Zone responding again
+
+<a id="req-sim-029"></a>
+A Scenario's When makes every Node a Failure stopped respond again, named by Node or by Zone, as a click does in the Live view `[REQ-SIM-029]`. The control plane places a Pod only when the Pod is created and never moves a running one. A Node that responds again therefore stays empty, and the Placement stays where the Failure left it. The Scenarios a-node-that-responds-again and a-zone-that-responds-again demonstrate that gap `[REQ-SIM-029]`.
+
+**Done when:**
+
+- `[REQ-SIM-029]` given stopped Nodes, when a When makes the Nodes respond again, then every stopped Node of the Scenario responds again in one Step. The run reports which, as a Failure's When does.
+- `[REQ-SIM-029]` given stopped Zones, when a When makes the Zones respond again, then every Node of every stopped Zone responds again in one Step. The run reports which Zones.
+- `[REQ-SIM-029]` given either Scenario, when read, then the When making Nodes or Zones respond again names no Node, Zone or count.
+- `[REQ-SIM-029]` given Nodes that responded again, when the next Wait's narrative is read, then it names each Node turning Ready.
+- `[REQ-SIM-029]` given a-node-that-responds-again, when its Node is Ready again and the Placement Settled, then that Node holds no Pod. Every Zone still holds three, and one Node holds two.
+- `[REQ-SIM-029]` given a-zone-that-responds-again, when its Nodes are Ready again and the Placement Settled, then that Zone holds no Pod. The nine Pods stay Running on the other Zones.
+
+**Edge cases:** each ends the Scenario at that When, naming it.
+
+1. A When making Nodes or Zones respond again while no Node of the Scenario is stopped.
+2. A When making Zones respond again while a stopped Node shares its Zone with a Node still responding.
+
+**Design:** [system-design.md](system-design.md)
+
+### Losing Pods of a Deployment
+
+<a id="req-sim-030"></a>
+A Scenario's When loses a stated number of one named Deployment's placed Pods in one Step, as a click on a Pod's box does in the Live view `[REQ-SIM-030]`. The Deployment replaces each lost Pod, and the control plane places each replacement among the Nodes responding at that moment. Losing every Pod of a Deployment therefore spreads its replacements over a Node that responded again. The Scenario pods-lost-after-a-node-responds-again demonstrates it, beside a-node-that-responds-again, where that Node stays empty `[REQ-SIM-030]`.
+
+**Done when:**
+
+- `[REQ-SIM-030]` given a Deployment with placed Pods, when a When names it and a number of Pods, then that many of its placed Pods are lost in one Step. The run reports each Pod lost.
+- `[REQ-SIM-030]` given Pods lost to a When, when the next Wait's narrative is read, then it names each replacement scheduled and its Node.
+- `[REQ-SIM-030]` given pods-lost-after-a-node-responds-again, when read, then its When losing Pods names the Deployment and the number of Pods alone, no Pod, Node or Zone.
+- `[REQ-SIM-030]` given a-node-that-responds-again's Settled Placement, with its Node Ready again and empty, when all nine Pods are lost and the Placement Settles, then every Node holds one Pod.
+- `[REQ-SIM-030]` given that Placement Settled after the loss, when the Thens are read, then nine Pods are Running and every Zone holds three.
+
+**Edge cases:** each ends the Scenario at that When, naming it.
+
+1. A When naming a Deployment the Scenario has not declared.
+2. A When losing fewer than one Pod, or more than the Deployment has placed.
+3. A When losing Pods of a Deployment declaring a Failure tolerance.
+
+**Design:** [system-design.md](system-design.md)
+
 ### Keeping Pods off a dedicated NodePool
 
 <a id="req-sim-019"></a>
@@ -528,6 +570,10 @@ An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inje
 - Whether a Failure injected from the Live view joins the Timeline as a When does.
 - Whether the Live view's Timeline sets a Wait narrative's moments apart from other Entries.
 - Whether the Live view is reachable from another machine.
+- Whether a PodDisruptionBudget joins the lab as a Given.
+- Whether a descheduler run that changes nothing, a dry run, joins the lab, given a Timeline records what changed.
+- Whether a Pod Failure a Scenario writes paces itself to the Floor, or leaves a fall for the Then judging the Floor to report.
+- Whether a Scenario loses Pods repeatedly until the Placement is even, beside losing them once in one When.
 - How long a Timeline file is kept, and whether the lab ever removes one.
 - How an engineer reaches a recorded Timeline beyond its file, and whether a Scenario may assert on it.
 - Whether the lab promises anything about a team's production manifests, which needs Topology and admission behavior mirroring a named environment.

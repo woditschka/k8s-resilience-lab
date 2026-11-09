@@ -180,11 +180,15 @@ type Scenario struct {
 	// note waits for the next Step or the Scenario's end.
 	lineOpen bool
 
+	// stopped are the Nodes stopped now, in the order they stopped; failed and
+	// failedZones are every Node and Zone a Failure stopped, responding again
+	// or not.
+	stopped     []string
 	failed      []string
 	failedZones []string
-	// stoppedPerWhen pairs with the When notes on the Timeline: the k-th set is
+	// nodesPerWhen pairs with the When notes on the Timeline: the k-th entry is
 	// the k-th When's.
-	stoppedPerWhen [][]string
+	nodesPerWhen []scenario.WhenNodes
 
 	// recorded is the Scenario's copy of its Timeline, filled by the recording
 	// goroutine while the Steps run on this one.
@@ -865,6 +869,84 @@ func (w When) NodesLabelledFail(labels node.Labels) {
 	w.scenario.stop(stopping, failure.Names())
 }
 
+// NodesRespondAgain makes every Node stopped so far respond again, whichever
+// When stopped it, naming them in the Topology's order. No Node stopped ends
+// the Scenario.
+func (w When) NodesRespondAgain() {
+	step, open := w.scenario.record(WhenStep, theStoppedNodesRespondingAgain)
+	if !open {
+		return
+	}
+
+	responding, err := scenario.NewNodesRespondingAgain(w.scenario.topology, w.scenario.stopped)
+	if err != nil {
+		w.scenario.end(step, err)
+
+		return
+	}
+	restoring := w.scenario.rename(theStoppedNodesRespondingAgain + ", " + strings.Join(responding.Names(), ", "))
+
+	w.scenario.restore(restoring, responding.Names())
+}
+
+// ZonesRespondAgain makes every Node stopped so far respond again, naming their
+// Zones in the Topology's order. No Node stopped, and a stopped Node sharing
+// its Zone with a Node still responding, end the Scenario.
+func (w When) ZonesRespondAgain() {
+	step, open := w.scenario.record(WhenStep, theStoppedZonesRespondingAgain)
+	if !open {
+		return
+	}
+
+	responding, err := scenario.NewZonesRespondingAgain(w.scenario.topology, w.scenario.stopped)
+	if err != nil {
+		w.scenario.end(step, err)
+
+		return
+	}
+	restoring := w.scenario.rename(theStoppedZonesRespondingAgain + ", " + strings.Join(responding.Names(), ", "))
+
+	w.scenario.restore(restoring, responding.NodeNames())
+}
+
+// PodsFail loses that many placed Pods of the named Deployment, the first the
+// last Wait's board lists, so the pick is the same on every run. Its
+// ReplicaSet replaces them. A Deployment the Scenario has not declared, one
+// declaring a Failure tolerance, and a count below one or above its placed Pods
+// end the Scenario.
+func (w When) PodsFail(name DeploymentName, pods int) {
+	step, open := w.scenario.record(WhenStep, podsFailing(pods, name))
+	if !open {
+		return
+	}
+
+	if _, observed := w.scenario.placement(step); !observed {
+		return
+	}
+
+	deployment, declared := w.scenario.declaredDeploymentNamed(name)
+	if !declared {
+		w.scenario.end(step, fmt.Errorf("the Scenario has declared no Deployment %q, so losing its Pods is refused", name))
+
+		return
+	}
+
+	failure, err := scenario.NewPodsFailure(w.scenario.board, deployment, pods)
+	if err != nil {
+		w.scenario.end(step, err)
+
+		return
+	}
+	losing := w.scenario.rename(podsFailing(pods, name) + ", " + strings.Join(failure.BoardNames(), ", "))
+
+	w.scenario.lose(losing, failure.Pods())
+}
+
+const (
+	theStoppedNodesRespondingAgain = "the stopped Nodes respond again"
+	theStoppedZonesRespondingAgain = "the stopped Zones respond again"
+)
+
 // stop discards the observation held until now, since it is the world before
 // the Failure.
 func (s *Scenario) stop(at Step, nodes []string) bool {
@@ -876,12 +958,67 @@ func (s *Scenario) stop(at Step, nodes []string) bool {
 			return false
 		}
 		s.failed = append(s.failed, node)
+		if !slices.Contains(s.stopped, node) {
+			s.stopped = append(s.stopped, node)
+		}
 	}
-	s.stoppedPerWhen = append(s.stoppedPerWhen, slices.Clone(nodes))
+	s.nodesPerWhen = append(s.nodesPerWhen, scenario.WhenNodes{Stopped: slices.Clone(nodes)})
 
 	s.observed, s.settled = scenario.Placement{}, false
 
 	return true
+}
+
+// lose discards the observation held until now, since it is the world before
+// the Pods were lost. A picked Pod the cluster no longer holds ends the
+// Scenario, since fewer Pods would be lost than the When states.
+func (s *Scenario) lose(at Step, pods []scenario.PodFailure) {
+	for _, pod := range pods {
+		s.changedTheCluster = true
+		lost, err := s.provisioned.LosePod(s.ctx, pod.Name())
+		if err != nil {
+			s.end(at, fmt.Errorf("lose the Pod %s: %w", pod.BoardName(), err))
+
+			return
+		}
+		if !lost {
+			s.end(at, fmt.Errorf("the Pod %s is already gone, so losing it is refused", pod.BoardName()))
+
+			return
+		}
+	}
+	s.nodesPerWhen = append(s.nodesPerWhen, scenario.WhenNodes{})
+
+	s.observed, s.settled = scenario.Placement{}, false
+}
+
+func (s *Scenario) declaredDeploymentNamed(name DeploymentName) (scenario.Deployment, bool) {
+	at := slices.IndexFunc(s.declaredDeployments, func(deployment scenario.Deployment) bool {
+		return deployment.Name() == string(name)
+	})
+	if at < 0 {
+		return scenario.Deployment{}, false
+	}
+
+	return s.declaredDeployments[at], true
+}
+
+// restore leaves the Nodes among those that failed, so the Thens on the failed
+// Nodes and Zones still judge them, and discards the observation held until
+// now, since it is the world before they responded again.
+func (s *Scenario) restore(at Step, nodes []string) {
+	for _, node := range nodes {
+		s.changedTheCluster = true
+		if err := s.provisioned.RestoreNode(s.ctx, node); err != nil {
+			s.end(at, fmt.Errorf("make Node %s respond again: %w", node, err))
+
+			return
+		}
+		s.stopped = slices.DeleteFunc(s.stopped, func(stopped string) bool { return stopped == node })
+	}
+	s.nodesPerWhen = append(s.nodesPerWhen, scenario.WhenNodes{RespondingAgain: slices.Clone(nodes)})
+
+	s.observed, s.settled = scenario.Placement{}, false
 }
 
 func nodesFailing(count int) string {
@@ -898,6 +1035,10 @@ func failing(count int) string {
 	}
 
 	return " fail"
+}
+
+func podsFailing(count int, name DeploymentName) string {
+	return counted(count, "Pod", "Pods") + " of " + string(name) + failing(count)
 }
 
 func labelledNodesFailing(labels node.Labels) string {
@@ -1051,7 +1192,7 @@ func (t Then) floorsToJudge(step Step) ([]scenario.FloorReading, bool) {
 			"and no Deployment declares one"))
 
 		return nil, false
-	case len(t.scenario.stoppedPerWhen) == 0:
+	case len(t.scenario.nodesPerWhen) == 0:
 		t.scenario.end(step, errors.New("this Then judges each Floor from the first Failure, "+
 			"and no When ran before it"))
 
@@ -1059,7 +1200,7 @@ func (t Then) floorsToJudge(step Step) ([]scenario.FloorReading, bool) {
 	}
 
 	readings, err := scenario.NewTimeline(t.scenario.recorded.entries()).
-		Floors(judged, t.scenario.namesOfTheDeployments(), t.scenario.stoppedPerWhen)
+		Floors(judged, t.scenario.namesOfTheDeployments(), t.scenario.nodesPerWhen)
 	if err != nil {
 		t.scenario.end(step, err)
 

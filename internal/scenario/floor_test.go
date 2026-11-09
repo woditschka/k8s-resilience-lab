@@ -142,7 +142,18 @@ func aWhenNoteAt(at time.Duration) scenario.Entry {
 func theReadingOf(t *testing.T, judged scenario.Deployment, entries []scenario.Entry, stopped ...[]string) scenario.FloorReading {
 	t.Helper()
 
-	readings, err := scenario.NewTimeline(entries).Floors([]scenario.Deployment{judged}, []string{judged.Name()}, stopped)
+	perWhen := make([]scenario.WhenNodes, 0, len(stopped))
+	for _, nodes := range stopped {
+		perWhen = append(perWhen, scenario.WhenNodes{Stopped: nodes})
+	}
+
+	return theReadingOver(t, judged, entries, perWhen...)
+}
+
+func theReadingOver(t *testing.T, judged scenario.Deployment, entries []scenario.Entry, perWhen ...scenario.WhenNodes) scenario.FloorReading {
+	t.Helper()
+
+	readings, err := scenario.NewTimeline(entries).Floors([]scenario.Deployment{judged}, []string{judged.Name()}, perWhen)
 	if err != nil {
 		t.Fatalf("read the Floor of %s: %v", judged.Name(), err)
 	}
@@ -303,6 +314,48 @@ func TestAFallAfterMoreThanOneFailure_ShouldNameThePodsLostToTheFailures(t *test
 		"web fell to 7 of 9 Pods Ready, below its Floor of 8 from " + theSecondFailureAsRead +
 			" for the rest of the Scenario: 2 Pods lost to the Failures, where 1 is the most it survives losing; " +
 			lostOn(aPodNamed(theFirstNode)+" on "+nodes[theFirstNode], aPodNamed(theSecondNode)+" on "+nodes[theSecondNode])))
+}
+
+const (
+	theNodeRespondingAgain = 12 * time.Second
+	theNextFailure         = 14 * time.Second
+
+	// From the Failure to the When making its Node respond again.
+	theFallUntilRespondingAgainAsRead = "2.000s"
+)
+
+// The When between the two Failures pairs with its own note, so the second
+// Failure stops the second Node rather than the first stopping twice.
+func TestAPodOnANodeThatRespondsAgain_ShouldCountAgainFromThatWhensNote(t *testing.T) {
+	topology := aTopologyOfThreeZonesOfThreeNodes(t)
+	nodes := theNodeNamesOf(topology)
+	recorded := append(onePodRunningPerNodeOf(topology),
+		aWhenNoteAt(theFirstFailure), aWhenNoteAt(theNodeRespondingAgain), aWhenNoteAt(theNextFailure))
+
+	reading := theReadingOver(t, aDeploymentOfNineSurviving(t, survivingNoNode()), recorded,
+		scenario.WhenNodes{Stopped: []string{nodes[theFirstNode]}},
+		scenario.WhenNodes{RespondingAgain: []string{nodes[theFirstNode]}},
+		scenario.WhenNodes{Stopped: []string{nodes[theSecondNode]}})
+
+	expect.Expect(t, reading.Fall()).To(expect.Equal(
+		"web fell to 8 of 9 Pods Ready, below its Floor of 9 from " + theFirstFailureAsRead + " for " +
+			theFallUntilRespondingAgainAsRead + ": 1 Pod lost to the Failures, where 0 is the most it survives losing; " +
+			lostOn(aPodNamed(theFirstNode)+" on "+nodes[theFirstNode])))
+	expect.Expect(t, reading.Line()).To(expect.Equal(
+		"web fell below its Floor of 9 Ready Pods through the loss of 0 Nodes: lowest 8 of 9 at " +
+			theFirstFailureAsRead + " for " + theFallUntilRespondingAgainAsRead))
+}
+
+func TestAWhenMakingNodesRespondAgain_ShouldNotCountAmongTheFailuresAFallIsLostTo(t *testing.T) {
+	topology := aTopologyOfThreeZonesOfThreeNodes(t)
+	nodes := theNodeNamesOf(topology)
+	recorded := append(onePodRunningPerNodeOf(topology), aWhenNoteAt(theFirstFailure), aWhenNoteAt(theNodeRespondingAgain))
+
+	reading := theReadingOver(t, aDeploymentOfNineSurviving(t, survivingNoNode()), recorded,
+		scenario.WhenNodes{Stopped: []string{nodes[theFirstNode]}},
+		scenario.WhenNodes{RespondingAgain: []string{nodes[theFirstNode]}})
+
+	expect.Expect(t, strings.Contains(reading.Fall(), "lost to the Failure,")).To(expect.Equal(true))
 }
 
 func TestATimelineHoldingNoWhensNote_ShouldJudgeNoFloor(t *testing.T) {

@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -177,6 +178,93 @@ func (f ZoneFailure) Equal(other ZoneFailure) bool {
 	return slices.Equal(f.zones, other.zones) && slices.EqualFunc(f.nodes, other.nodes, Node.Equal)
 }
 
+// NodesRespondingAgain are every Node stopped so far, resolved against the
+// Topology, since a Scenario makes the stopped Nodes respond again without
+// naming them.
+type NodesRespondingAgain struct {
+	nodes []Node
+}
+
+// NewNodesRespondingAgain gives the Nodes in the Topology's order whichever
+// When stopped each, so the same Whens resolve alike on every run. No Node
+// stopped is refused, since the When would change nothing.
+func NewNodesRespondingAgain(topology Topology, stopped []string) (NodesRespondingAgain, error) {
+	nodes, err := stoppedNodesOf(topology, stopped)
+	if err != nil {
+		return NodesRespondingAgain{}, err
+	}
+
+	return NodesRespondingAgain{nodes: nodes}, nil
+}
+
+func (r NodesRespondingAgain) Names() []string {
+	return namesOf(r.nodes)
+}
+
+// ZonesRespondingAgain carries both the Zones a report names and the Nodes a
+// Scenario makes respond again, since a Zone responds again by every Node in it
+// doing so.
+type ZonesRespondingAgain struct {
+	zones []string
+	nodes []Node
+}
+
+// NewZonesRespondingAgain gives every Zone holding a stopped Node, in the
+// Topology's order. No Node stopped is refused, and so is a stopped Node
+// sharing its Zone with a Node still responding, since that Zone never stopped
+// whole.
+func NewZonesRespondingAgain(topology Topology, stopped []string) (ZonesRespondingAgain, error) {
+	nodes, err := stoppedNodesOf(topology, stopped)
+	if err != nil {
+		return ZonesRespondingAgain{}, err
+	}
+
+	var zones []string
+	for _, zone := range topology.Zones() {
+		stoppedHere, responding := partitioned(nodesIn(topology, []string{zone}), stopped)
+		switch {
+		case len(stoppedHere) == 0:
+			continue
+		case len(responding) > 0:
+			return ZonesRespondingAgain{}, fmt.Errorf("the Zone %s holds the stopped Nodes %s beside %s still responding, "+
+				"so it cannot respond again whole", zone, strings.Join(namesOf(stoppedHere), ", "),
+				strings.Join(namesOf(responding), ", "))
+		}
+		zones = append(zones, zone)
+	}
+
+	return ZonesRespondingAgain{zones: zones, nodes: nodes}, nil
+}
+
+func (r ZonesRespondingAgain) Names() []string {
+	return slices.Clone(r.zones)
+}
+
+func (r ZonesRespondingAgain) NodeNames() []string {
+	return namesOf(r.nodes)
+}
+
+func partitioned(held []Node, stopped []string) (stoppedHere, responding []Node) {
+	for _, node := range held {
+		if slices.Contains(stopped, node.Name) {
+			stoppedHere = append(stoppedHere, node)
+		} else {
+			responding = append(responding, node)
+		}
+	}
+
+	return stoppedHere, responding
+}
+
+func stoppedNodesOf(topology Topology, stopped []string) ([]Node, error) {
+	nodes := slices.DeleteFunc(topology.Nodes(), func(node Node) bool { return !slices.Contains(stopped, node.Name) })
+	if len(nodes) == 0 {
+		return nil, errors.New("making the stopped Nodes respond again needs a Node stopped, and no Node of the Topology is stopped")
+	}
+
+	return nodes, nil
+}
+
 // PodFailure is the one placed Pod a Failure loses, resolved against the board
 // an engineer clicked, since a Pod's name is the control plane's and only an
 // observation holds it.
@@ -210,6 +298,57 @@ func (f PodFailure) Name() string {
 // BoardName is how the Live view and a board name the Pod lost.
 func (f PodFailure) BoardName() string {
 	return f.pod.BoardName()
+}
+
+// PodsFailure is the placed Pods of one Deployment a When loses, each as a Pod
+// Failure of a click.
+type PodsFailure struct {
+	pods []PodFailure
+}
+
+// NewPodsFailure picks the first count placed Pods of the Deployment in the
+// board's order of Zones, Nodes and Pods, so the same Pods are lost on every
+// run. A Deployment declaring a Failure tolerance is refused, since the Floor
+// it holds is not paced here, and so is a count below one or above the Pods it
+// has placed.
+func NewPodsFailure(board PlacementBoard, deployment Deployment, count int) (PodsFailure, error) {
+	if _, declares := deployment.FailureTolerance(); declares {
+		return PodsFailure{}, fmt.Errorf("the Deployment %s declares a Failure tolerance, so losing its Pods is refused",
+			deployment.Name())
+	}
+
+	var placed []PodFailure
+	for _, zone := range board.Zones() {
+		for _, node := range zone.Nodes {
+			for _, pod := range node.Pods {
+				if pod.Deployment == deployment.Name() {
+					placed = append(placed, PodFailure{pod: pod})
+				}
+			}
+		}
+	}
+	if count < 1 || count > len(placed) {
+		return PodsFailure{}, fmt.Errorf("losing %d Pods of the Deployment %s is refused, since it has %d placed",
+			count, deployment.Name(), len(placed))
+	}
+
+	return PodsFailure{pods: placed[:count]}, nil
+}
+
+// Pods are the picked Pods, a copy the caller may not alias.
+func (f PodsFailure) Pods() []PodFailure {
+	return slices.Clone(f.pods)
+}
+
+// BoardNames are how the Live view and a board name each Pod lost, in the
+// order picked.
+func (f PodsFailure) BoardNames() []string {
+	names := make([]string, 0, len(f.pods))
+	for _, pod := range f.pods {
+		names = append(names, pod.BoardName())
+	}
+
+	return names
 }
 
 func nodesIn(topology Topology, zones []string) []Node {

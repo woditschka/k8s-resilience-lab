@@ -615,3 +615,157 @@ func TestAClickOnANodeThatRespondsAgain_ShouldStopItRespondingOnceMore(t *testin
 		"When Node " + clicked + " stops responding",
 	}))
 }
+
+const (
+	theScenarioMakingNodesRespondAgain = "a-scenario-making-its-stopped-nodes-respond-again"
+	theScenarioMakingZonesRespondAgain = "a-scenario-making-its-stopped-zones-respond-again"
+)
+
+// whensAndCause is what a run of a Scenario reports of its Whens, and why it
+// ended where it did, empty for one that carried out every Step.
+type whensAndCause struct {
+	Whens []string
+	Cause string
+}
+
+// aRunOfAZoneFailureFollowedBy stops one Zone, so more than one Node is stopped
+// by one When, and then waits for every Node Ready, which only a Node that
+// responds again reaches.
+func aRunOfAZoneFailureFollowedBy(t *testing.T, name string, responding func(When)) whensAndCause {
+	t.Helper()
+
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), name, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.When().ZonesFail(oneLost)
+		responding(steps.When())
+		steps.WaitFor().AllNodesReady()
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", name, err)
+	}
+
+	var whens []string
+	for _, step := range ran.Steps {
+		if step.Kind == WhenStep {
+			whens = append(whens, step.Name)
+		}
+	}
+
+	return whensAndCause{Whens: whens, Cause: causeOf(ran)}
+}
+
+func theFirstZoneFailing(topology scenario.Topology) string {
+	return zonesFailing(oneLost) + ", " + topology.Zones()[0]
+}
+
+func TestAWhenMakingNodesRespondAgain_ShouldMakeEveryStoppedNodeRespondAgainAndReportWhich(t *testing.T) {
+	t.Parallel()
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stopped := nodeNamesOf(theNodesOutside(declared, declared.Zones()[1]))
+
+	ran := aRunOfAZoneFailureFollowedBy(t, theScenarioMakingNodesRespondAgain, When.NodesRespondAgain)
+
+	expect.Expect(t, ran).To(expect.Equal(whensAndCause{Whens: []string{
+		theFirstZoneFailing(declared),
+		theStoppedNodesRespondingAgain + ", " + strings.Join(stopped, ", "),
+	}}))
+}
+
+func TestAWhenMakingZonesRespondAgain_ShouldMakeEveryNodeOfEveryStoppedZoneRespondAgainAndReportWhich(t *testing.T) {
+	t.Parallel()
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+
+	ran := aRunOfAZoneFailureFollowedBy(t, theScenarioMakingZonesRespondAgain, When.ZonesRespondAgain)
+
+	expect.Expect(t, ran).To(expect.Equal(whensAndCause{Whens: []string{
+		theFirstZoneFailing(declared),
+		theStoppedZonesRespondingAgain + ", " + declared.Zones()[0],
+	}}))
+}
+
+const (
+	theScenarioLosingPods = "a-scenario-losing-pods-of-its-deployment"
+	twoPodsLost           = 2
+)
+
+func TestAWhenLosingPodsOfADeployment_ShouldLoseThatManyOfItsPlacedPodsInOneStepAndReportEach(t *testing.T) {
+	t.Parallel()
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioLosingPods, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+		steps.WaitFor().AllPodsReady()
+		steps.When().PodsFail(someDeploymentName, twoPodsLost)
+		steps.WaitFor().AllPodsReady()
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioLosingPods, err)
+	}
+
+	lost := strings.Split(strings.TrimPrefix(theLastWhenOf(ran).Name, podsFailing(twoPodsLost, someDeploymentName)+", "), ", ")
+	board := ran.Steps[len(ran.Steps)-1].Board.Lines()
+	expect.Expect(t, causeOf(ran)).To(expect.Equal(""))
+	expect.Expect(t, len(lost)).To(expect.Equal(twoPodsLost))
+	expect.Expect(t, len(board) > 0).To(expect.Equal(true))
+	expect.Expect(t, theNamesHeldBy(board, lost)).To(expect.Equal([]string{}))
+}
+
+const theScenarioLosingPodsBeforeANodeFails = "a-scenario-losing-pods-before-a-node-fails"
+
+// A Pod Failure stops no Node, so the Floor of the Deployment declaring a
+// Failure tolerance is read against the Node the later When stops, from that
+// When's note on, never from the Pod Failure's. It runs on a cluster since
+// only a real loss carries the When out.
+func TestAWhenLosingPodsBeforeANodeFailure_ShouldLeaveTheFloorJudgedAgainstTheNodeTheLaterWhenStops(t *testing.T) {
+	t.Parallel()
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioLosingPodsBeforeANodeFails, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+		steps.Given().Deployment(anotherDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+			SurvivesLosing(Nodes(oneLost))
+		steps.WaitFor().AllPodsReady()
+		steps.When().PodsFail(someDeploymentName, oneLost)
+		steps.WaitFor().AllPodsReady()
+		steps.When().NodesFail(oneLost)
+		steps.WaitFor().AllPodsReady()
+		steps.Then().EnoughPodsStayedReady()
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioLosingPodsBeforeANodeFails, err)
+	}
+
+	judged := aDeploymentNamedSurvivingTheLossOf(t, anotherDeploymentName, podsOverEveryNode, Nodes(oneLost), declared)
+	readings, err := ran.Timeline.Floors([]scenario.Deployment{judged},
+		[]string{string(someDeploymentName), string(anotherDeploymentName)},
+		[]scenario.WhenNodes{{}, {Stopped: []string{theNodeThatStopped(declared)}}})
+	if err != nil {
+		t.Fatalf("read the Floors over the recorded Timeline: %v", err)
+	}
+	expect.Expect(t, causeOf(ran)).To(expect.Equal(""))
+	expect.Expect(t, ran.Steps[len(ran.Steps)-1]).To(expect.Equal(enoughPodsStayedReadyStep(linesOf(readings)...)))
+}
+
+func theNamesHeldBy(lines, names []string) []string {
+	held := []string{}
+	for _, name := range names {
+		if strings.Contains(strings.Join(lines, "\n"), name) {
+			held = append(held, name)
+		}
+	}
+
+	return held
+}
+
+func theLastWhenOf(ran Outcome) Step {
+	var last Step
+	for _, step := range ran.Steps {
+		if step.Kind == WhenStep {
+			last = step
+		}
+	}
+
+	return last
+}

@@ -147,6 +147,34 @@ const (
 	theFloorKeptWhenTheSpotNodesStopped = "checkout kept its Floor of 6 Ready Pods through the loss of 3 Nodes: lowest 6 of 9 at +"
 )
 
+// The control plane never moves a running Pod, so the Node or Zone that
+// responds again stays empty: the Zone the Node is in keeps its three Pods on
+// its other two Nodes, one of them holding two.
+const (
+	nodeRespondsAgainReported    = aScenarioHeading + "a-node-that-responds-again"
+	theNodesRespondAgainReported = "When the stopped Nodes respond again, " + theNodePickedToFail
+	theNodeTurningReadyNarrated  = "Node " + theNodePickedToFail + " Ready"
+
+	zoneRespondsAgainReported    = aScenarioHeading + "a-zone-that-responds-again"
+	theZonesRespondAgainReported = "When the stopped Zones respond again, " + theZonePickedToFail
+
+	noPodHeld   = 0
+	onePodHeld  = 1
+	twoPodsHeld = 2
+	// Every Node of the three Zones of three but the one left empty and the one
+	// holding two.
+	nodesHoldingOne = 3*3 - 2
+)
+
+// Every Pod is lost after the stopped Node responded again, so the replacements
+// spread over every Node, the one that was empty included.
+const (
+	podsLostAfterANodeRespondsAgainReported = aScenarioHeading + "pods-lost-after-a-node-responds-again"
+	everyPodOfCheckoutLostReported          = "When 9 Pods of checkout fail, "
+	onePodOnEveryNodeHeld                   = 3 * 3
+	everyPodOfCheckoutLost                  = 9
+)
+
 // Each Zone holds one on-demand and one spot Node, so six Pods spread evenly
 // put two in each Zone and three on each capacity type.
 const (
@@ -475,6 +503,139 @@ func TestEveryFailureScenario_ShouldDeclareWhatItsWhenFailsAndKeepEveryFloor(t *
 	}
 }
 
+func TestANodeThatRespondsAgain_ShouldHoldNoPodWhileEveryZoneKeepsThreeAndOneNodeHoldsTwo(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), nodeRespondsAgainReported)
+
+	reportShows(t, reported, oneNodeFailsReported)
+	reportShows(t, reported, theNodesRespondAgainReported)
+	reportShows(t, reported, noPodOnTheFailedNodesJudged)
+	reportShows(t, reported, threePodsPerZoneJudged)
+	reportLacks(t, reported, aFindingReported)
+	expect.Expect(t, thePodsPerNodeOnTheLastBoardOf(reported)).To(expect.Equal(slices.Concat(
+		[]int{noPodHeld}, slices.Repeat([]int{onePodHeld}, nodesHoldingOne), []int{twoPodsHeld})))
+}
+
+func TestAZoneThatRespondsAgain_ShouldHoldNoPodWhileTheNinePodsStayRunningOnTheOtherZones(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), zoneRespondsAgainReported)
+
+	reportShows(t, reported, oneZoneFailsReported)
+	reportShows(t, reported, theZonesRespondAgainReported)
+	reportShows(t, reported, noPodInTheFailedZonesJudged)
+	reportShows(t, reported, everyPodRunningJudged)
+	reportLacks(t, reported, aFindingReported)
+}
+
+func TestPodsLostAfterANodeRespondsAgain_ShouldPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), podsLostAfterANodeRespondsAgainReported)
+
+	reportShows(t, reported, everyPodOfCheckoutLostReported)
+	reportShows(t, reported, everyPodRunningJudged)
+	reportShows(t, reported, threePodsPerZoneJudged)
+	reportLacks(t, reported, aFindingReported)
+	expect.Expect(t, thePodsPerNodeOnTheLastBoardOf(reported)).To(expect.Equal(slices.Repeat([]int{onePodHeld}, onePodOnEveryNodeHeld)))
+}
+
+func TestPodsLostToAWhen_ShouldBeReplacedAndNamedWithTheirNodeInTheNextWaitsNarrative(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), podsLostAfterANodeRespondsAgainReported)
+
+	next := theNextWaitAfter(reported, everyPodOfCheckoutLostReported)
+	replacements := theSchedulingOfEachPodOnTheLastBoardOf(reported)
+
+	expect.Expect(t, len(replacements)).To(expect.Equal(everyPodOfCheckoutLost))
+	expect.Expect(t, theSchedulingNarratedIn(next, replacements)).To(expect.Equal(replacements))
+}
+
+func TestNodesThatRespondAgain_ShouldBeNamedTurningReadyInTheNextWaitNarrative(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), nodeRespondsAgainReported)
+
+	reportShows(t, theNextWaitAfter(reported, theNodesRespondAgainReported), theNodeTurningReadyNarrated)
+}
+
+// theNextWaitAfter reads the Wait line and its narrative, which stand above the
+// separator opening its board.
+func theNextWaitAfter(section, line string) string {
+	_, after, _ := strings.Cut(section, line)
+	wait, _, _ := strings.Cut(after, "\n  "+separatorRune)
+
+	return wait
+}
+
+// The board the section's last Wait drew is the one the Thens judged; its Node
+// lines alone stand two levels in, opening on the Node's name, which begins
+// with its Zone's, and its NodePool before its Pods. The counts are sorted, since which Node of the
+// Zone takes the second Pod is the scheduler's pick.
+func thePodsPerNodeOnTheLastBoardOf(section string) []int {
+	var counts []int
+	for _, line := range theNodeLinesOfTheLastBoardOf(section) {
+		counts = append(counts, len(strings.Fields(line))-columnsBeforeThePods)
+	}
+	slices.Sort(counts)
+
+	return counts
+}
+
+func theNodeLinesOfTheLastBoardOf(section string) []string {
+	board := section[strings.LastIndex(section, "\n  "+waitOpens):]
+
+	var lines []string
+	for line := range strings.SplitSeq(board, "\n") {
+		if strings.HasPrefix(line, aNodeLineOnABoard) {
+			lines = append(lines, line)
+		}
+	}
+
+	return lines
+}
+
+// The replacements are the Pods standing once the Placement Settled, so the
+// narrative's scheduling of each reads as it would print, sorted, since the
+// order the lost Pods are replaced in is the control plane's.
+func theSchedulingOfEachPodOnTheLastBoardOf(section string) []string {
+	var scheduled []string
+	for _, line := range theNodeLinesOfTheLastBoardOf(section) {
+		fields := strings.Fields(line)
+		for _, pod := range fields[columnsBeforeThePods:] {
+			scheduled = append(scheduled, aPodScheduled(strings.TrimSuffix(pod, ","), fields[0]))
+		}
+	}
+	slices.Sort(scheduled)
+
+	return scheduled
+}
+
+// A narrative line reads its moment, then what happened, then when the Pod
+// turned Running; only what happened names the Pod and its Node. A Pod
+// scheduled that stands on no board after it is no replacement and is left
+// out.
+func theSchedulingNarratedIn(narrative string, replacements []string) []string {
+	scheduled := []string{}
+	for line := range strings.SplitSeq(narrative, "\n") {
+		_, happened, _ := strings.Cut(strings.TrimSpace(line), "  ")
+		happened, _, _ = strings.Cut(happened, ", Running at ")
+		if slices.Contains(replacements, happened) {
+			scheduled = append(scheduled, happened)
+		}
+	}
+	slices.Sort(scheduled)
+
+	return scheduled
+}
+
+func aPodScheduled(pod, node string) string {
+	return "Pod " + pod + " scheduled on " + node
+}
+
+const (
+	waitOpens            = "Wait for "
+	aNodeLineOnABoard    = "    zone-"
+	columnsBeforeThePods = 2
+)
+
 func TestSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerLabelValue(t *testing.T) {
 	t.Parallel()
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), spreadOverOnDemandAndSpotReported)
@@ -697,7 +858,8 @@ func TestARunOfEveryScenario_ShouldReportEachScenariosLinesTogetherInDeclaredOrd
 		resilientPlacementReported, nodeStopsRespondingReported,
 		zoneStopsRespondingReported, noRoomAfterAZoneStopsRespondingReported,
 		spreadOverOnDemandAndSpotReported, spotNodesStopRespondingReported,
-		generalPodsStayOffGpuNodesReported,
+		generalPodsStayOffGpuNodesReported, nodeRespondsAgainReported, zoneRespondsAgainReported,
+		podsLostAfterANodeRespondsAgainReported,
 	}
 
 	reported := theRunOfEveryScenario(t)

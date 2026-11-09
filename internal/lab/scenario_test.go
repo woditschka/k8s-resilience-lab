@@ -136,7 +136,7 @@ func aScenarioAfterFailingWithNoWaitSince(placed scenario.Placement, stopped str
 // The copy stands for the Timeline a recording delivered, so a Then judging
 // every Floor reads it without a cluster.
 func aScenarioRecording(stopped []string, recorded ...scenario.Entry) *Scenario {
-	return &Scenario{stoppedPerWhen: [][]string{stopped}, recorded: &timelineCopy{copied: recorded}}
+	return &Scenario{nodesPerWhen: []scenario.WhenNodes{{Stopped: stopped}}, recorded: &timelineCopy{copied: recorded}}
 }
 
 func aScenarioAfterFailingAZone(placed scenario.Placement, stopped string) *Scenario {
@@ -1572,7 +1572,7 @@ func theReadingsOf(t *testing.T, recorded []scenario.Entry, stopped []string, ju
 	t.Helper()
 
 	readings, err := scenario.NewTimeline(recorded).
-		Floors(judged, []string{string(someDeploymentName), string(anotherDeploymentName)}, [][]string{stopped})
+		Floors(judged, []string{string(someDeploymentName), string(anotherDeploymentName)}, []scenario.WhenNodes{{Stopped: stopped}})
 	if err != nil {
 		t.Fatalf("read the Floors over the recorded Timeline: %v", err)
 	}
@@ -2198,3 +2198,147 @@ func TestANoScheduleTolerationStatingAWaitingTime_ShouldEndTheScenarioAtThatGive
 	expect.Expect(t, refusing.outcome().EndedAt.Kind).To(expect.Equal(GivenStep))
 	causeNames(t, refusing.outcome(), "pod.Toleration states tolerationSeconds")
 }
+
+// The refusal names the Nodes stopped as none, whichever When it ends.
+const theRefusalOfNoNodeStopped = "no Node of the Topology is stopped"
+
+func aScenarioWithNodesStopped(placed scenario.Placement, stopped ...string) *Scenario {
+	return &Scenario{observed: placed, settled: true, stopped: stopped, failed: stopped}
+}
+
+// Once a When resolves the Nodes or Zones it makes respond again it renames its
+// line, which only a run against a cluster reaches.
+func nodesRespondingAgainStep() Step {
+	return Step{Kind: WhenStep, Name: theStoppedNodesRespondingAgain}
+}
+
+func zonesRespondingAgainStep() Step {
+	return Step{Kind: WhenStep, Name: theStoppedZonesRespondingAgain}
+}
+
+func TestAWhenMakingNodesOrZonesRespondAgainWithNoNodeStopped_ShouldEndTheScenarioNamingThatWhen(t *testing.T) {
+	whens := map[string]struct {
+		respond func(*Scenario)
+		step    Step
+	}{
+		"the Nodes responding again": {
+			respond: func(ending *Scenario) { ending.When().NodesRespondAgain() },
+			step:    nodesRespondingAgainStep(),
+		},
+		"the Zones responding again": {
+			respond: func(ending *Scenario) { ending.When().ZonesRespondAgain() },
+			step:    zonesRespondingAgainStep(),
+		},
+	}
+
+	for responding, when := range whens {
+		t.Run(responding, func(t *testing.T) {
+			declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+			ending := aScenarioOver(onePodPerNodeOf(declared))
+			ending.Given().Zones(twoZones, theGeneralNodePool())
+			ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+
+			when.respond(ending)
+			ending.Then().AllPodsRunning()
+
+			ended := ending.outcome()
+			expect.Expect(t, ended.EndedAt).To(expect.Equal(when.step))
+			expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+				topologyStepOf(twoZones, twoNodesPerZone),
+				resilientPlacementDeploymentStepOf(podsOverEveryNode),
+				when.step,
+			}))
+			causeNames(t, ended, theRefusalOfNoNodeStopped)
+		})
+	}
+}
+
+func TestAWhenMakingZonesRespondAgainWhileAStoppedNodeSharesItsZoneWithARespondingNode_ShouldEndTheScenarioNamingIt(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	stoppedAlone := theNodeThatStopped(declared)
+	ending := aScenarioWithNodesStopped(everyPodBackOnTheRespondingNodesOf(declared, stoppedAlone), stoppedAlone)
+	ending.Given().Zones(twoZones, theGeneralNodePool())
+	ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+
+	ending.When().ZonesRespondAgain()
+	ending.Then().AllPodsRunning()
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(zonesRespondingAgainStep()))
+	expect.Expect(t, ended.Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone),
+		resilientPlacementDeploymentStepOf(podsOverEveryNode),
+		zonesRespondingAgainStep(),
+	}))
+	causeNames(t, ended, stoppedAlone)
+}
+
+func podsFailStepOf(pods int, deployment DeploymentName) Step {
+	return Step{Kind: WhenStep, Name: podsFailing(pods, deployment)}
+}
+
+// The Pods carry their Deployment, which a board names them by, and no
+// cluster is reached, as the Scenario ends before it loses one.
+func aScenarioHoldingOnePodPerNodeOfTheDeployment(t *testing.T, declared scenario.Topology) *Scenario {
+	t.Helper()
+
+	placed := onePodPerNodeOf(declared).Pods()
+	for index := range placed {
+		placed[index].Deployment = string(someDeploymentName)
+	}
+	observed := scenario.NewPlacement(declared.Nodes(), placed)
+
+	return &Scenario{observed: observed, settled: true, board: scenario.NewPlacementBoard(declared, observed, scenario.PlacementBoard{})}
+}
+
+func TestAWhenLosingPodsOfAnUndeclaredDeployment_ShouldEndTheScenarioAtThatWhenNamingIt(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	ending := aScenarioHoldingOnePodPerNodeOfTheDeployment(t, declared)
+	ending.Given().Zones(twoZones, theGeneralNodePool())
+	ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+
+	ending.When().PodsFail(anotherDeploymentName, oneLost)
+	ending.Then().AllPodsRunning()
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(podsFailStepOf(oneLost, anotherDeploymentName)))
+	causeNames(t, ended, string(anotherDeploymentName))
+}
+
+func TestAWhenLosingFewerThanOnePodOrMoreThanArePlaced_ShouldEndTheScenarioAtThatWhenNamingIt(t *testing.T) {
+	refusals := map[string]int{
+		"no Pod":                    noPodLost,
+		"more Pods than are placed": podsOverEveryNode + oneLost,
+	}
+
+	for refused, count := range refusals {
+		t.Run(refused, func(t *testing.T) {
+			declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+			ending := aScenarioHoldingOnePodPerNodeOfTheDeployment(t, declared)
+			ending.Given().Zones(twoZones, theGeneralNodePool())
+			ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+
+			ending.When().PodsFail(someDeploymentName, count)
+
+			ended := ending.outcome()
+			expect.Expect(t, ended.EndedAt).To(expect.Equal(podsFailStepOf(count, someDeploymentName)))
+			causeNames(t, ended, strconv.Itoa(count)+" Pods of the Deployment "+string(someDeploymentName))
+		})
+	}
+}
+
+func TestAWhenLosingPodsOfADeploymentDeclaringAFailureTolerance_ShouldEndTheScenarioAtThatWhenNamingIt(t *testing.T) {
+	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
+	ending := aScenarioHoldingOnePodPerNodeOfTheDeployment(t, declared)
+	ending.Given().Zones(twoZones, theGeneralNodePool())
+	ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+		SurvivesLosing(Nodes(oneLost))
+
+	ending.When().PodsFail(someDeploymentName, oneLost)
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(podsFailStepOf(oneLost, someDeploymentName)))
+	causeNames(t, ended, "the Deployment "+string(someDeploymentName)+" declares a Failure tolerance")
+}
+
+const noPodLost = 0

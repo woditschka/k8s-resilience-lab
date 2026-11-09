@@ -20,6 +20,9 @@ func All() []func(*lab.Scenario) {
 		ADeploymentSpreadOverOnDemandAndSpot_ShouldPlaceTwoPodsPerZoneAndThreePerCapacityType,
 		SpotNodesThatStopResponding_ShouldSurviveLosingThreePodsAndRestoreNinePodsOnTheOnDemandNodes,
 		GeneralPodsBesideTaintedGPUNodes_ShouldStayOffThemWhileTheTolerantPodsReachThemByTheirRequest,
+		ANodeThatRespondsAgain_ShouldHoldNoPodWhileEveryZoneKeepsThreeAndOneNodeHoldsTwo,
+		AZoneThatRespondsAgain_ShouldHoldNoPodWhileTheNinePodsStayRunningOnTheOtherZones,
+		PodsLostAfterANodeRespondsAgain_ShouldPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone,
 	}
 }
 
@@ -152,4 +155,69 @@ func GeneralPodsBesideTaintedGPUNodes_ShouldStayOffThemWhileTheTolerantPodsReach
 	s.Then().AllPodsRunning()
 	s.Then().PodsOnNodePool("gpu", 3)
 	s.Then().PodsOnNodePool("general", 0)
+}
+
+// A Node stops responding and then responds again. The control plane never
+// moves a running Pod, so the Node stays empty while its Zone keeps three Pods
+// on its other two Nodes.
+func ANodeThatRespondsAgain_ShouldHoldNoPodWhileEveryZoneKeepsThreeAndOneNodeHoldsTwo(s *lab.Scenario) {
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
+	s.WaitFor().AllNodesReady()
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement())
+	s.WaitFor().AllPodsReady()
+
+	s.When().NodesFail(1)
+	s.WaitFor().AllPodsReadyWithinSeconds(30)
+
+	s.When().NodesRespondAgain()
+	s.WaitFor().AllNodesReadyWithinSeconds(30)
+	s.WaitFor().PlacementSettledWithinSeconds(30)
+
+	s.Then().NoPodsOnTheFailedNodes()
+	s.Then().PodsPerZone(3)
+}
+
+// A whole Zone stops responding and then responds again. The control plane
+// never moves a running Pod, so the Zone stays empty while the nine Pods keep
+// running on the other two.
+func AZoneThatRespondsAgain_ShouldHoldNoPodWhileTheNinePodsStayRunningOnTheOtherZones(s *lab.Scenario) {
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
+	s.WaitFor().AllNodesReady()
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement())
+	s.WaitFor().AllPodsReady()
+
+	s.When().ZonesFail(1)
+	s.WaitFor().AllPodsReadyWithinSeconds(30)
+
+	s.When().ZonesRespondAgain()
+	s.WaitFor().AllNodesReadyWithinSeconds(30)
+	s.WaitFor().PlacementSettledWithinSeconds(30)
+
+	s.Then().NoPodsInTheFailedZones()
+	s.Then().AllPodsRunning()
+}
+
+// A Node stops responding and responds again, and then every Pod is lost. The
+// Deployment replaces them, and the Node that responded again, empty until
+// now, takes one like every other Node.
+func PodsLostAfterANodeRespondsAgain_ShouldPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone(s *lab.Scenario) {
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
+	s.WaitFor().AllNodesReady()
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement())
+	s.WaitFor().AllPodsReady()
+
+	s.When().NodesFail(1)
+	s.WaitFor().AllPodsReadyWithinSeconds(30)
+
+	s.When().NodesRespondAgain()
+	s.WaitFor().AllNodesReadyWithinSeconds(30)
+	s.WaitFor().PlacementSettledWithinSeconds(30)
+
+	s.When().PodsFail(Checkout, 9)
+	s.WaitFor().AllPodsReadyWithinSeconds(30)
+	s.WaitFor().PlacementSettledWithinSeconds(30)
+
+	s.Then().AllPodsRunning()
+	s.Then().PodsPerZone(3)
+	s.Then().PodsPerNode(1)
 }

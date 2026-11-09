@@ -87,18 +87,27 @@ func (r FloorReading) theFailures() string {
 	return "the Failure"
 }
 
+// WhenNodes are the Nodes one When stopped responding and the Nodes it made
+// respond again; a Failure leaves the second empty, and a When making Nodes
+// respond again the first.
+type WhenNodes struct {
+	Stopped         []string
+	RespondingAgain []string
+}
+
 // Floors reads each judged Deployment from the first When's note, pairing the
-// k-th When note with the k-th set of Nodes stopped. A Pod counts while its
-// latest reading is Running on a Node no When noted so far has stopped, so a Pod
-// the control plane still reports Running on a stopped Node is lost from that
-// note. A Pod belongs to the declared Deployment whose name begins its own, at
-// the longest match. A Timeline holding no When's note judges nothing.
-func (t Timeline) Floors(judged []Deployment, declared []string, stoppedPerWhen [][]string) ([]FloorReading, error) {
+// k-th When note with the k-th WhenNodes. A Pod counts while its latest reading
+// is Running on a Node stopped at no note so far, or made to respond again
+// since, so a Pod the control plane still reports Running on a stopped Node is
+// lost from that note until its Node responds again. A Pod belongs to the
+// declared Deployment whose name begins its own, at the longest match. A
+// Timeline holding no When's note judges nothing.
+func (t Timeline) Floors(judged []Deployment, declared []string, perWhen []WhenNodes) ([]FloorReading, error) {
 	replay := newFloorReplay(judged, declared)
 	for _, entry := range t.entries {
 		switch {
 		case entry.notesAWhen():
-			replay.when(stoppedPerWhen)
+			replay.when(perWhen)
 		case entry.Kind == PodObject && entry.observed():
 			replay.readPod(entry)
 		default:
@@ -124,6 +133,7 @@ type floorReplay struct {
 	stopped  map[string]bool
 	ready    map[string]int
 	whens    int
+	failures int
 	watches  []*floorWatch
 }
 
@@ -203,17 +213,15 @@ func (r *floorReplay) counts(pod *podReplayed) bool {
 }
 
 // when keeps the Pods Ready just before the first Failure stops any Node, and
-// counts every Pod again once the Nodes stopped grow.
-func (r *floorReplay) when(stoppedPerWhen [][]string) {
+// counts every Pod again once the Nodes stopped change.
+func (r *floorReplay) when(perWhen []WhenNodes) {
 	if r.whens == 0 {
 		for _, watch := range r.watches {
 			watch.readyAtFirst = r.readyOf(watch.reading.deployment.Name())
 		}
 	}
-	if r.whens < len(stoppedPerWhen) {
-		for _, node := range stoppedPerWhen[r.whens] {
-			r.stopped[node] = true
-		}
+	if r.whens < len(perWhen) {
+		r.change(perWhen[r.whens])
 	}
 	r.whens++
 
@@ -222,6 +230,18 @@ func (r *floorReplay) when(stoppedPerWhen [][]string) {
 		if r.counts(pod) {
 			r.ready[pod.deployment]++
 		}
+	}
+}
+
+func (r *floorReplay) change(nodes WhenNodes) {
+	if len(nodes.Stopped) > 0 {
+		r.failures++
+	}
+	for _, node := range nodes.Stopped {
+		r.stopped[node] = true
+	}
+	for _, node := range nodes.RespondingAgain {
+		delete(r.stopped, node)
 	}
 }
 
@@ -263,7 +283,7 @@ func (r *floorReplay) readings() []FloorReading {
 	readings := make([]FloorReading, 0, len(r.watches))
 	for _, watch := range r.watches {
 		reading := watch.reading
-		reading.failures = r.whens
+		reading.failures = r.failures
 		readings = append(readings, reading)
 	}
 

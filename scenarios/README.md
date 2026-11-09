@@ -55,11 +55,16 @@ A setting of several values is a keyed literal under Kubernetes' names, such as 
 - `pod.StartupMillis(n)` — the Startup time stating the whole milliseconds each of its Pods takes to start
 - `pod.StartupMillisBetween(shortest, longest)` — the Startup time stating that each Pod takes a time between the two, in whole milliseconds
 
-**Failures**
+**Whens**
 
 - `When().NodesFail(n)` — n Nodes stop responding
 - `When().ZonesFail(n)` — every Node of n Zones stops responding at once
 - `When().NodesLabelledFail(node.Labels{key: value})` — every Node carrying that one label a NodePool states stops responding at once; a key or value no NodePool states ends the Scenario at this When
+- `When().NodesRespondAgain()` — every Node stopped so far responds again, whichever When stopped it, and the line names each Node; no Node stopped ends the Scenario at this When
+- `When().ZonesRespondAgain()` — every Node stopped so far responds again, and the line names each Zone; no Node stopped, or a stopped Node sharing its Zone with a Node still responding, ends the Scenario at this When
+- `When().PodsFail(deployment, n)` — n placed Pods of the named Deployment are lost in one Step, the first the last Wait's board lists, and the line names each; its ReplicaSet replaces them. A Deployment the Scenario has not declared, one declaring a Failure tolerance, a count below one or above its placed Pods, and a picked Pod already gone end the Scenario at this When
+
+A Node that responds again stays among the Nodes and Zones that failed, so `NoPodsOnTheFailedNodes` and `NoPodsInTheFailedZones` still judge it.
 
 **Waits**
 
@@ -80,7 +85,7 @@ A Wait stating no time is held to the lab's own waiting time, which every run re
 - `Then().PodsPending(pods)` — how many Pods the Placement leaves Pending, which is what no Node had room for
 - `Then().NoPodsOnTheFailedNodes()`
 - `Then().NoPodsInTheFailedZones()`
-- `Then().EnoughPodsStayedReady()` — every Deployment declaring a Failure tolerance kept its Floor of Ready Pods at every moment from the first Failure to this Then, read off the Timeline rather than the Settled Placement. A Pod counts while Ready, as the lab reads it from its Running entry, and one on a Node a When stopped is lost from that When, though the control plane still reports it. One line beneath the Then per judged Deployment states whether it kept or fell below its Floor and its lowest Ready count, when and for how long. Each Deployment falling below records a Finding naming how low, from when and for how long, the Pods lost and the Nodes they were on. No Deployment declaring a Failure tolerance, or no When before it, ends the Scenario at this Then
+- `Then().EnoughPodsStayedReady()` — every Deployment declaring a Failure tolerance kept its Floor of Ready Pods at every moment from the first Failure to this Then, read off the Timeline rather than the Settled Placement. A Pod counts while Ready, as the lab reads it from its Running entry, and one on a Node a When stopped is lost from that When until a When makes the Node respond again, though the control plane still reports it. One line beneath the Then per judged Deployment states whether it kept or fell below its Floor and its lowest Ready count, when and for how long. Each Deployment falling below records a Finding naming how low, from when and for how long, the Pods lost and the Nodes they were on. No Deployment declaring a Failure tolerance, or no When before it, ends the Scenario at this Then
 
 ## The Scenarios
 
@@ -91,6 +96,9 @@ A Wait stating no time is held to the lab's own waiting time, which every run re
 - **a-deployment-spread-over-on-demand-and-spot** — three Zones, each holding an on-demand and a spot NodePool of one Standard Node, labelled by capacity type: six Pods spread evenly over both, two per Zone and three per capacity type.
 - **spot-nodes-that-stop-responding** — three Zones, each holding two on-demand Nodes and one spot Node under Resilient placement, then every spot Node stops responding at once: the nine Pods are restored on the on-demand Nodes, three per Zone, and the Deployment keeps its Floor of six Ready Pods through the three spot Nodes it survives losing.
 - **general-pods-beside-tainted-gpu-nodes** — three Zones, each holding two general Nodes and one larger gpu Node tainted NoSchedule: six Pods under Resilient placement all run on the general Nodes, then three Pods tolerating the taint run on the gpu Nodes, drawn there by GPU Pods, a Request only a gpu Node has room for.
+- **a-node-that-responds-again** — the Resilient placement world, one Node stops responding and then responds again: the control plane never moves a running Pod, so that Node stays empty, every Zone still holds three Pods, and one Node holds two.
+- **a-zone-that-responds-again** — the same world, every Node of one Zone stops responding and then responds again: that Zone stays empty while the nine Pods stay Running on the other Zones.
+- **pods-lost-after-a-node-responds-again** — the same world as a-node-that-responds-again, then all nine Pods are lost: the Deployment replaces them, and the Node that responded again takes a Pod like every other, so each Node holds one and every Zone three.
 
 A Scenario's Steps are read in `scenarios.go`.
 
