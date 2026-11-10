@@ -6,7 +6,11 @@ package lab
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +18,8 @@ import (
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
+	"github.com/woditschka/k8s-resilience-lab/internal/lab/descheduler"
+	"github.com/woditschka/k8s-resilience-lab/internal/lab/node"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
@@ -768,4 +774,367 @@ func theLastWhenOf(ran Outcome) Step {
 	}
 
 	return last
+}
+
+const (
+	theScenarioRunningADeschedulerPass = "a-scenario-running-a-descheduler-pass"
+	theScenarioWhosePassEvictsNothing  = "a-scenario-whose-descheduler-pass-evicts-nothing"
+	theScenarioWhosePassCannotRun      = "a-scenario-whose-descheduler-pass-cannot-run"
+	thePolicyRestoringTheSpread        = "even-spread-restored"
+	aPolicyNameThePassRefuses          = "never-scheduled"
+	onePodDescheduled                  = 1
+	aPassThatExitedNonZero             = "exited with status"
+	anActionTheDeschedulerRefuses      = descheduler.UnsatisfiableConstraintAction("NeverSchedule")
+)
+
+func aPolicyRestoringTheSpread() descheduler.Policy {
+	return aPolicyBalancingTheSpreadUnder(thePolicyRestoringTheSpread, descheduler.DoNotSchedule)
+}
+
+// The Descheduler validates the constraint actions it is given, so a pass under
+// this policy exits non-zero before it evicts anything.
+func aPolicyThePassRefuses() descheduler.Policy {
+	return aPolicyBalancingTheSpreadUnder(aPolicyNameThePassRefuses, anActionTheDeschedulerRefuses)
+}
+
+func aPolicyBalancingTheSpreadUnder(name string, action descheduler.UnsatisfiableConstraintAction) descheduler.Policy {
+	return descheduler.Policy{Profiles: []descheduler.Profile{{
+		Name: name,
+		PluginConfig: []descheduler.PluginConfig{{
+			Name: descheduler.RemovePodsViolatingTopologySpreadConstraint,
+			Args: descheduler.RemovePodsViolatingTopologySpreadConstraintArgs{
+				Constraints: []descheduler.UnsatisfiableConstraintAction{action},
+			},
+		}},
+		Plugins: descheduler.Plugins{
+			Balance: descheduler.PluginSet{Enabled: []descheduler.PluginName{descheduler.RemovePodsViolatingTopologySpreadConstraint}},
+		},
+	}}}
+}
+
+func deschedulerPassStepUnder(name string) Step {
+	step := deschedulerPassStepNamingNoPolicy()
+	step.Name += " under " + name
+
+	return step
+}
+
+func thePodsDescheduledBeforeTheStepAfter(recorded scenario.Timeline, noted Step) []string {
+	descheduled := []string{}
+	passed := false
+	for _, entry := range recorded.Entries() {
+		switch {
+		case entry.Kind == scenario.StepObject && passed:
+			return descheduled
+		case entry.Kind == scenario.StepObject:
+			passed = entry.Detail == noted.String()
+		case passed && entry.Reason == scenario.EvictedByTheDescheduler:
+			descheduled = append(descheduled, entry.Name)
+		}
+	}
+
+	return descheduled
+}
+
+// A Node that stops responding and responds again leaves it empty and another
+// Node of its Zone holding two, past the hostname spread, so the pass evicts
+// one Pod. Its eviction recorded before the next Step's note shows the next
+// Step started once the pass ended.
+func TestAWhenRunningADeschedulerPass_ShouldRunOnePassUnderTheDeclaredPolicyBeforeTheNextStep(t *testing.T) {
+	t.Parallel()
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioRunningADeschedulerPass, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+		steps.Given().Descheduler(aPolicyRestoringTheSpread())
+		steps.WaitFor().AllPodsReady()
+		steps.When().NodesFail(oneLost)
+		steps.WaitFor().AllPodsReady()
+		steps.When().NodesRespondAgain()
+		steps.WaitFor().AllNodesReady()
+		steps.WaitFor().PlacementSettled()
+		steps.When().DeschedulerRunsOnce()
+		steps.WaitFor().AllPodsReady()
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioRunningADeschedulerPass, err)
+	}
+
+	pass := deschedulerPassStepUnder(thePolicyRestoringTheSpread)
+	descheduled := thePodsDescheduledBeforeTheStepAfter(ran.Timeline, pass)
+	expect.Expect(t, causeOf(ran)).To(expect.Equal(""))
+	expect.Expect(t, theLastWhenOf(ran)).To(expect.Equal(pass))
+	expect.Expect(t, len(descheduled)).To(expect.Equal(onePodDescheduled))
+}
+
+func TestADeschedulerPassThatCannotRunOrDoesNotEnd_ShouldEndTheScenarioAtThatWhenNamingWhy(t *testing.T) {
+	t.Parallel()
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioWhosePassCannotRun, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Descheduler(aPolicyThePassRefuses())
+		steps.When().DeschedulerRunsOnce()
+		steps.WaitFor().AllNodesReady()
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioWhosePassCannotRun, err)
+	}
+
+	expect.Expect(t, ran.EndedAt).To(expect.Equal(deschedulerPassStepUnder(aPolicyNameThePassRefuses)))
+	causeNames(t, ran, aPassThatExitedNonZero)
+}
+
+// One Pod on every Node holds the hostname spread, so the pass finds no Pod to
+// evict, and the Wait after it narrates no change.
+func TestADeschedulerPassEvictingNothing_ShouldLeaveThePlacementAsItStands(t *testing.T) {
+	t.Parallel()
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioWhosePassEvictsNothing, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+		steps.Given().Descheduler(aPolicyRestoringTheSpread())
+		steps.WaitFor().AllPodsReady()
+		steps.WaitFor().PlacementSettled()
+		steps.When().DeschedulerRunsOnce()
+		steps.WaitFor().AllPodsReady()
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioWhosePassEvictsNothing, err)
+	}
+
+	expect.Expect(t, causeOf(ran)).To(expect.Equal(""))
+	expect.Expect(t, ran.Steps[len(ran.Steps)-1].Narrative).To(expect.Equal(scenario.WaitNarrative{}))
+}
+
+const (
+	theScenarioRunningPassesOnAnInterval  = "a-scenario-running-descheduler-passes-on-an-interval"
+	theScenarioSettlingBeforeItsFirstPass = "a-scenario-settling-before-its-first-descheduler-pass"
+	theScenarioWhoseIntervalCannotRun     = "a-scenario-whose-descheduler-interval-cannot-run"
+	theScenarioEndingWithItsInterval      = "a-scenario-ending-with-its-descheduler-interval"
+	theScenarioEndedAtAStepByItsInterval  = "a-scenario-ended-at-a-step-with-its-descheduler-interval"
+	aPassEverySecond                      = 1
+	// The Settled Wait is held to less than the interval, so reaching it in
+	// time shows it never waited on a pass.
+	anIntervalLongerThanTheSettledWait = 60
+	aSettledWaitShorterThanTheInterval = 30
+)
+
+// A pass begun after a Wait for one evicting nothing is what ends that Wait,
+// so the second such Wait reached shows a further pass ran on the interval.
+func TestADeschedulerDeclaredWithAnInterval_ShouldRunAPassOnEachIntervalUntilTheScenarioEnds(t *testing.T) {
+	t.Parallel()
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioRunningPassesOnAnInterval, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+		steps.Given().Descheduler(aPolicyRestoringTheSpread()).EverySeconds(aPassEverySecond)
+		steps.WaitFor().AllPodsReady()
+		steps.WaitFor().DeschedulerPassEvictingNothing()
+		steps.WaitFor().DeschedulerPassEvictingNothing()
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioRunningPassesOnAnInterval, err)
+	}
+
+	expect.Expect(t, causeOf(ran)).To(expect.Equal(""))
+	expect.Expect(t, theWaitsReachedIn(ran)).To(expect.Equal([]string{
+		allNodesReady, allPodsReady, aDeschedulerPassEvictingNothing, aDeschedulerPassEvictingNothing,
+	}))
+}
+
+func theWaitsReachedIn(ran Outcome) []string {
+	var reached []string
+	for _, step := range ran.Steps {
+		if step.Kind == WaitStep && step.Reached {
+			reached = append(reached, step.Name)
+		}
+	}
+
+	return reached
+}
+
+func TestAWaitForAPlacementSettledUnderADeschedulerOnAnInterval_ShouldObserveThePlacementAlone(t *testing.T) {
+	t.Parallel()
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioSettlingBeforeItsFirstPass, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+		steps.Given().Descheduler(aPolicyRestoringTheSpread()).EverySeconds(anIntervalLongerThanTheSettledWait)
+		steps.WaitFor().PlacementSettledWithinSeconds(aSettledWaitShorterThanTheInterval)
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioSettlingBeforeItsFirstPass, err)
+	}
+
+	expect.Expect(t, causeOf(ran)).To(expect.Equal(""))
+	expect.Expect(t, theWaitsReachedIn(ran)).To(expect.Equal([]string{allNodesReady, theSettledPlacement}))
+}
+
+func TestADeschedulerOnAnIntervalThatCannotStartOrStops_ShouldEndTheScenarioNamingWhy(t *testing.T) {
+	t.Parallel()
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioWhoseIntervalCannotRun, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Descheduler(aPolicyThePassRefuses()).EverySeconds(aPassEverySecond)
+		steps.WaitFor().AllNodesReady()
+		steps.WaitFor().DeschedulerPassEvictingNothing()
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioWhoseIntervalCannotRun, err)
+	}
+
+	expect.Expect(t, ran.EndedAt.Name).To(expect.Equal(aDeschedulerPassEvictingNothing))
+	causeNames(t, ran, aPassThatExitedNonZero)
+}
+
+// The engine is asked for every container named after the Scenario's cluster,
+// its pass containers included, so the test names no container of its own.
+func theContainersNamedAfter(t *testing.T, engine cluster.Endpoint, clusterName string) []string {
+	t.Helper()
+
+	asked := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", engine.Socket())
+		},
+	}}
+	defer asked.CloseIdleConnections()
+	filters, err := json.Marshal(map[string][]string{"name": {clusterName}})
+	if err != nil {
+		t.Fatalf("compose the engine's filter for %s: %v", clusterName, err)
+	}
+	request, err := http.NewRequestWithContext(context.WithoutCancel(t.Context()), http.MethodGet,
+		"http://engine/containers/json?"+url.Values{"all": {"true"}, "filters": {string(filters)}}.Encode(), nil)
+	if err != nil {
+		t.Fatalf("build the engine's listing of %s: %v", clusterName, err)
+	}
+	answer, err := asked.Do(request)
+	if err != nil {
+		t.Fatalf("list the containers named after %s: %v", clusterName, err)
+	}
+	defer func() { _ = answer.Body.Close() }()
+
+	var listed []struct{ Names []string }
+	if err := json.NewDecoder(answer.Body).Decode(&listed); err != nil {
+		t.Fatalf("read the containers named after %s: %v", clusterName, err)
+	}
+	named := []string{}
+	for _, container := range listed {
+		named = append(named, container.Names...)
+	}
+
+	return named
+}
+
+// Each ending follows a Wait a pass ended, so a pass on the interval runs or is
+// about to as the Scenario ends.
+func TestAScenarioWhoseDeschedulerRanOnAnInterval_ShouldLeaveNothingOfItsDeschedulerWhenItEnds(t *testing.T) {
+	t.Parallel()
+	endings := map[string]struct {
+		name   string
+		ending func(*Scenario)
+	}{
+		"every Step carried out": {name: theScenarioEndingWithItsInterval, ending: func(*Scenario) {}},
+		"a Step ending it":       {name: theScenarioEndedAtAStepByItsInterval, ending: func(steps *Scenario) { steps.When().DeschedulerRunsOnce() }},
+	}
+
+	for ended, by := range endings {
+		t.Run(ended, func(t *testing.T) {
+			t.Parallel()
+			engine, err := cluster.DetectEngine(t.Context(), slog.New(slog.DiscardHandler))
+			if err != nil {
+				t.Fatalf("no container engine answers on this machine, so the Simulated Cluster cannot be driven: %v", err)
+			}
+			t.Cleanup(engine.Close)
+
+			ran, err := NewRunner(engine, cluster.DefaultKubernetesVersion(), timeline.NewFolder(t.TempDir())).
+				runNamed(t.Context(), by.name, func(steps *Scenario) {
+					steps.Given().Zones(twoZones, theGeneralNodePool())
+					steps.WaitFor().AllNodesReady()
+					steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+					steps.Given().Descheduler(aPolicyRestoringTheSpread()).EverySeconds(aPassEverySecond)
+					steps.WaitFor().DeschedulerPassEvictingNothing()
+					by.ending(steps)
+				})
+			if err != nil {
+				t.Fatalf("carry out the Scenario %s: %v", by.name, err)
+			}
+
+			expect.Expect(t, theContainersNamedAfter(t, engine, ran.Cluster)).To(expect.Equal([]string{}))
+		})
+	}
+}
+
+const (
+	theTwinOfAZoneThatRespondsAgain = "a-zone-that-responds-again-under-a-descheduler"
+	oneEvictionPerPass              = 1
+)
+
+// The Scenario's own function lives in the scenarios package, which imports this
+// one, so its Steps and policy are written out here as it writes them.
+func aPolicyLikeEvenSpreadRestored() descheduler.Policy {
+	return descheduler.Policy{
+		MaxNoOfPodsToEvictTotal: oneEvictionPerPass,
+		Profiles: []descheduler.Profile{{
+			Name: thePolicyRestoringTheSpread,
+			PluginConfig: []descheduler.PluginConfig{
+				{Name: descheduler.DefaultEvictor, Args: descheduler.DefaultEvictorArgs{NodeFit: true}},
+				{
+					Name: descheduler.RemovePodsViolatingTopologySpreadConstraint,
+					Args: descheduler.RemovePodsViolatingTopologySpreadConstraintArgs{
+						Constraints: []descheduler.UnsatisfiableConstraintAction{descheduler.DoNotSchedule},
+					},
+				},
+			},
+			Plugins: descheduler.Plugins{
+				Balance: descheduler.PluginSet{Enabled: []descheduler.PluginName{descheduler.RemovePodsViolatingTopologySpreadConstraint}},
+			},
+		}},
+	}
+}
+
+func TestAZoneThatRespondsAgainUnderADescheduler_ShouldMovePodsBackUntilEveryZoneHoldsThreeAndEveryNodeOneWithTheFloorHeld(t *testing.T) {
+	const (
+		threeZones        = 3
+		threeNodesPerZone = 3
+		ninePods          = threeZones * threeNodesPerZone
+		threePodsPerZone  = ninePods / threeZones
+		onePodPerNode     = 1
+		aRecoveryWait     = 30
+	)
+	t.Parallel()
+	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theTwinOfAZoneThatRespondsAgain, func(steps *Scenario) {
+		steps.Given().Zones(threeZones, node.Pool(generalNodePool, node.PerZone(threeNodesPerZone), roomyNodes()))
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, ninePods, askingForNothing(), resilientPlacement()).SurvivesLosing(Zones(oneLost))
+		steps.Given().Descheduler(aPolicyLikeEvenSpreadRestored()).EverySeconds(aPassEveryFiveSeconds)
+		steps.WaitFor().AllPodsReady()
+		steps.When().ZonesFail(oneLost)
+		steps.WaitFor().AllPodsReadyWithinSeconds(aRecoveryWait)
+		steps.When().ZonesRespondAgain()
+		steps.WaitFor().AllNodesReadyWithinSeconds(aRecoveryWait)
+		steps.WaitFor().DeschedulerPassEvictingNothing()
+		steps.WaitFor().PlacementSettledWithinSeconds(aRecoveryWait)
+		steps.Then().AllPodsRunning()
+		steps.Then().PodsPerZone(threePodsPerZone)
+		steps.Then().PodsPerNode(onePodPerNode)
+		steps.Then().EnoughPodsStayedReady()
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theTwinOfAZoneThatRespondsAgain, err)
+	}
+
+	expect.Expect(t, causeOf(ran)).To(expect.Equal(""))
+	expect.Expect(t, ran.Findings).To(expect.Equal([]Finding(nil)))
+	expect.Expect(t, len(theEvictionsByTheDeschedulerOn(ran.Timeline)) > 0).To(expect.Equal(true))
+}
+
+func theEvictionsByTheDeschedulerOn(recorded scenario.Timeline) []string {
+	var evicted []string
+	for _, entry := range recorded.Entries() {
+		if entry.Reason == scenario.EvictedByTheDescheduler {
+			evicted = append(evicted, entry.Name)
+		}
+	}
+
+	return evicted
 }

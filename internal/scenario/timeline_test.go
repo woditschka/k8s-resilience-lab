@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -181,6 +182,58 @@ func TestAWaitNarrativeAfterAFailure_ShouldNameNodesNotReadyEvictionsAndReplacem
 			replacementRanAsRead + "  Pod " + aSecondPodAsNamed + " scheduled on " + aSecondNodeName + ", Running at " + replacementRanAsRead,
 		},
 	}))
+}
+
+const aDeschedulerPassLine = "When one Descheduler pass under Even spread restored"
+
+func TestPodsTheDeschedulerEvicted_ShouldBeNamedApartFromAFailuresWithTheirReplacementsInTheNextWaitNarrative(t *testing.T) {
+	descheduled := Entry{
+		Elapsed: whenThePodWasEvicted, Change: ChangeReported, Kind: PodObject, Name: aPodName,
+		Reason: EvictedByTheDescheduler, Detail: aNodeName,
+	}
+	terminating := Entry{
+		Elapsed: whenThePodWasEvicted, Change: ChangeModified, Kind: PodObject, Name: aPodName,
+		Reason: string(PodTerminating), Detail: aNodeName,
+	}
+	arrivals := map[string][]Entry{
+		"the descheduled mark recorded before the Pod marked for deletion": {descheduled, terminating},
+		"the descheduled mark recorded after the Pod marked for deletion":  {terminating, descheduled},
+	}
+
+	for arrival, evicted := range arrivals {
+		t.Run(arrival, func(t *testing.T) {
+			recorded := slices.Concat([]Entry{
+				{
+					Elapsed: whenTheLastNodeWasReady, Change: ChangeAdded, Kind: NodeObject, Name: aNodeName,
+					Reason: string(NodeReady), Detail: someNodeCapacity,
+				},
+				theDeploymentDeployed(),
+				{
+					Elapsed: whenTheFirstPodRan, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
+					Reason: string(PodRunning), Detail: aNodeName,
+				},
+				aWaitNoteAt(whenTheFirstWaitEnded),
+				{Elapsed: whenTheFirstWaitEnded, Change: ChangeNoted, Kind: StepObject, Name: aWhenStepNamed, Detail: aDeschedulerPassLine},
+			}, evicted, []Entry{
+				{
+					Elapsed: whenThePodWasEvicted, Change: ChangeAdded, Kind: PodObject, Name: aSecondPodName,
+					Reason: string(PodPending),
+				},
+				{
+					Elapsed: whenTheReplacementRan, Change: ChangeModified, Kind: PodObject, Name: aSecondPodName,
+					Reason: string(PodRunning), Detail: aSecondNodeName,
+				},
+				aWaitNoteAt(whenTheSecondWaitEnded),
+			})
+
+			narrated := NewTimeline(recorded).WaitNarratives()
+
+			expect.Expect(t, linesOf(narrated)[1]).To(expect.Equal([]string{
+				podEvictedAsRead + "  Pod " + aPodAsTheBoardNamesIt + " evicted from " + aNodeName + " by the Descheduler",
+				replacementRanAsRead + "  Pod " + aSecondPodAsNamed + " scheduled on " + aSecondNodeName + ", Running at " + replacementRanAsRead,
+			}))
+		})
+	}
 }
 
 func TestAWaitNarrative_ShouldNameEachPodLeftPendingWithTheSchedulersReason(t *testing.T) {

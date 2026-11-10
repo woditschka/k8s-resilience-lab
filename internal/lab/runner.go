@@ -76,8 +76,14 @@ func (s *Scenario) outcome() Outcome {
 
 // finish notes the line a further call could still have completed, stops the
 // record and gives each Wait Step its narrative.
+//
+// A pass on the Descheduler's interval that failed after the last Step ends the
+// Scenario at the Given that declared the interval.
 func (s *Scenario) finish() Outcome {
 	s.noteTheOpenLine()
+	if failed := s.descheduling.failure(); failed != nil {
+		s.end(s.deschedulerDeclaredAt, failed)
+	}
 	recorded := s.provisioned.StopRecording()
 
 	finished := s.outcome()
@@ -173,24 +179,34 @@ func NewRunner(engine cluster.Endpoint, version cluster.KubernetesVersion, timel
 // Timeline file the lab could not write does not stop the Scenario and is
 // reported on the Outcome.
 //
-// The returned error is the lab's own failure. A name it cannot derive stops
-// the run before anything is provisioned, so no cluster is named after nothing.
+// The returned error is the lab's own failure. A name it cannot derive, or a
+// Descheduler policy it declares on a version the lab pairs no Descheduler
+// with, stops the run before anything is provisioned, so no cluster is named
+// after nothing.
 func (r *Runner) Run(ctx context.Context, steps func(*Scenario)) (Outcome, error) {
 	name, err := scenarioNameOfFunction(steps)
 	if err != nil {
+		return Outcome{}, err
+	}
+	if err := r.stopAtAnUnpairedDescheduler([]func(*Scenario){steps}); err != nil {
 		return Outcome{}, err
 	}
 
 	return r.runNamed(ctx, name, steps)
 }
 
-// RunAtOnce derives every Scenario name and obtains the Kubernetes version
-// before provisioning anything, so an underivable or duplicate name, or a
-// version the lab cannot obtain, stops the run before any Scenario starts. Past
-// that, one Scenario's failure ends that Scenario alone.
+// RunAtOnce derives every Scenario name, pairs the Descheduler and obtains the
+// Kubernetes version before provisioning anything, so an underivable or
+// duplicate name, a Descheduler policy declared on a version the lab pairs no
+// Descheduler with, or a version the lab cannot obtain, stops the run before
+// any Scenario starts. Past that, one Scenario's failure ends that Scenario
+// alone.
 func (r *Runner) RunAtOnce(ctx context.Context, scenarios []func(*Scenario)) ([]Carried, error) {
 	names, err := scenarioNamesOfEach(scenarios)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.stopAtAnUnpairedDescheduler(scenarios); err != nil {
 		return nil, err
 	}
 
@@ -258,8 +274,35 @@ func (r *Runner) Hold(ctx context.Context, steps func(*Scenario), observer Obser
 	if err != nil {
 		return Outcome{}, err
 	}
+	if err := r.stopAtAnUnpairedDescheduler([]func(*Scenario){steps}); err != nil {
+		return Outcome{}, err
+	}
 
 	return r.holdNamed(ctx, name, steps, observer, injector, reported)
+}
+
+// stopAtAnUnpairedDescheduler stops a run whose Kubernetes version the lab
+// pairs no Descheduler with only where one of its Scenarios declares a
+// Descheduler policy, so a run declaring none keeps every version. The
+// declaring pass runs only on such a version, so a run on a paired one carries
+// out each Scenario's function once.
+func (r *Runner) stopAtAnUnpairedDescheduler(scenarios []func(*Scenario)) error {
+	_, unpaired := r.version.PairedDescheduler()
+	if unpaired == nil || !slices.ContainsFunc(scenarios, declaresADeschedulerPolicy) {
+		return nil
+	}
+
+	return fmt.Errorf("a Scenario of this run declares a Descheduler policy: %w", unpaired)
+}
+
+// declaresADeschedulerPolicy runs the Scenario's function over a Scenario
+// holding no cluster, which carries out its Givens alone: a Given applies
+// nothing, and every other Step records itself before it reaches a cluster.
+func declaresADeschedulerPolicy(steps func(*Scenario)) bool {
+	declaring := &Scenario{declaringOnly: true}
+	steps(declaring)
+
+	return declaring.declaresADeschedulerPolicy
 }
 
 func (r *Runner) holdNamed(ctx context.Context, name string, steps func(*Scenario), observer Observer,
@@ -485,6 +528,10 @@ func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario
 	}
 
 	running := newScenario(ctx, provisioned, copied)
+	running.kubernetes = r.version
+	// Deferred after the removal, so it runs before it: no pass starts on a
+	// removed cluster, and Close finds no pass but one already held.
+	defer running.stopDescheduling()
 	if held != nil {
 		running.haltsAtTheFirstWhen = true
 		// Deferred after the removal, so it runs before it: no observation

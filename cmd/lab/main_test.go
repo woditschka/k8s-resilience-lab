@@ -158,6 +158,8 @@ const (
 	zoneRespondsAgainReported    = aScenarioHeading + "a-zone-that-responds-again"
 	theZonesRespondAgainReported = "When the stopped Zones respond again, " + theZonePickedToFail
 
+	zoneRespondsAgainUnderADeschedulerReported = aScenarioHeading + "a-zone-that-responds-again-under-a-descheduler"
+
 	noPodHeld   = 0
 	onePodHeld  = 1
 	twoPodsHeld = 2
@@ -173,6 +175,15 @@ const (
 	everyPodOfCheckoutLostReported          = "When 9 Pods of checkout fail, "
 	onePodOnEveryNodeHeld                   = 3 * 3
 	everyPodOfCheckoutLost                  = 9
+)
+
+// One Descheduler pass after the stopped Node responded again evicts the one Pod
+// past the spread, and its replacement takes the empty Node.
+const (
+	deschedulerPassAfterANodeRespondsAgainReported = aScenarioHeading + "a-descheduler-pass-after-a-node-responds-again"
+	theDeschedulerPassReported                     = "When one Descheduler pass under even-spread-restored"
+	evictedByTheDeschedulerNarrated                = " by the Descheduler"
+	onePodDescheduled                              = 1
 )
 
 // Each Zone holds one on-demand and one spot Node, so six Pods spread evenly
@@ -549,6 +560,26 @@ func TestPodsLostToAWhen_ShouldBeReplacedAndNamedWithTheirNodeInTheNextWaitsNarr
 	expect.Expect(t, theSchedulingNarratedIn(next, replacements)).To(expect.Equal(replacements))
 }
 
+func TestAWhenRunningADeschedulerPassesLine_ShouldNameTheDeclaredPolicy(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), deschedulerPassAfterANodeRespondsAgainReported)
+
+	reportShows(t, reported, "\n  "+theDeschedulerPassReported+"\n")
+}
+
+func TestADeschedulerPassAfterANodeRespondsAgain_ShouldEvictOnePodAndPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone(t *testing.T) {
+	t.Parallel()
+	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), deschedulerPassAfterANodeRespondsAgainReported)
+
+	next := theNextWaitAfter(reported, theDeschedulerPassReported)
+
+	expect.Expect(t, strings.Count(next, evictedByTheDeschedulerNarrated)).To(expect.Equal(onePodDescheduled))
+	reportShows(t, reported, everyPodRunningJudged)
+	reportShows(t, reported, threePodsPerZoneJudged)
+	reportLacks(t, reported, aFindingReported)
+	expect.Expect(t, thePodsPerNodeOnTheLastBoardOf(reported)).To(expect.Equal(slices.Repeat([]int{onePodHeld}, onePodOnEveryNodeHeld)))
+}
+
 func TestNodesThatRespondAgain_ShouldBeNamedTurningReadyInTheNextWaitNarrative(t *testing.T) {
 	t.Parallel()
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), nodeRespondsAgainReported)
@@ -859,7 +890,8 @@ func TestARunOfEveryScenario_ShouldReportEachScenariosLinesTogetherInDeclaredOrd
 		zoneStopsRespondingReported, noRoomAfterAZoneStopsRespondingReported,
 		spreadOverOnDemandAndSpotReported, spotNodesStopRespondingReported,
 		generalPodsStayOffGpuNodesReported, nodeRespondsAgainReported, zoneRespondsAgainReported,
-		podsLostAfterANodeRespondsAgainReported,
+		zoneRespondsAgainUnderADeschedulerReported,
+		podsLostAfterANodeRespondsAgainReported, deschedulerPassAfterANodeRespondsAgainReported,
 	}
 
 	reported := theRunOfEveryScenario(t)

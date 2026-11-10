@@ -3,6 +3,7 @@ package cluster
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -10,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -617,10 +619,7 @@ func toEntry(elapsed time.Duration, event watch.Event) (scenario.Entry, bool) {
 			Reason: string(readinessOf(*object)), Detail: capacityOf(*object),
 		}, true
 	case *corev1.Pod:
-		return scenario.Entry{
-			Elapsed: elapsed, Change: change, Kind: scenario.PodObject, Name: object.Name,
-			Reason: string(observedPhaseOf(*object)), Detail: object.Spec.NodeName,
-		}, true
+		return fromPod(elapsed, change, *object), true
 	case *appsv1.Deployment:
 		return scenario.Entry{
 			Elapsed: elapsed, Change: change, Kind: scenario.DeploymentObject, Name: object.Name,
@@ -634,6 +633,63 @@ func toEntry(elapsed time.Duration, event watch.Event) (scenario.Entry, bool) {
 	default:
 		return scenario.Entry{}, false
 	}
+}
+
+// The API server marks a Pod it evicts through the eviction subresource with
+// this reason; client-go exports no constant for it.
+const evictionByEvictionAPI = "EvictionByEvictionAPI"
+
+// Only the Descheduler evicts through the eviction subresource in a Simulated
+// Cluster, since a Failure and the taint manager delete. The API server marks
+// the Pod in an update of its own before it marks the Pod for deletion, and
+// that marking still reads Terminating.
+func fromPod(elapsed time.Duration, change scenario.Change, pod corev1.Pod) scenario.Entry {
+	if pod.DeletionTimestamp == nil && isEvictedThroughTheEvictionAPI(pod) {
+		return scenario.Entry{
+			Elapsed: elapsed, Change: scenario.ChangeReported, Kind: scenario.PodObject, Name: pod.Name,
+			Reason: scenario.EvictedByTheDescheduler, Detail: pod.Spec.NodeName,
+		}
+	}
+
+	return scenario.Entry{
+		Elapsed: elapsed, Change: change, Kind: scenario.PodObject, Name: pod.Name,
+		Reason: string(observedPhaseOf(pod)), Detail: pod.Spec.NodeName,
+	}
+}
+
+// anyEvicted judges a pass by the Pods it could evict: those listed before it
+// that were not already leaving. One of them listed no more, marked for
+// deletion or marked a disruption target was evicted, whatever evicted it.
+func anyEvicted(before, after []corev1.Pod) bool {
+	listedAfter := make(map[types.UID]corev1.Pod, len(after))
+	for _, pod := range after {
+		listedAfter[pod.UID] = pod
+	}
+
+	for _, pod := range before {
+		if isLeaving(pod) {
+			continue
+		}
+		still, listed := listedAfter[pod.UID]
+		if !listed || isLeaving(still) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isLeaving(pod corev1.Pod) bool {
+	return pod.DeletionTimestamp != nil || slices.ContainsFunc(pod.Status.Conditions, func(condition corev1.PodCondition) bool {
+		return condition.Type == corev1.DisruptionTarget && condition.Status == corev1.ConditionTrue
+	})
+}
+
+func isEvictedThroughTheEvictionAPI(pod corev1.Pod) bool {
+	return slices.ContainsFunc(pod.Status.Conditions, func(condition corev1.PodCondition) bool {
+		return condition.Type == corev1.DisruptionTarget && condition.Status == corev1.ConditionTrue &&
+			condition.Reason == evictionByEvictionAPI
+	})
 }
 
 // An Event is always read as reported, because it is the control plane

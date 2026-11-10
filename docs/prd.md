@@ -314,6 +314,43 @@ A Scenario's When loses a stated number of one named Deployment's placed Pods in
 
 **Design:** [system-design.md](system-design.md)
 
+### Moving Pods with the Descheduler
+
+<a id="req-sim-031"></a>
+A Scenario's Descheduler evicts running Pods its Descheduler policy names, which the control plane never moves, and their Deployments replace them `[REQ-SIM-031]`. A Given declares the policy by a name stating its intent. Its definition beside the Scenarios mirrors line for line the YAML the Descheduler itself reads, under Kubernetes' names. The lab defines none and adds or infers nothing. The Descheduler mirrors the run's Kubernetes version. A dry run, leaving no Entry, is no part of the lab.
+
+A When runs one Descheduler pass under the declared policy, and the next Step starts once it has ended `[REQ-SIM-031]`. The Scenario a-descheduler-pass-after-a-node-responds-again evicts one Pod to reach the Placement pods-lost-after-a-node-responds-again reaches by losing nine.
+
+A further call on the Given runs a pass on each interval it states `[REQ-SIM-031]`. A Wait of its own waits for a pass evicting nothing; Settled keeps its meaning. The Scenario a-zone-that-responds-again-under-a-descheduler, a-zone-that-responds-again's twin, runs a pass every five seconds from its Givens on and moves the Pods back with no When.
+
+**Done when:**
+
+- `[REQ-SIM-031]` given a declared Descheduler policy, when its Given line is read, then it names the policy and the Descheduler version. The lines beneath report each limit, profile, plugin and argument under their Kubernetes names.
+- `[REQ-SIM-031]` given a Descheduler policy, when its definition is read, then its limits, profiles, plugin arguments and plugins by extension point stand there as the Descheduler's YAML holds them. The lab adds none.
+- `[REQ-SIM-031]` given a Kubernetes version the lab pairs with no Descheduler, when a run carries a Scenario declaring a policy, then it stops before any Simulated Cluster, naming that version. The default version has one.
+- `[REQ-SIM-031]` given a Scenario declaring a Descheduler policy, when a When runs one Descheduler pass, then the pass runs under that policy in one Step, ending with the pass. The When's line names the policy.
+- `[REQ-SIM-031]` given a Descheduler pass, when the next Wait's narrative is read, then it names each Pod the Descheduler evicted and each replacement scheduled with its Node. It sets those evictions apart from a Failure's.
+- `[REQ-SIM-031]` given a-node-that-responds-again's Settled Placement, with its Node Ready again and empty, when one pass runs and the Placement Settles, then the pass evicted one Pod. Every Node holds one Pod, nine are Running and every Zone holds three.
+- `[REQ-SIM-031]` given a Scenario that ran a pass, when it ends however it ends, then nothing of its Descheduler remains.
+- `[REQ-SIM-031]` given a policy declared with an interval, when the Scenario runs, then a pass runs on each interval until it ends. The Given line names the interval.
+- `[REQ-SIM-031]` given a Descheduler on an interval, when a Scenario Waits for a pass evicting nothing, then the Wait ends at the first such pass begun after it.
+- `[REQ-SIM-031]` given a-zone-that-responds-again-under-a-descheduler, its Descheduler running every five seconds, when the Zone fails and responds again, a pass evicts nothing and the Placement Settles, then nine Pods are Running. Every Zone holds three, every Node one, and the Floor holds.
+
+**Edge cases:**
+
+1. A Descheduler policy naming no plugin, refused where it is stated.
+2. Two Descheduler policies defined under one name, reported where they are defined.
+3. A Scenario declaring a second Descheduler policy, refused where it is stated.
+4. A When running a Descheduler pass in a Scenario declaring no policy, ending the Scenario at that When, naming it.
+5. A Descheduler pass that cannot run or does not end, ending the Scenario at that When, naming why.
+6. A Descheduler pass evicting nothing, leaving the Placement as it stands.
+7. A Descheduler interval of zero or less, refused where it is stated.
+8. A Wait for a pass evicting nothing in a Scenario whose Descheduler runs on no interval, ending the Scenario at that Wait, naming it.
+9. A When running one pass while the Descheduler runs on an interval, ending the Scenario at that When, naming it.
+10. A Descheduler on an interval that cannot start or stops, ending the Scenario, naming why.
+
+**Design:** [system-design.md](system-design.md)
+
 ### Keeping Pods off a dedicated NodePool
 
 <a id="req-sim-019"></a>
@@ -571,7 +608,6 @@ An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inje
 - Whether the Live view's Timeline sets a Wait narrative's moments apart from other Entries.
 - Whether the Live view is reachable from another machine.
 - Whether a PodDisruptionBudget joins the lab as a Given.
-- Whether a descheduler run that changes nothing, a dry run, joins the lab, given a Timeline records what changed.
 - Whether a Pod Failure a Scenario writes paces itself to the Floor, or leaves a fall for the Then judging the Floor to report.
 - Whether a Scenario loses Pods repeatedly until the Placement is even, beside losing them once in one When.
 - How long a Timeline file is kept, and whether the lab ever removes one.

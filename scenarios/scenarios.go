@@ -22,7 +22,9 @@ func All() []func(*lab.Scenario) {
 		GeneralPodsBesideTaintedGPUNodes_ShouldStayOffThemWhileTheTolerantPodsReachThemByTheirRequest,
 		ANodeThatRespondsAgain_ShouldHoldNoPodWhileEveryZoneKeepsThreeAndOneNodeHoldsTwo,
 		AZoneThatRespondsAgain_ShouldHoldNoPodWhileTheNinePodsStayRunningOnTheOtherZones,
+		AZoneThatRespondsAgainUnderADescheduler_ShouldMovePodsBackUntilEveryZoneHoldsThreeAndEveryNodeOneWithTheFloorHeld,
 		PodsLostAfterANodeRespondsAgain_ShouldPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone,
+		ADeschedulerPassAfterANodeRespondsAgain_ShouldEvictOnePodAndPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone,
 	}
 }
 
@@ -197,6 +199,31 @@ func AZoneThatRespondsAgain_ShouldHoldNoPodWhileTheNinePodsStayRunningOnTheOther
 	s.Then().AllPodsRunning()
 }
 
+// a-zone-that-responds-again's twin, its Descheduler running from the start:
+// once the Zone responds again, the passes move Pods back into it one at a
+// time, so the spread is restored without the Ready Pods falling below the
+// Floor.
+func AZoneThatRespondsAgainUnderADescheduler_ShouldMovePodsBackUntilEveryZoneHoldsThreeAndEveryNodeOneWithTheFloorHeld(s *lab.Scenario) {
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
+	s.WaitFor().AllNodesReady()
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosing(lab.Zones(1))
+	s.Given().Descheduler(EvenSpreadRestored()).EverySeconds(5)
+	s.WaitFor().AllPodsReady()
+
+	s.When().ZonesFail(1)
+	s.WaitFor().AllPodsReadyWithinSeconds(30)
+
+	s.When().ZonesRespondAgain()
+	s.WaitFor().AllNodesReadyWithinSeconds(30)
+	s.WaitFor().DeschedulerPassEvictingNothing()
+	s.WaitFor().PlacementSettledWithinSeconds(30)
+
+	s.Then().AllPodsRunning()
+	s.Then().PodsPerZone(3)
+	s.Then().PodsPerNode(1)
+	s.Then().EnoughPodsStayedReady()
+}
+
 // A Node stops responding and responds again, and then every Pod is lost. The
 // Deployment replaces them, and the Node that responded again, empty until
 // now, takes one like every other Node.
@@ -214,6 +241,33 @@ func PodsLostAfterANodeRespondsAgain_ShouldPlaceOnePodOnEveryNodeWithNinePodsRun
 	s.WaitFor().PlacementSettledWithinSeconds(30)
 
 	s.When().PodsFail(Checkout, 9)
+	s.WaitFor().AllPodsReadyWithinSeconds(30)
+	s.WaitFor().PlacementSettledWithinSeconds(30)
+
+	s.Then().AllPodsRunning()
+	s.Then().PodsPerZone(3)
+	s.Then().PodsPerNode(1)
+}
+
+// A Node stops responding and responds again, leaving it empty and another
+// Node of its Zone holding two. One Descheduler pass evicts one of those two,
+// and the spread places its replacement on the empty Node: the Placement that
+// losing every Pod reaches, for the loss of one.
+func ADeschedulerPassAfterANodeRespondsAgain_ShouldEvictOnePodAndPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone(s *lab.Scenario) {
+	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
+	s.WaitFor().AllNodesReady()
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement())
+	s.Given().Descheduler(EvenSpreadRestored())
+	s.WaitFor().AllPodsReady()
+
+	s.When().NodesFail(1)
+	s.WaitFor().AllPodsReadyWithinSeconds(30)
+
+	s.When().NodesRespondAgain()
+	s.WaitFor().AllNodesReadyWithinSeconds(30)
+	s.WaitFor().PlacementSettledWithinSeconds(30)
+
+	s.When().DeschedulerRunsOnce()
 	s.WaitFor().AllPodsReadyWithinSeconds(30)
 	s.WaitFor().PlacementSettledWithinSeconds(30)
 

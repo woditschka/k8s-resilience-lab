@@ -896,6 +896,64 @@ func TestAnObservedChangeToAKindATimelineReads_ShouldBecomeOneEntryOfThatChange(
 	}
 }
 
+// The API server marks a Pod it evicts through the eviction subresource as a
+// disruption target in an update of its own, before it marks the Pod for
+// deletion; the taint manager marks the Pods it deletes under another reason.
+const (
+	theEvictionAPIsReason  = "EvictionByEvictionAPI"
+	theTaintManagersReason = "DeletionByTaintManager"
+)
+
+func aPodMarkedADisruptionTarget(reason string) *corev1.Pod {
+	return &corev1.Pod{
+		Name: watchedPodName,
+		Spec: corev1.PodSpec{NodeName: watchedNodeName},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.DisruptionTarget, Status: corev1.ConditionTrue, Reason: reason},
+			},
+		},
+	}
+}
+
+func TestAPodTheEvictionAPIMarkedADisruptionTargetBeforeItsDeletion_ShouldBecomeAnEntryReadingThatPodEvictedByTheDescheduler(t *testing.T) {
+	marked := watch.Event{Type: watch.Modified, Object: aPodMarkedADisruptionTarget(theEvictionAPIsReason)}
+
+	entry, recorded := toEntry(observedAfter, marked)
+
+	expect.Expect(t, recorded).To(expect.Equal(true))
+	expect.Expect(t, entry).To(expect.Equal(scenario.Entry{
+		Elapsed: observedAfter, Change: scenario.ChangeReported, Kind: scenario.PodObject,
+		Name: watchedPodName, Reason: scenario.EvictedByTheDescheduler, Detail: watchedNodeName,
+	}))
+}
+
+func TestAPodTheEvictionAPIMarkedADisruptionTargetAndForDeletion_ShouldStillReadTerminating(t *testing.T) {
+	pod := aPodMarkedADisruptionTarget(theEvictionAPIsReason)
+	pod.DeletionTimestamp = markedForDeletion()
+
+	entry, recorded := toEntry(observedAfter, watch.Event{Type: watch.Modified, Object: pod})
+
+	expect.Expect(t, recorded).To(expect.Equal(true))
+	expect.Expect(t, entry).To(expect.Equal(scenario.Entry{
+		Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.PodObject,
+		Name: watchedPodName, Reason: string(scenario.PodTerminating), Detail: watchedNodeName,
+	}))
+}
+
+func TestAPodTheTaintManagerMarkedADisruptionTarget_ShouldReadAsAnyPodOfItsPhase(t *testing.T) {
+	marked := watch.Event{Type: watch.Modified, Object: aPodMarkedADisruptionTarget(theTaintManagersReason)}
+
+	entry, recorded := toEntry(observedAfter, marked)
+
+	expect.Expect(t, recorded).To(expect.Equal(true))
+	expect.Expect(t, entry).To(expect.Equal(scenario.Entry{
+		Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.PodObject,
+		Name: watchedPodName, Reason: string(scenario.PodRunning), Detail: watchedNodeName,
+	}))
+}
+
 func TestAnObservedChangeNoTimelineRecords_ShouldBecomeNoEntry(t *testing.T) {
 	changes := map[string]watch.Event{
 		"a change to an object of a kind no Timeline records": {

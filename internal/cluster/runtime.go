@@ -304,8 +304,12 @@ func engineMessageIn(body io.Reader) string {
 }
 
 // The engine publishes the API port on a host port of its own choosing, so two
-// Simulated Clusters on one machine cannot collide on a port.
-const apiServerPort = "8080/tcp"
+// Simulated Clusters on one machine cannot collide on a port. A container
+// sharing the cluster's network namespace reaches the port itself.
+const (
+	apiServerContainerPort = "8080"
+	apiServerPort          = apiServerContainerPort + "/tcp"
+)
 
 // The API server is unauthenticated, so a port published on any other interface
 // would offer it to the network.
@@ -444,7 +448,7 @@ func (e Engine) pullWhenAbsent(ctx context.Context, image string) error {
 	query := url.Values{"fromImage": {repository}, "tag": {tag}}
 	progress, err := engineStream(pulling, e.endpoint, http.MethodPost, "/images/create?"+query.Encode(), nil)
 	if err != nil {
-		return fmt.Errorf("pull the cluster image %s: %w", image, err)
+		return fmt.Errorf("pull the image %s: %w", image, err)
 	}
 	defer func() { _ = progress.Close() }()
 
@@ -460,7 +464,7 @@ func (e Engine) pullWhenAbsent(ctx context.Context, image string) error {
 			return fmt.Errorf("read the progress of pulling %s: %w", image, err)
 		}
 		if message.Error != "" {
-			return fmt.Errorf("pull the cluster image %s: %s", image, message.Error)
+			return fmt.Errorf("pull the image %s: %s", image, message.Error)
 		}
 	}
 
@@ -539,12 +543,18 @@ func (c *ClusterContainer) APIAddress(ctx context.Context) (string, error) {
 
 // Remove returns only once the engine no longer holds the container.
 func (c *ClusterContainer) Remove(ctx context.Context) error {
+	return removeContainer(ctx, c.endpoint, c.identifier, "the Simulated Cluster "+c.name)
+}
+
+// removeContainer acts on an identifier one of the package's own handles holds,
+// and the container is described by the handle's role and name.
+func removeContainer(ctx context.Context, endpoint Endpoint, identifier, described string) error {
 	query := url.Values{"force": {"true"}, "v": {"true"}}
-	if err := engineRequest(ctx, c.endpoint, http.MethodDelete, "/containers/"+c.identifier+"?"+query.Encode(), nil, nil); err != nil {
-		return fmt.Errorf("remove the Simulated Cluster %s: %w", c.name, err)
+	if err := engineRequest(ctx, endpoint, http.MethodDelete, "/containers/"+identifier+"?"+query.Encode(), nil, nil); err != nil {
+		return fmt.Errorf("remove %s: %w", described, err)
 	}
 
-	return c.awaitRemoved(ctx)
+	return awaitRemoved(ctx, endpoint, identifier, described)
 }
 
 // errStillHeld is not a failure of its own: it is the reason a removal that
@@ -557,13 +567,13 @@ var errStillHeld = errors.New("the engine still holds it")
 // removal: a transport failure, an engine restart or a 5xx is an engine the lab
 // cannot read, and reading those alike would report a removal complete while an
 // unauthenticated API server still runs.
-func (c *ClusterContainer) awaitRemoved(ctx context.Context) error {
+func awaitRemoved(ctx context.Context, endpoint Endpoint, identifier, described string) error {
 	removing, cancel := context.WithTimeout(ctx, removalTimeout)
 	defer cancel()
 
 	for {
 		unconfirmed := errStillHeld
-		if err := engineRequest(removing, c.endpoint, http.MethodGet, "/containers/"+c.identifier+"/json", nil, nil); err != nil {
+		if err := engineRequest(removing, endpoint, http.MethodGet, "/containers/"+identifier+"/json", nil, nil); err != nil {
 			if isNoLongerHeld(err) {
 				return nil
 			}
@@ -572,7 +582,7 @@ func (c *ClusterContainer) awaitRemoved(ctx context.Context) error {
 
 		select {
 		case <-removing.Done():
-			return fmt.Errorf("the removal of the Simulated Cluster %s was not confirmed within %s: %w", c.name, removalTimeout, unconfirmed)
+			return fmt.Errorf("the removal of %s was not confirmed within %s: %w", described, removalTimeout, unconfirmed)
 		case <-time.After(pollInterval):
 		}
 	}

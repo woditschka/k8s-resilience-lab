@@ -64,6 +64,21 @@ const (
 
 var theLabsSourceRoots = []string{"internal", "cmd"}
 
+// In theDeschedulerPolicies every declaration is an exported function taking
+// nothing that returns one keyed composite literal of
+// theDeschedulerPolicyDefinition, each profile's name a string literal, or of
+// theDeschedulerGroup. No other source writes either literal, and only
+// theDeschedulersConversion calls theDomainsDeschedulerPolicy.
+const (
+	theDeschedulerPolicies         = "descheduler.go"
+	theDeschedulerPolicyDefinition = "Policy"
+	theDeschedulerGroup            = "PluginConfig"
+	theDeschedulerProfiles         = "Profiles"
+	theDeschedulerProfileName      = "Name"
+	theDeschedulersConversion      = "Declared"
+	theDomainsDeschedulerPolicy    = "NewDeschedulerPolicy"
+)
+
 // In thePodSpecifications every declaration is an exported function taking
 // nothing that returns one call of thePodSpecificationDefinition, the name
 // first as a string literal and the Startup time second, or one of
@@ -118,9 +133,10 @@ const (
 )
 
 const (
-	theStepSurface = "github.com/woditschka/k8s-resilience-lab/internal/lab"
-	thePodPackage  = theStepSurface + "/pod"
-	theNodePackage = theStepSurface + "/node"
+	theStepSurface        = "github.com/woditschka/k8s-resilience-lab/internal/lab"
+	thePodPackage         = theStepSurface + "/pod"
+	theNodePackage        = theStepSurface + "/node"
+	theDeschedulerPackage = theStepSurface + "/descheduler"
 )
 
 // A source reaching the surface under another name is reported as holding no
@@ -129,10 +145,11 @@ const (
 	theStepSurfaceName   = "lab"
 	thePodName           = "pod"
 	theNodeName          = "node"
+	theDeschedulerName   = "descheduler"
 	theScenarioParameter = "*" + theStepSurfaceName + ".Scenario"
 )
 
-var theSubjects = []string{theStepSurfaceName, thePodName, theNodeName}
+var theSubjects = []string{theStepSurfaceName, thePodName, theNodeName, theDeschedulerName}
 
 const theLabsOwnPackageDir = "internal/lab"
 
@@ -148,12 +165,13 @@ const (
 	theStepSurfaceImport      = `"` + theStepSurface + `"`
 	thePodImport              = `"` + thePodPackage + `"`
 	theNodeImport             = `"` + theNodePackage + `"`
+	theDeschedulerImport      = `"` + theDeschedulerPackage + `"`
 	thePodSettingsImport      = thePodSettingsName + ` "` + thePodSettingsPackage + `"`
 	theKubernetesClientImport = `"k8s.io/client-go/kubernetes"`
 	theDomainImport           = `"github.com/woditschka/k8s-resilience-lab/internal/scenario"`
 )
 
-var theScenarioImports = []string{theStepSurfaceImport, theNodeImport, thePodImport}
+var theScenarioImports = []string{theStepSurfaceImport, theDeschedulerImport, theNodeImport, thePodImport}
 
 // theScenarioSourceShape is written as a Scenario of the lab is written, so a
 // rule reaches its lines the same way.
@@ -3040,6 +3058,8 @@ func declarationsThatDoNotBelong(files []modulerules.GoFile) []string {
 			offenders = append(offenders, declarationsThatAreNotNodeLabelKeys(file)...)
 		case thePodSpecifications:
 			offenders = append(offenders, declarationsThatAreNotPodSpecifications(file)...)
+		case theDeschedulerPolicies:
+			offenders = append(offenders, declarationsThatAreNotDeschedulerPolicies(file)...)
 		case theList:
 			offenders = append(offenders, declarationsThatAreNeitherTheListNorAScenario(file)...)
 		default:
@@ -3458,12 +3478,12 @@ func readTheReadme(t *testing.T, place string) string {
 }
 
 // Read on scratch sources, since no shipped Scenario reaches full access.
-func TestTheImportRule_ShouldAdmitTheLabsThreePackagesAndThePodSettingsPackageAlone(t *testing.T) {
+func TestTheImportRule_ShouldAdmitTheLabsFourPackagesAndThePodSettingsPackageAlone(t *testing.T) {
 	written := map[string]struct {
 		imported []string
 		admitted bool
 	}{
-		"the lab's three packages": {
+		"the lab's four packages": {
 			imported: theScenarioImports,
 			admitted: true,
 		},
@@ -3493,26 +3513,26 @@ func TestTheImportRule_ShouldAdmitTheLabsThreePackagesAndThePodSettingsPackageAl
 	}
 }
 
-// The three packages alone are what make every name a Scenario writes one the
+// The four packages alone are what make every name a Scenario writes one the
 // lab offers it; the Pod settings package is the single exception, for full
 // access.
 func machineryImportedBy(source modulerules.GoFile) []string {
-	admitted := []string{theStepSurface, thePodPackage, theNodePackage, thePodSettingsPackage}
+	admitted := []string{theStepSurface, thePodPackage, theNodePackage, theDeschedulerPackage, thePodSettingsPackage}
 
 	var offenders []string
 	for _, imported := range source.Imports {
 		if slices.Contains(admitted, imported) {
 			continue
 		}
-		offenders = append(offenders, fmt.Sprintf("  %s imports %s, which is none of lab, pod and node nor the Pod settings full access reaches",
+		offenders = append(offenders, fmt.Sprintf("  %s imports %s, which is none of lab, pod, node and descheduler nor the Pod settings full access reaches",
 			source.Path, imported))
 	}
 
 	return offenders
 }
 
-// A Scenario's three subjects then form no cycle and each reads on its own.
-func TestThePodAndNodePackages_ShouldImportNeitherTheStepSurfaceNorEachOther(t *testing.T) {
+// A Scenario's subjects then form no cycle and each reads on its own.
+func TestThePodNodeAndDeschedulerPackages_ShouldImportNeitherTheStepSurfaceNorEachOther(t *testing.T) {
 	root, err := modulerules.Root(t.Context(), ownPackageDir)
 	if err != nil {
 		t.Fatalf("locate the root of the module: %v", err)
@@ -3529,8 +3549,9 @@ func TestThePodAndNodePackages_ShouldImportNeitherTheStepSurfaceNorEachOther(t *
 
 func backEdgesAmong(sources []modulerules.GoFile) []string {
 	refused := map[string][]string{
-		thePodName:  {theStepSurface, theNodePackage},
-		theNodeName: {theStepSurface, thePodPackage},
+		thePodName:         {theStepSurface, theNodePackage, theDeschedulerPackage},
+		theNodeName:        {theStepSurface, thePodPackage, theDeschedulerPackage},
+		theDeschedulerName: {theStepSurface, thePodPackage, theNodePackage},
 	}
 
 	var offenders []string
@@ -3896,4 +3917,334 @@ func keysEveryValue(literal *ast.CompositeLit) bool {
 
 		return !isKeyed
 	})
+}
+
+const (
+	aFileOfDeschedulerPoliciesShape = `package scenarios
+
+import "github.com/woditschka/k8s-resilience-lab/internal/lab/descheduler"
+
+%s
+`
+	theBalancedPolicyName       = "balanced-over-zones"
+	theBalancedPolicyDefinition = `func BalancedOverZones() descheduler.Policy {
+	return descheduler.Policy{
+		MaxNoOfPodsToEvictPerNode: 1,
+		Profiles: []descheduler.Profile{{
+			Name:         "` + theBalancedPolicyName + `",
+			PluginConfig: []descheduler.PluginConfig{EvictorFittingTheNode()},
+			Plugins: descheduler.Plugins{
+				Balance: descheduler.PluginSet{Enabled: []descheduler.PluginName{descheduler.RemovePodsViolatingTopologySpreadConstraint}},
+			},
+		}},
+	}
+}`
+	theEvictorGroupDefinition = `func EvictorFittingTheNode() descheduler.PluginConfig {
+	return descheduler.PluginConfig{Name: descheduler.DefaultEvictor, Args: descheduler.DefaultEvictorArgs{NodeFit: true}}
+}`
+	aSecondDefinitionOfBalanced = `func BalancedOverNodes() descheduler.Policy {
+	return descheduler.Policy{Profiles: []descheduler.Profile{{
+		Name:    "` + theBalancedPolicyName + `",
+		Plugins: descheduler.Plugins{Balance: descheduler.PluginSet{Enabled: []descheduler.PluginName{descheduler.RemoveDuplicates}}},
+	}}}
+}`
+)
+
+func TestEveryDeschedulerPolicyOfTheScenarios_ShouldBeDefinedOnceBesideThem(t *testing.T) {
+	place := theScenariosPlace(t)
+
+	offenders := slices.Concat(
+		deschedulerPoliciesNotDefinedOnceBesideTheScenarios(filesOfThePlace(t, place)),
+		deschedulerPoliciesOfTheLabsOwn(theLabsOwnSources(t)))
+
+	if len(offenders) > 0 {
+		t.Errorf("each Descheduler policy is defined once in %s, by an exported function taking nothing that returns one keyed descheduler.%s literal, and the lab defines none, but:\n%s",
+			theDeschedulerPolicies, theDeschedulerPolicyDefinition, strings.Join(offenders, "\n"))
+	}
+}
+
+func TestADeschedulerPolicyDefinedBesideTheScenarios_ShouldBeAdmittedAsAKeyedLiteralUnderKubernetesNames(t *testing.T) {
+	place := aPlaceHolding(t, map[string]string{
+		theScenarioSource: aScenarioSourceWhoseStepsAre(theTopologyLine),
+		theDeschedulerPolicies: fmt.Sprintf(aFileOfDeschedulerPoliciesShape,
+			theBalancedPolicyDefinition+"\n\n"+theEvictorGroupDefinition),
+	})
+
+	offenders := deschedulerPoliciesNotDefinedOnceBesideTheScenarios(place)
+
+	expect.Expect(t, offenders).To(expect.HaveLen[string](0))
+}
+
+func TestTwoDeschedulerPoliciesDefinedUnderOneName_ShouldBeReportedWhereTheyAreDefined(t *testing.T) {
+	place := aPlaceHolding(t, map[string]string{
+		theScenarioSource: aScenarioSourceWhoseStepsAre(theTopologyLine),
+		theDeschedulerPolicies: fmt.Sprintf(aFileOfDeschedulerPoliciesShape,
+			theBalancedPolicyDefinition+"\n\n"+theEvictorGroupDefinition+"\n\n"+aSecondDefinitionOfBalanced),
+	})
+
+	offenders := deschedulerPoliciesNotDefinedOnceBesideTheScenarios(place)
+
+	expect.Expect(t, offenders).To(expect.Equal([]string{
+		fmt.Sprintf("  %s defines the Descheduler policy %q twice or more", theDeschedulerPolicies, theBalancedPolicyName),
+	}))
+}
+
+// Read on scratch sources, since the shipped sources hold only the descheduler
+// package's own conversion of a policy.
+func TestTheLabDefinesNoDeschedulerPolicyRule_ShouldReportEveryDefinitionButTheDeschedulerPackagesOwnConversion(t *testing.T) {
+	written := map[string]struct {
+		source   string
+		admitted bool
+	}{
+		"the descheduler package's own conversion of a policy": {
+			source: `package descheduler
+
+func (p Policy) Declared() (scenario.DeschedulerPolicy, error) {
+	return scenario.NewDeschedulerPolicy(p.MaxNoOfPodsToEvictPerNode)
+}
+`,
+			admitted: true,
+		},
+		"the Step surface writing a policy literal of its own": {
+			source: `package lab
+
+func balanced() descheduler.Policy {
+	return descheduler.Policy{Profiles: []descheduler.Profile{{Name: "balanced"}}}
+}
+`,
+		},
+		"the Step surface writing a group of its own": {
+			source: `package lab
+
+func evictor() []descheduler.PluginConfig {
+	return []descheduler.PluginConfig{{Name: descheduler.DefaultEvictor}}
+}
+`,
+		},
+		"the command reaching the domain's constructor": {
+			source: `package main
+
+func balanced() scenario.DeschedulerPolicy {
+	policy, _ := scenario.NewDeschedulerPolicy(0)
+	return policy
+}
+`,
+		},
+	}
+
+	for shape, taken := range written {
+		t.Run(shape, func(t *testing.T) {
+			sources := aPlaceHolding(t, map[string]string{theLabsSource: taken.source})
+
+			offenders := deschedulerPoliciesOfTheLabsOwn(sources)
+
+			expect.Expect(t, len(offenders) == 0).To(expect.Equal(taken.admitted))
+		})
+	}
+}
+
+func deschedulerPoliciesNotDefinedOnceBesideTheScenarios(files []modulerules.GoFile) []string {
+	var offenders []string
+	defined := make(map[string]int)
+	for _, file := range files {
+		if filepath.Base(file.Path) != theDeschedulerPolicies {
+			offenders = append(offenders, deschedulerLiteralsOutsideTheDeschedulerPolicies(file)...)
+
+			continue
+		}
+		offenders = append(offenders, declarationsThatAreNotDeschedulerPolicies(file)...)
+		for _, declared := range file.Declarations {
+			if name, isAPolicy := theDeschedulerPolicyDefinedBy(declared); isAPolicy {
+				defined[name]++
+			}
+		}
+	}
+	for name, definitions := range defined {
+		if definitions > onlyOnce {
+			offenders = append(offenders, fmt.Sprintf("  %s defines the Descheduler policy %q twice or more",
+				theDeschedulerPolicies, name))
+		}
+	}
+
+	return offenders
+}
+
+func declarationsThatAreNotDeschedulerPolicies(source modulerules.GoFile) []string {
+	var offenders []string
+	for _, declared := range source.Declarations {
+		_, isAPolicy := theDeschedulerPolicyDefinedBy(declared)
+		if !isAPolicy && theDeschedulerLiteralReturnedBy(declared, theDeschedulerGroup) == nil {
+			offenders = append(offenders, fmt.Sprintf("  %s declares the %s %s, which is not an exported function "+
+				"taking nothing that returns one keyed descheduler.%s literal, each profile named by a string, "+
+				"or one keyed descheduler.%s literal",
+				source.Path, declared.Kind, declared.Name, theDeschedulerPolicyDefinition, theDeschedulerGroup))
+		}
+	}
+
+	return offenders
+}
+
+// A policy is named by its profile names in order, as the domain value names
+// it, so two definitions naming their profiles alike define one name twice.
+func theDeschedulerPolicyDefinedBy(declared modulerules.Declaration) (string, bool) {
+	policy := theDeschedulerLiteralReturnedBy(declared, theDeschedulerPolicyDefinition)
+	if policy == nil {
+		return "", false
+	}
+	profiles, isAList := valueKeyed(policy, theDeschedulerProfiles).(*ast.CompositeLit)
+	if !isAList {
+		return "", false
+	}
+
+	names := make([]string, 0, len(profiles.Elts))
+	for _, element := range profiles.Elts {
+		profile, isALiteral := element.(*ast.CompositeLit)
+		if !isALiteral {
+			return "", false
+		}
+		written, isAString := valueKeyed(profile, theDeschedulerProfileName).(*ast.BasicLit)
+		if !isAString || written.Kind != token.STRING {
+			return "", false
+		}
+		name, err := strconv.Unquote(written.Value)
+		if err != nil {
+			return "", false
+		}
+		names = append(names, name)
+	}
+
+	return strings.Join(names, ", "), true
+}
+
+// A definition is an exported function taking nothing whose one statement
+// returns a keyed literal of the qualified type.
+func theDeschedulerLiteralReturnedBy(declared modulerules.Declaration, definition string) *ast.CompositeLit {
+	if declared.Kind != modulerules.FuncDeclaration || !declared.Exported ||
+		len(declared.Parameters) != 0 || len(declared.Statements) != onlyOnce {
+		return nil
+	}
+	returned, isAReturn := strings.CutPrefix(declared.Statements[0].Written, theReturn)
+	if !isAReturn {
+		return nil
+	}
+	parsed, err := parser.ParseExpr(returned)
+	if err != nil {
+		return nil
+	}
+	literal, isALiteral := parsed.(*ast.CompositeLit)
+	if !isALiteral || !namesThe(literal.Type, theDeschedulerName, definition) || !keysEveryValue(literal) {
+		return nil
+	}
+
+	return literal
+}
+
+func valueKeyed(literal *ast.CompositeLit, field string) ast.Expr {
+	for _, element := range literal.Elts {
+		keyed, isKeyed := element.(*ast.KeyValueExpr)
+		if !isKeyed {
+			continue
+		}
+		if key, isAName := keyed.Key.(*ast.Ident); isAName && key.Name == field {
+			return keyed.Value
+		}
+	}
+
+	return nil
+}
+
+func deschedulerLiteralsOutsideTheDeschedulerPolicies(source modulerules.GoFile) []string {
+	var offenders []string
+	for _, declaredIn := range declarationsWritingADeschedulerLiteral(source) {
+		offenders = append(offenders, fmt.Sprintf("  %s, in %s: defines a Descheduler policy outside %s",
+			source.Path, declaredIn, theDeschedulerPolicies))
+	}
+
+	return offenders
+}
+
+func deschedulerPoliciesOfTheLabsOwn(files []modulerules.GoFile) []string {
+	var offenders []string
+	for _, file := range files {
+		for _, declaredIn := range declarationsWritingADeschedulerLiteral(file) {
+			offenders = append(offenders, fmt.Sprintf("  %s, in %s: a descheduler.%s or descheduler.%s literal "+
+				"defines a Descheduler policy of the lab's own", file.Path, declaredIn, theDeschedulerPolicyDefinition, theDeschedulerGroup))
+		}
+		for _, declared := range file.Declarations {
+			if callsTheDomainsDeschedulerPolicy(file.Package, declared) {
+				offenders = append(offenders, fmt.Sprintf("  %s, in %s: %s.%s defines a Descheduler policy of the lab's own",
+					file.Path, declared.Name, theDomainsName, theDomainsDeschedulerPolicy))
+			}
+		}
+	}
+
+	return offenders
+}
+
+func callsTheDomainsDeschedulerPolicy(declaredIn string, declared modulerules.Declaration) bool {
+	isTheConversion := declaredIn == theDeschedulerName && declared.Name == theDeschedulersConversion
+
+	return !isTheConversion && slices.ContainsFunc(declared.Names, func(used modulerules.UsedName) bool {
+		return used.Name == theDomainsDeschedulerPolicy &&
+			(used.Qualifier == theDomainsName || used.Qualifier == "" && declaredIn == theDomainsName)
+	})
+}
+
+// The source is parsed again, since a declaration's names do not tell a
+// literal from a type in a signature. A slice literal of either type counts,
+// since its elements leave the type out.
+func declarationsWritingADeschedulerLiteral(source modulerules.GoFile) []string {
+	parsed, err := parser.ParseFile(token.NewFileSet(), source.Path, nil, parser.SkipObjectResolution)
+	if err != nil {
+		return []string{fmt.Sprintf("unparsable (%v)", err)}
+	}
+
+	var writing []string
+	for _, declaration := range parsed.Decls {
+		if writesADeschedulerLiteral(declaration) {
+			writing = append(writing, theNameOfTheDeclaration(declaration))
+		}
+	}
+
+	return writing
+}
+
+func writesADeschedulerLiteral(declaration ast.Decl) bool {
+	found := false
+	ast.Inspect(declaration, func(visited ast.Node) bool {
+		literal, isALiteral := visited.(*ast.CompositeLit)
+		if !isALiteral {
+			return !found
+		}
+		written := literal.Type
+		if list, isAList := written.(*ast.ArrayType); isAList {
+			written = list.Elt
+		}
+		found = found || namesThe(written, theDeschedulerName, theDeschedulerPolicyDefinition) ||
+			namesThe(written, theDeschedulerName, theDeschedulerGroup)
+
+		return !found
+	})
+
+	return found
+}
+
+func theNameOfTheDeclaration(declaration ast.Decl) string {
+	switch shape := declaration.(type) {
+	case *ast.FuncDecl:
+		return shape.Name.Name
+	case *ast.GenDecl:
+		var names []string
+		for _, spec := range shape.Specs {
+			if values, isAValue := spec.(*ast.ValueSpec); isAValue {
+				for _, name := range values.Names {
+					names = append(names, name.Name)
+				}
+			}
+		}
+
+		return strings.Join(names, ", ")
+	default:
+		return ""
+	}
 }

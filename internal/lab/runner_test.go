@@ -381,3 +381,88 @@ func TestAScenarioNameMatchingNone_ShouldBeRefusedNamingEveryScenarioInOrder(t *
 			theFirstConditionsName, theSecondConditionsName, err)
 	}
 }
+
+// Each is declared at the top level, because a closure's runtime name names no
+// condition.
+func ADeclaredDeschedulerPolicy_ShouldBeRunByThePairedDescheduler(steps *Scenario) {
+	steps.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName))
+}
+
+func NoDeschedulerPolicy_ShouldRunOnAnyVersion(steps *Scenario) {
+	steps.Given().Zones(twoZones, theGeneralNodePool())
+}
+
+// The engine endpoint answers nothing, so a run reaching it fails; stopping
+// first is what names the version.
+func aRunnerOn(t *testing.T, version cluster.KubernetesVersion) *Runner {
+	t.Helper()
+
+	return NewRunner(cluster.Endpoint{}, version, timeline.NewFolder(t.TempDir()))
+}
+
+func TestAKubernetesVersionPairedWithNoDescheduler_ShouldStopARunDeclaringAPolicyBeforeAnyClusterNamingThatVersion(t *testing.T) {
+	running := aRunnerOn(t, theVersionPairedWithNoDescheduler(t))
+	runs := map[string]func() error{
+		"every Scenario at once": func() error {
+			_, err := running.RunAtOnce(t.Context(), []func(*Scenario){ADeclaredDeschedulerPolicy_ShouldBeRunByThePairedDescheduler})
+
+			return err
+		},
+		"one Scenario": func() error {
+			_, err := running.Run(t.Context(), ADeclaredDeschedulerPolicy_ShouldBeRunByThePairedDescheduler)
+
+			return err
+		},
+		"one Scenario held": func() error {
+			_, err := running.Hold(t.Context(), ADeclaredDeschedulerPolicy_ShouldBeRunByThePairedDescheduler,
+				Observer{}, nil, nil)
+
+			return err
+		},
+	}
+
+	for named, run := range runs {
+		t.Run(named, func(t *testing.T) {
+			err := run()
+
+			if err == nil {
+				t.Fatalf("a run declaring a Descheduler policy on %s stops, but it ran", aVersionPairedWithNoDescheduler)
+			}
+			expect.Expect(t, strings.Contains(err.Error(), aVersionPairedWithNoDescheduler)).To(expect.Equal(true))
+		})
+	}
+}
+
+// Read on the check itself, since a run it does not stop goes on to reach the
+// engine.
+func TestAKubernetesVersionPairedWithNoDescheduler_ShouldNotStopARunDeclaringNoPolicy(t *testing.T) {
+	running := aRunnerOn(t, theVersionPairedWithNoDescheduler(t))
+
+	err := running.stopAtAnUnpairedDescheduler([]func(*Scenario){NoDeschedulerPolicy_ShouldRunOnAnyVersion})
+
+	expect.Expect(t, err).To(expect.Equal[error](nil))
+}
+
+func TestADeclaringPassOverStepsOfEveryKind_ShouldFindThePolicyDeclaredAfterThemWithoutACluster(t *testing.T) {
+	everyKind := func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool()).WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+			SurvivesLosing(Nodes(oneLost)).WaitFor().AllPodsReady()
+		steps.WaitFor().PlacementSettledWithinSeconds(aTimeAWaitStates)
+		steps.When().NodesFail(oneNodeFailing)
+		steps.When().NodesRespondAgain()
+		steps.When().ZonesFail(oneLost)
+		steps.When().ZonesRespondAgain()
+		steps.When().PodsFail(someDeploymentName, onePodLeftBehind)
+		steps.WaitFor().PlacementSettled()
+		steps.Then().AllPodsRunning()
+		steps.Then().PodsPerZone(podsPerZoneWhenEven)
+		steps.Then().NoPodsOnTheFailedNodes()
+		steps.Then().EnoughPodsStayedReady()
+		steps.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName))
+	}
+
+	declared := declaresADeschedulerPolicy(everyKind)
+
+	expect.Expect(t, declared).To(expect.Equal(true))
+}

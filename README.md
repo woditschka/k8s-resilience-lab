@@ -115,6 +115,7 @@ On that cluster a Scenario declares what a real team would declare, then watches
 - **A Topology** of Zones and NodePools, each NodePool stating how many Nodes it holds per Zone, their capacity, and the labels and taints its Nodes carry.
 - **A Deployment** of a given replica count under a Pod specification: topology spread constraints, tolerations and resource requests under their Kubernetes names.
 - **A Failure** that stops one Node, every Node of a Zone, or every Node of one label value. The lab withholds the Node's heartbeat, so the control plane marks it unresponsive and reschedules exactly as it would after a lost machine.
+- **A Descheduler pass** under a policy the Scenario declares, run by the official Descheduler image beside the cluster once, or on each interval the Scenario states, which evicts the Pods the policy names so the control plane places them again. A Wait holds until a pass on the interval evicts nothing. The policy is written line for line like the Descheduler's own policy file: the limits on the Pods a pass evicts per Node and in all, profiles, plugin configuration and the plugins each extension point enables.
 - **Assertions** on the Placement once it has Settled: Pods per Zone, per Node and per NodePool, and the Floor of Ready Pods a Deployment keeps at every moment of the Failure, set by the Zones or Nodes its Failure tolerance survives losing.
 
 Every Scenario also leaves a Timeline, recorded from the API's own watch streams, naming each Node, Pod and Deployment change, the scheduler's reason for each Placement, and each Step at its moment. A run narrates from it under every Wait and files it, so what happened inside the cluster is explainable afterwards.
@@ -125,7 +126,7 @@ The lab never touches a real cluster. It provisions and removes the Simulated Cl
 
 The lab is one Go module built as a modulith. The `scenarios` package holds the experiments and nothing else. The machinery lives under `internal/`. `scenario` holds the immutable descriptions and does no I/O, and `cluster` holds every Kubernetes call. `lab` offers Scenarios their Steps, and `timeline` records what the cluster did. Kubernetes is a boundary the project does not control, so its types stay inside `cluster`, enforced by the compiler, by `internal/` and by a lint rule. New dependencies need a justification; the standard library comes first.
 
-Every value a Scenario builds is immutable and validated by its own constructor, so a Topology or Deployment that cannot exist is refused at the line that declared it. A setting of several values is a keyed struct literal under Kubernetes' own field names, so a Scenario reads as its manifest would. Each exported name sits in the package of its subject, `pod`, `node` or `lab`.
+Every value a Scenario builds is immutable and validated by its own constructor, so a Topology or Deployment that cannot exist is refused at the line that declared it. A setting of several values is a keyed struct literal under Kubernetes' own field names, so a Scenario reads as its manifest would. Each exported name sits in the package of its subject, `pod`, `node`, `descheduler` or `lab`.
 
 Testing follows the same stance of proving rather than simulating:
 

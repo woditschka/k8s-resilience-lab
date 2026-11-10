@@ -42,6 +42,10 @@ const (
 // WaitStepNamed names a Wait's note, the one each Wait narrative ends at.
 const WaitStepNamed = "Wait"
 
+// EvictedByTheDescheduler is the reason a reported entry carries for a Pod the
+// Descheduler evicted, which sets its eviction apart from a Failure's.
+const EvictedByTheDescheduler = "DeschedulerEviction"
+
 // NodeReadiness is the one thing about a Node a Placement depends on.
 type NodeReadiness string
 
@@ -183,18 +187,21 @@ type narration struct {
 }
 
 type podNarrated struct {
-	named     string
-	node      string
-	phase     PodPhase
-	reason    string
-	ran       bool
-	evicted   bool
-	removed   bool
-	scheduled int
+	named       string
+	node        string
+	phase       PodPhase
+	reason      string
+	ran         bool
+	evicted     bool
+	descheduled bool
+	removed     bool
+	scheduled   int
+	eviction    int
 }
 
-// noMoment marks a Pod whose scheduling stands under an earlier Wait, so its
-// Running reads as a moment of its own.
+// noMoment marks a Pod whose scheduling or eviction stands under an earlier
+// Wait, so its Running reads as a moment of its own and its eviction is not
+// rewritten.
 const noMoment = -1
 
 type moment struct {
@@ -253,7 +260,7 @@ func (n *narration) readPod(entry Entry) {
 		return
 	}
 	if !entry.observed() {
-		pod.reason = entry.reasonGiven()
+		n.readReported(pod, entry)
 
 		return
 	}
@@ -287,7 +294,39 @@ func (n *narration) evict(pod *podNarrated, entry Entry) {
 	}
 
 	pod.evicted = true
-	n.moments = append(n.moments, moment{at: entry.Elapsed, says: "Pod " + pod.named + " evicted from " + pod.node})
+	pod.eviction = len(n.moments)
+	n.moments = append(n.moments, moment{at: entry.Elapsed, says: pod.evictionSaid()})
+}
+
+// A reported entry is either the Descheduler's eviction or what the control
+// plane last said about the Pod, which a Pod left Pending is named with.
+func (n *narration) readReported(pod *podNarrated, entry Entry) {
+	if entry.Reason == EvictedByTheDescheduler {
+		n.deschedule(pod)
+
+		return
+	}
+
+	pod.reason = entry.reasonGiven()
+}
+
+// A watch that restarts may deliver the Pod marked for deletion before its
+// descheduled mark, so an eviction already narrated is rewritten as the
+// Descheduler's.
+func (n *narration) deschedule(pod *podNarrated) {
+	pod.descheduled = true
+	if pod.evicted && pod.eviction != noMoment {
+		n.moments[pod.eviction].says = pod.evictionSaid()
+	}
+}
+
+func (p *podNarrated) evictionSaid() string {
+	said := "Pod " + p.named + " evicted from " + p.node
+	if p.descheduled {
+		said += " by the Descheduler"
+	}
+
+	return said
 }
 
 func (n *narration) run(pod *podNarrated, at time.Duration) {
@@ -311,7 +350,7 @@ func (n *narration) podOf(name string) (*podNarrated, bool) {
 		return nil, false
 	}
 
-	pod := &podNarrated{named: boardNameOf(deployment, name), scheduled: noMoment}
+	pod := &podNarrated{named: boardNameOf(deployment, name), scheduled: noMoment, eviction: noMoment}
 	n.pods[name] = pod
 	n.podOrder = append(n.podOrder, name)
 
@@ -333,7 +372,7 @@ func (n *narration) cut() WaitNarrative {
 
 	n.moments = nil
 	for _, pod := range n.pods {
-		pod.scheduled = noMoment
+		pod.scheduled, pod.eviction = noMoment, noMoment
 	}
 
 	return WaitNarrative{lines: lines}

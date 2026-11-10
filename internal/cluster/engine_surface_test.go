@@ -110,9 +110,9 @@ func isNeitherDigitNorDot(character rune) bool {
 
 // An image reference or a container identifier would widen the surface to
 // anything on the machine, which the engine socket cannot scope down.
-var admittedParameters = []string{"context.Context", "KubernetesVersion"}
+var admittedParameters = []string{"context.Context", "KubernetesVersion", "DeschedulerVersion"}
 
-var restrictedSurface = []string{"Engine", "ClusterContainer"}
+var restrictedSurface = []string{"Engine", "ClusterContainer", "deschedulerPass"}
 
 func TestNoExportedEngineMethod_ShouldTakeAnImageOrAContainerIdentifier(t *testing.T) {
 	var offenders []string
@@ -152,29 +152,34 @@ func TestTheEngineSurface_ShouldNameNoEndpointThatListsOrPrunesTheMachine(t *tes
 }
 
 const (
-	clusterCommandDeclaration = "clusterArguments"
-	createRequestCommandKey   = "Cmd"
+	clusterCommandDeclaration         = "clusterArguments"
+	deschedulerPassCommandDeclaration = "deschedulerPassArguments"
+	createRequestCommandKey           = "Cmd"
 )
 
-// The command is read from the package's own declarations, so the test needs no
-// engine: a value composed from run input would read as an expression that is
-// neither a literal nor a package constant. Both halves are needed, since a
+// The commands are read from the package's own declarations, so the test needs
+// no engine: a value composed from run input would read as an expression that
+// is neither a literal nor a package constant. Both halves are needed, since a
 // command composed inline would leave the constants untouched, and a constant
 // list the request does not send proves nothing.
-func TestTheContainersCommand_ShouldBeComposedFromThePackagesOwnConstantsAlone(t *testing.T) {
-	expect.Expect(t, commandSentToTheEngine(t)).To(expect.Equal(clusterCommandDeclaration))
-	expect.Expect(t, argumentsThatAreNoConstant(t)).To(expect.Equal([]string{}))
+func TestTheContainersCommands_ShouldBeComposedFromThePackagesOwnConstantsAlone(t *testing.T) {
+	declared := []string{clusterCommandDeclaration, deschedulerPassCommandDeclaration}
+
+	expect.Expect(t, commandsSentToTheEngine(t)).To(expect.Equal(declared))
+	expect.Expect(t, argumentsThatAreNoConstant(t, declared)).To(expect.Equal([]string{}))
 }
 
-func argumentsThatAreNoConstant(t *testing.T) []string {
+func argumentsThatAreNoConstant(t *testing.T, declared []string) []string {
 	t.Helper()
 
 	constants := stringConstantsOf(t)
 
 	offenders := make([]string, 0)
-	for _, argument := range elementsOf(t, clusterCommandDeclaration) {
-		if !composedOfConstants(argument, constants) {
-			offenders = append(offenders, types.ExprString(argument))
+	for _, named := range declared {
+		for _, argument := range elementsOf(t, named) {
+			if !composedOfConstants(argument, constants) {
+				offenders = append(offenders, types.ExprString(argument))
+			}
 		}
 	}
 
@@ -200,9 +205,10 @@ func composedOfConstants(expression ast.Expr, constants map[string]ast.Expr) boo
 	}
 }
 
-// More than one such request, or none, is itself a finding: the property holds
-// over the one place the command is sent from.
-func commandSentToTheEngine(t *testing.T) string {
+// Each request creating a container names its command once, from one of the
+// declared lists; the sent commands are sorted, since the files are read in no
+// order a test turns on.
+func commandsSentToTheEngine(t *testing.T) []string {
 	t.Helper()
 
 	var sent []string
@@ -218,12 +224,9 @@ func commandSentToTheEngine(t *testing.T) string {
 		})
 	}
 
-	if len(sent) != 1 {
-		t.Fatalf("one request creates a container and names its command once, but %d name a %s: %s",
-			len(sent), createRequestCommandKey, strings.Join(sent, ", "))
-	}
+	slices.Sort(sent)
 
-	return sent[0]
+	return sent
 }
 
 func fieldNameOf(pair *ast.KeyValueExpr) string {
@@ -278,7 +281,7 @@ func elementsOf(t *testing.T, named string) []ast.Expr {
 		}
 	}
 
-	t.Fatalf("this package declares %s, the list its cluster container is created with", named)
+	t.Fatalf("this package declares %s, the list a container is created with", named)
 
 	return nil
 }

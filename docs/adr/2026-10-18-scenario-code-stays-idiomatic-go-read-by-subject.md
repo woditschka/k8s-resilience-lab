@@ -55,7 +55,8 @@ Options 2, 6, 8, 12, 14, 16, 18 and 19.
 - No dot import. Each exported name sits in its subject's package, a Pod, a Node or the Scenario, without repeating it: `node.NotReady`.
 - `pod` holds the specification, `pod.Predefined`, Customizations, `pod.Settings`, full access, the Startup forms, the three settings, `pod.Gi` and their values.
 - `node` holds `node.Pool`, `node.PerZone`, `node.Capacity`, `node.Named`, `node.Gi`, the Zone and hostname labels, the Node-condition taints and `node.UnresponsiveWait`.
-- `lab` keeps the Scenario, its Steps and `lab.DeploymentName`. `lab` imports `pod` and `node`; neither imports `lab` or the other.
+- `descheduler` holds `descheduler.Policy`, the descheduler's policy file as a keyed literal, with its parts, plugin names and argument types.
+- `lab` keeps the Scenario, its Steps and `lab.DeploymentName`. `lab` imports `pod`, `node` and `descheduler`; none imports `lab` or another.
 - A setting is a keyed literal under Kubernetes' names, amounts in Kubernetes' units. Kubernetes naming is the floor, and a Named setting stands above it, reported expanded.
 - Every field of a setting is required, its zero value the field left out. A toleration requires exactly the fields its operator and effect take. A refusal names the setting and field, ending the Scenario at its Given.
 - A count is a bare `int` under the Step naming its subject; `SurvivesLosing(lab.Zones(1))` is the one exception. A Node's room is the `Pods` field of `node.Capacity`.
@@ -68,7 +69,7 @@ A Scenario line shows where each name comes from, and each setting reads as its 
 
 ## Implementation
 
-**Requirements:** REQ-SIM-006, REQ-SIM-016, REQ-SIM-019, REQ-SIM-025, REQ-SIM-026
+**Requirements:** REQ-SIM-006, REQ-SIM-016, REQ-SIM-019, REQ-SIM-025, REQ-SIM-026, REQ-SIM-031
 
 ## References
 

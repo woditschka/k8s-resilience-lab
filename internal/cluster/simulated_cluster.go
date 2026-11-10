@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -63,6 +64,9 @@ type SimulatedCluster struct {
 	// The runner starts and stops recording on one goroutine, so the field is
 	// never shared.
 	recording *recording
+	// pass is a Descheduler pass container while it exists. Close may run on
+	// another goroutine than the pass, so the handle is swapped atomically.
+	pass atomic.Pointer[deschedulerPass]
 }
 
 // ObtainVersion lets a run learn once, before any Scenario starts, whether
@@ -708,9 +712,11 @@ func hasSettled(previous, current scenario.Placement, deployment scenario.Deploy
 // fails part-way still loses its cluster.
 //
 // A Timeline still recording is stopped first, since a record outliving its
-// cluster would only record its own disconnection.
+// cluster would only record its own disconnection. A Descheduler pass still
+// held goes before the cluster, since it joined the cluster's network
+// namespace and would outlive its owner.
 func (c *SimulatedCluster) Close(ctx context.Context) error {
 	c.StopRecording()
 
-	return c.container.Remove(ctx)
+	return errors.Join(c.removeHeldDeschedulerPass(ctx), c.container.Remove(ctx))
 }

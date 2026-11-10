@@ -2,8 +2,8 @@
 // runner that provisions a Simulated Cluster for each Scenario.
 //
 // It is the one package naming both a Step and the Simulated Cluster, so a
-// Scenario source imports it, the pod package and the node package, and nothing
-// else of the lab.
+// Scenario source imports it, the pod, node and descheduler packages, and
+// nothing else of the lab.
 package lab
 
 import (
@@ -19,6 +19,7 @@ import (
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
+	"github.com/woditschka/k8s-resilience-lab/internal/lab/descheduler"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/node"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -54,6 +55,8 @@ const (
 	// condition, because it holds for a Placement that has stopped changing
 	// whether its Pods became Ready or stayed Pending.
 	theSettledPlacement = "the Placement Settled"
+
+	aDeschedulerPassEvictingNothing = "a Descheduler pass evicting nothing"
 
 	theWaitThatNeverStood = "no Wait stands before it"
 
@@ -224,6 +227,25 @@ type Scenario struct {
 	// published is the declared Topology, the one field a held run's observer
 	// reads while the Steps run on another goroutine.
 	published atomic.Pointer[scenario.Topology]
+
+	// kubernetes is the version the run mirrors, which the Descheduler a
+	// policy runs under is paired with.
+	kubernetes                 cluster.KubernetesVersion
+	deschedulerPolicy          scenario.DeschedulerPolicy
+	pairedDescheduler          cluster.DeschedulerVersion
+	declaresADeschedulerPolicy bool
+	// deschedulerInterval is set by a further call on the Descheduler's Given,
+	// and descheduling runs it from the Wait applying it until the runner
+	// stops it. deschedulerDeclaredAt is the line a failed pass ends the
+	// Scenario at when no Step follows it.
+	deschedulerInterval   scenario.DeschedulerInterval
+	runsOnAnInterval      bool
+	descheduling          *deschedulerInterval
+	deschedulerDeclaredAt Step
+
+	// declaringOnly is set for the run's declaring pass alone, which carries
+	// out the Givens and nothing else, since it holds no cluster.
+	declaringOnly bool
 }
 
 type pendingDeployment struct {
@@ -260,12 +282,18 @@ func (s *Scenario) record(kind StepKind, name string) (Step, bool) {
 	if kind == WhenStep && s.haltsAtTheFirstWhen {
 		s.halted = true
 	}
-	if s.cause != nil || s.halted {
+	if s.cause != nil || s.halted || (s.declaringOnly && kind != GivenStep) {
 		return Step{}, false
 	}
 
 	step := Step{Kind: kind, Name: name}
 	s.steps = append(s.steps, step)
+	if failed := s.descheduling.failure(); failed != nil {
+		s.end(step, failed)
+		s.note(step)
+
+		return step, false
+	}
 	switch kind {
 	case GivenStep, ThenStep:
 		s.lineOpen = true
@@ -485,6 +513,34 @@ func (s *Scenario) awaitSettledPlacementWithinSeconds(seconds int) {
 	s.awaitStating(theSettledPlacement, seconds, s.reachSettledPlacement)
 }
 
+// A Scenario running no interval ends at this Wait before any cluster is
+// reached, as a Wait stating a time the lab cannot hold does.
+func (s *Scenario) awaitADeschedulerPassEvictingNothing() {
+	if !s.runsOnAnInterval {
+		if step, open := s.record(WaitStep, aDeschedulerPassEvictingNothing); open {
+			s.end(step, errors.New("the Scenario runs no Descheduler on an interval, so no pass is coming to evict nothing"))
+			s.endWait()
+		}
+
+		return
+	}
+
+	s.await(aDeschedulerPassEvictingNothing, scenario.NewWaitStatingNoTime(), s.reachADeschedulerPassEvictingNothing)
+}
+
+// The passes are counted as the Wait reaches for them, after it applied the
+// Givens, so a pass the Wait itself started counts as begun after it.
+func (s *Scenario) reachADeschedulerPassEvictingNothing() (scenario.Placement, error) {
+	waiting, cancel := context.WithTimeout(s.ctx, scenario.WaitingTime)
+	defer cancel()
+
+	if err := s.descheduling.awaitAPassEvictingNothingAfter(waiting, s.descheduling.passesBegun()); err != nil {
+		return scenario.Placement{}, err
+	}
+
+	return s.reachSettledPlacement()
+}
+
 // apply applies the Topology first, so the Deployment's Pods have Nodes to be
 // placed on. A Given reaches no cluster, so a refusal only the control plane
 // can give is named here, and one the lab checks itself stays at the Given.
@@ -511,8 +567,20 @@ func (s *Scenario) apply(at Step) bool {
 		}
 	}
 	s.undeployed, s.deployed = nil, true
+	if s.runsOnAnInterval && s.descheduling == nil {
+		s.changedTheCluster = true
+		s.descheduling = startDeschedulerInterval(s.ctx, s.provisioned, s.deschedulerPolicy, s.pairedDescheduler, s.deschedulerInterval)
+	}
 
 	return true
+}
+
+// stopDescheduling is the runner's to call before it closes the cluster, so no
+// pass starts on a cluster being removed.
+func (s *Scenario) stopDescheduling() {
+	if s.descheduling != nil {
+		s.descheduling.stop()
+	}
 }
 
 // The earlier Deployments stay deployed. The Placement observed before belongs to
@@ -617,6 +685,129 @@ func (g Given) Deployment(name DeploymentName, replicas int, asks pod.Customizat
 	g.scenario.declareDeployment(deployment, declares.Accesses(), step.Name)
 
 	return declared
+}
+
+// Descheduler declares the Scenario's one Descheduler policy, under the
+// Descheduler paired with the run's Kubernetes version. A second policy is
+// refused, naming the first.
+func (g Given) Descheduler(defined descheduler.Policy) DeclaredDescheduler {
+	declared := DeclaredDescheduler{scenario: g.scenario}
+	paired, unpaired := g.scenario.kubernetes.PairedDescheduler()
+	step, open := g.scenario.record(GivenStep, deschedulerPolicyLine(defined.Name(), paired, unpaired))
+	if !open {
+		return declared
+	}
+	g.scenario.declaresADeschedulerPolicy = true
+	if unpaired != nil {
+		g.scenario.end(step, unpaired)
+
+		return declared
+	}
+
+	policy, refused := defined.Declared()
+	if refused != nil {
+		g.scenario.end(step, refused)
+
+		return declared
+	}
+	step = g.scenario.carrying(asThePolicyFileWritesIt(policy))
+
+	if first := g.scenario.deschedulerPolicy.Name(); first != "" {
+		g.scenario.end(step, fmt.Errorf("a Scenario declares one Descheduler policy, "+
+			"so the policy %s declared after %s is refused", policy.Name(), first))
+
+		return declared
+	}
+	g.scenario.deschedulerPolicy, g.scenario.pairedDescheduler = policy, paired
+
+	return DeclaredDescheduler{scenario: g.scenario, line: step.Name}
+}
+
+// DeclaredDescheduler holds the line of a policy the Scenario took, and no line
+// where the Given was refused or never recorded, so a further call completes
+// only a declared policy.
+type DeclaredDescheduler struct {
+	scenario *Scenario
+	line     string
+}
+
+// EverySeconds runs a pass under the declared policy on each interval of that
+// many seconds, from the Wait applying the Given until the Scenario ends. No
+// When may run a pass beside them.
+func (d DeclaredDescheduler) EverySeconds(seconds int) {
+	if d.line == "" || d.scenario.cause != nil {
+		return
+	}
+
+	step := d.scenario.rename(d.line + ", a pass every " + counted(seconds, "second", "seconds"))
+	interval, err := scenario.NewDeschedulerInterval(seconds)
+	if err != nil {
+		d.scenario.end(step, err)
+
+		return
+	}
+	d.scenario.deschedulerInterval, d.scenario.runsOnAnInterval, d.scenario.deschedulerDeclaredAt = interval, true, step
+}
+
+// A version paired with no Descheduler leaves the line naming the policy alone,
+// since the refusal it ends at names the version.
+func deschedulerPolicyLine(name string, paired cluster.DeschedulerVersion, unpaired error) string {
+	if unpaired != nil {
+		return "a Descheduler policy " + name
+	}
+
+	return fmt.Sprintf("a Descheduler policy %s for Descheduler %s", name, paired)
+}
+
+// asThePolicyFileWritesIt reports one line per limit, profile, configuration
+// entry and extension point, under the policy file's keys and in definition
+// order, so the report reads as the file the Descheduler receives.
+func asThePolicyFileWritesIt(policy scenario.DeschedulerPolicy) []string {
+	var lines []string
+	if limit := policy.MaxPodsToEvictPerNode(); limit > 0 {
+		lines = append(lines, fmt.Sprintf("maxNoOfPodsToEvictPerNode: %d", limit))
+	}
+	if limit := policy.MaxPodsToEvictTotal(); limit > 0 {
+		lines = append(lines, fmt.Sprintf("maxNoOfPodsToEvictTotal: %d", limit))
+	}
+	for _, profile := range policy.Profiles() {
+		lines = append(lines, "profile: "+profile.Name())
+		for _, entry := range profile.PluginConfig() {
+			lines = append(lines, "pluginConfig: "+asAnEntryWritesIt(entry))
+		}
+		for _, set := range profile.Enabled() {
+			lines = append(lines, fmt.Sprintf("%s: %s", set.Point(), asAListWritesIt(set.Plugins())))
+		}
+	}
+
+	return lines
+}
+
+func asAnEntryWritesIt(entry scenario.DeschedulerPluginConfig) string {
+	arguments := entry.Arguments()
+	if len(arguments) == 0 {
+		return string(entry.Name())
+	}
+
+	written := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		value := argument.Value()
+		if words, isAList := value.([]string); isAList {
+			value = asAListWritesIt(words)
+		}
+		written = append(written, fmt.Sprintf("%s: %v", argument.Name(), value))
+	}
+
+	return fmt.Sprintf("%s {%s}", entry.Name(), strings.Join(written, ", "))
+}
+
+func asAListWritesIt[V ~string](items []V) string {
+	written := make([]string, 0, len(items))
+	for _, item := range items {
+		written = append(written, string(item))
+	}
+
+	return "[" + strings.Join(written, ", ") + "]"
 }
 
 // DeclaredDeployment is complete as it stands, so no half-built Deployment ever
@@ -789,6 +980,14 @@ func (w Wait) PlacementSettledWithinSeconds(seconds int) {
 	w.scenario.awaitSettledPlacementWithinSeconds(seconds)
 }
 
+// DeschedulerPassEvictingNothing holds until a pass on the Descheduler's
+// interval that began after this Wait did evicts nothing, then until the
+// Placement Settles. It is held to the lab's own waiting time, and only a
+// Scenario whose Descheduler runs on an interval may write it.
+func (w Wait) DeschedulerPassEvictingNothing() {
+	w.scenario.awaitADeschedulerPassEvictingNothing()
+}
+
 // When injects a Failure and waits for nothing, so the Placement its Thens
 // judge is the one the next Wait reaches.
 type When struct {
@@ -940,6 +1139,57 @@ func (w When) PodsFail(name DeploymentName, pods int) {
 	losing := w.scenario.rename(podsFailing(pods, name) + ", " + strings.Join(failure.BoardNames(), ", "))
 
 	w.scenario.lose(losing, failure.Pods())
+}
+
+// DeschedulerRunsOnce runs one Descheduler pass under the policy the Scenario
+// declared, and returns once the pass has ended. A Scenario declaring no
+// policy, and a pass that cannot run or does not end, end the Scenario.
+func (w When) DeschedulerRunsOnce() {
+	policy := w.scenario.deschedulerPolicy
+	step, open := w.scenario.record(WhenStep, deschedulerRunningOnce(policy))
+	if !open {
+		return
+	}
+
+	if policy.Name() == "" {
+		w.scenario.end(step, errors.New("the Scenario declares no Descheduler policy, so there is none for a Descheduler pass to run under"))
+
+		return
+	}
+	if w.scenario.runsOnAnInterval {
+		w.scenario.end(step, errors.New("the Descheduler runs its passes on an interval, "+
+			"so one more pass beside them is refused"))
+
+		return
+	}
+
+	w.scenario.deschedule(step)
+}
+
+const theDeschedulerPass = "one Descheduler pass"
+
+// A Scenario declaring no policy has no name to state, and ends at this line.
+func deschedulerRunningOnce(policy scenario.DeschedulerPolicy) string {
+	if policy.Name() == "" {
+		return theDeschedulerPass
+	}
+
+	return theDeschedulerPass + " under " + policy.Name()
+}
+
+// deschedule discards the observation held until now, since it is the world
+// before the pass. A pass stops no Node, so the Floor pairs its When with
+// none.
+func (s *Scenario) deschedule(at Step) {
+	s.changedTheCluster = true
+	if _, err := s.provisioned.RunDeschedulerPass(s.ctx, s.deschedulerPolicy, s.pairedDescheduler); err != nil {
+		s.end(at, fmt.Errorf("run one Descheduler pass under %s: %w", s.deschedulerPolicy.Name(), err))
+
+		return
+	}
+	s.nodesPerWhen = append(s.nodesPerWhen, scenario.WhenNodes{})
+
+	s.observed, s.settled = scenario.Placement{}, false
 }
 
 const (

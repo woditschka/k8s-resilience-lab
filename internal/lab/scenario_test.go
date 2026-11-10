@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
+	"github.com/woditschka/k8s-resilience-lab/internal/lab/descheduler"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/node"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -2342,3 +2344,230 @@ func TestAWhenLosingPodsOfADeploymentDeclaringAFailureTolerance_ShouldEndTheScen
 }
 
 const noPodLost = 0
+
+// No test turns on either policy's name beyond telling the two apart.
+const (
+	somePolicyName    = "balanced-over-zones"
+	anotherPolicyName = "apart-from-each-other"
+)
+
+// The pairing names no Descheduler for a minor this old, which is all this
+// version stands for.
+const aVersionPairedWithNoDescheduler = "v1.10.4"
+
+func aDeschedulerPolicyNamed(name string) descheduler.Policy {
+	return descheduler.Policy{Profiles: []descheduler.Profile{{
+		Name:         name,
+		PluginConfig: []descheduler.PluginConfig{{Name: descheduler.RemoveDuplicates}},
+		Plugins:      descheduler.Plugins{Balance: descheduler.PluginSet{Enabled: []descheduler.PluginName{descheduler.RemoveDuplicates}}},
+	}}}
+}
+
+// The lines aDeschedulerPolicyNamed reports beneath its Given line.
+func theLinesOfAPolicyNamed(name string) []string {
+	return []string{"profile: " + name, "pluginConfig: RemoveDuplicates", "balance: [RemoveDuplicates]"}
+}
+
+func aScenarioOn(version cluster.KubernetesVersion) *Scenario {
+	return &Scenario{kubernetes: version}
+}
+
+func theVersionPairedWithNoDescheduler(t *testing.T) cluster.KubernetesVersion {
+	t.Helper()
+
+	version, err := cluster.ParseKubernetesVersion(aVersionPairedWithNoDescheduler)
+	if err != nil {
+		t.Fatalf("parse the Kubernetes version %s: %v", aVersionPairedWithNoDescheduler, err)
+	}
+
+	return version
+}
+
+func theDeschedulerPairedByDefault(t *testing.T) cluster.DeschedulerVersion {
+	t.Helper()
+
+	paired, err := cluster.DefaultKubernetesVersion().PairedDescheduler()
+	if err != nil {
+		t.Fatalf("pair a Descheduler with the default Kubernetes version: %v", err)
+	}
+
+	return paired
+}
+
+func deschedulerPolicyStepNaming(name string) Step {
+	return Step{Kind: GivenStep, Name: "a Descheduler policy " + name}
+}
+
+func deschedulerPolicyStepOf(name string, paired cluster.DeschedulerVersion) Step {
+	named := deschedulerPolicyStepNaming(name)
+	named.Name += " for Descheduler " + paired.String()
+
+	return named
+}
+
+func TestADeclaredDeschedulerPolicysGivenLine_ShouldNameThePolicyAndTheDeschedulerVersion(t *testing.T) {
+	declaring := aScenarioOn(cluster.DefaultKubernetesVersion())
+
+	declaring.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName))
+
+	expect.Expect(t, declaring.outcome().Steps).To(expect.Equal([]Step{
+		carrying(deschedulerPolicyStepOf(somePolicyName, theDeschedulerPairedByDefault(t)), theLinesOfAPolicyNamed(somePolicyName)...),
+	}))
+}
+
+func TestADeclaredDeschedulerPolicysGivenLine_ShouldReportEveryPluginAndArgumentUnderItsKubernetesName(t *testing.T) {
+	const (
+		twoEvictionsPerNode  = 2
+		fourEvictionsPerPass = 4
+	)
+	declaring := aScenarioOn(cluster.DefaultKubernetesVersion())
+
+	declaring.Given().Descheduler(descheduler.Policy{
+		MaxNoOfPodsToEvictPerNode: twoEvictionsPerNode,
+		MaxNoOfPodsToEvictTotal:   fourEvictionsPerPass,
+		Profiles: []descheduler.Profile{{
+			Name: somePolicyName,
+			PluginConfig: []descheduler.PluginConfig{
+				{Name: descheduler.DefaultEvictor, Args: descheduler.DefaultEvictorArgs{NodeFit: true}},
+				{
+					Name: descheduler.RemovePodsViolatingTopologySpreadConstraint,
+					Args: descheduler.RemovePodsViolatingTopologySpreadConstraintArgs{
+						Constraints: []descheduler.UnsatisfiableConstraintAction{descheduler.DoNotSchedule, descheduler.ScheduleAnyway},
+					},
+				},
+				{Name: descheduler.RemoveDuplicates},
+			},
+			Plugins: descheduler.Plugins{
+				Deschedule: descheduler.PluginSet{Enabled: []descheduler.PluginName{descheduler.RemovePodsViolatingInterPodAntiAffinity}},
+				Balance: descheduler.PluginSet{Enabled: []descheduler.PluginName{
+					descheduler.RemovePodsViolatingTopologySpreadConstraint, descheduler.RemoveDuplicates,
+				}},
+			},
+		}},
+	})
+
+	expect.Expect(t, declaring.outcome().Steps).To(expect.Equal([]Step{carrying(
+		deschedulerPolicyStepOf(somePolicyName, theDeschedulerPairedByDefault(t)),
+		fmt.Sprintf("maxNoOfPodsToEvictPerNode: %d", twoEvictionsPerNode),
+		fmt.Sprintf("maxNoOfPodsToEvictTotal: %d", fourEvictionsPerPass),
+		"profile: "+somePolicyName,
+		"pluginConfig: DefaultEvictor {nodeFit: true}",
+		"pluginConfig: RemovePodsViolatingTopologySpreadConstraint {constraints: [DoNotSchedule, ScheduleAnyway]}",
+		"pluginConfig: RemoveDuplicates",
+		"deschedule: [RemovePodsViolatingInterPodAntiAffinity]",
+		"balance: [RemovePodsViolatingTopologySpreadConstraint, RemoveDuplicates]",
+	)}))
+}
+
+func TestADeschedulerProfileEnablingNoPlugin_ShouldBeRefusedWhereItIsStatedReportingNoLine(t *testing.T) {
+	declaring := aScenarioOn(cluster.DefaultKubernetesVersion())
+
+	declaring.Given().Descheduler(descheduler.Policy{Profiles: []descheduler.Profile{{Name: somePolicyName}}})
+
+	ended := declaring.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(deschedulerPolicyStepOf(somePolicyName, theDeschedulerPairedByDefault(t))))
+	causeNames(t, ended, somePolicyName)
+}
+
+func TestAScenarioDeclaringASecondDeschedulerPolicy_ShouldBeRefusedWhereItIsStated(t *testing.T) {
+	declaring := aScenarioOn(cluster.DefaultKubernetesVersion())
+	declaring.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName))
+
+	declaring.Given().Descheduler(aDeschedulerPolicyNamed(anotherPolicyName))
+
+	ended := declaring.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(
+		carrying(deschedulerPolicyStepOf(anotherPolicyName, theDeschedulerPairedByDefault(t)), theLinesOfAPolicyNamed(anotherPolicyName)...)))
+	causeNames(t, ended, somePolicyName)
+}
+
+// The runner stops such a run before any cluster, so this is the Given's own
+// refusal for a Scenario carried out past that check.
+func TestADeschedulerPolicyDeclaredOnAVersionPairedWithNoDescheduler_ShouldEndTheScenarioNamingThatVersion(t *testing.T) {
+	declaring := aScenarioOn(theVersionPairedWithNoDescheduler(t))
+
+	declaring.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName))
+
+	ended := declaring.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(deschedulerPolicyStepNaming(somePolicyName)))
+	causeNames(t, ended, aVersionPairedWithNoDescheduler)
+}
+
+func deschedulerPassStepNamingNoPolicy() Step {
+	return Step{Kind: WhenStep, Name: "one Descheduler pass"}
+}
+
+func TestAWhenRunningADeschedulerPassInAScenarioDeclaringNoPolicy_ShouldEndTheScenarioAtThatWhenNamingIt(t *testing.T) {
+	running := aScenarioOn(cluster.DefaultKubernetesVersion())
+
+	running.When().DeschedulerRunsOnce()
+
+	ended := running.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(deschedulerPassStepNamingNoPolicy()))
+	causeNames(t, ended, "declares no Descheduler policy")
+}
+
+// No test turns on the interval but those naming or refusing it.
+const (
+	aPassEveryFiveSeconds = 5
+	anIntervalOfNoSeconds = 0
+)
+
+func deschedulerOnAnIntervalStepOf(name string, paired cluster.DeschedulerVersion, seconds int) Step {
+	step := deschedulerPolicyStepOf(name, paired)
+	step.Name += fmt.Sprintf(", a pass every %d seconds", seconds)
+
+	return step
+}
+
+func TestADeschedulerOnAnIntervalsGivenLine_ShouldNameTheInterval(t *testing.T) {
+	declaring := aScenarioOn(cluster.DefaultKubernetesVersion())
+
+	declaring.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName)).EverySeconds(aPassEveryFiveSeconds)
+
+	expect.Expect(t, declaring.outcome().Steps).To(expect.Equal([]Step{carrying(
+		deschedulerOnAnIntervalStepOf(somePolicyName, theDeschedulerPairedByDefault(t), aPassEveryFiveSeconds),
+		theLinesOfAPolicyNamed(somePolicyName)...,
+	)}))
+}
+
+func TestADeschedulerIntervalOfZeroOrLess_ShouldBeRefusedWhereItIsStated(t *testing.T) {
+	declaring := aScenarioOn(cluster.DefaultKubernetesVersion())
+
+	declaring.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName)).EverySeconds(anIntervalOfNoSeconds)
+
+	ended := declaring.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(carrying(
+		deschedulerOnAnIntervalStepOf(somePolicyName, theDeschedulerPairedByDefault(t), anIntervalOfNoSeconds),
+		theLinesOfAPolicyNamed(somePolicyName)...,
+	)))
+	causeNames(t, ended, strconv.Itoa(anIntervalOfNoSeconds)+" seconds")
+}
+
+func TestAWhenRunningADeschedulerPassWhileItRunsOnAnInterval_ShouldEndTheScenarioAtThatWhenNamingIt(t *testing.T) {
+	running := aScenarioOn(cluster.DefaultKubernetesVersion())
+	running.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName)).EverySeconds(aPassEveryFiveSeconds)
+
+	running.When().DeschedulerRunsOnce()
+
+	ended := running.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(deschedulerPassStepUnder(somePolicyName)))
+	causeNames(t, ended, "runs its passes on an interval")
+}
+
+func deschedulerPassEvictingNothingStep() Step {
+	return Step{Kind: WaitStep, Name: "a Descheduler pass evicting nothing"}
+}
+
+// A Scenario declaring no Descheduler at all runs on no interval the same way,
+// so the policy declared here stands for both.
+func TestAWaitForAPassEvictingNothingWithNoDeschedulerOnAnInterval_ShouldEndTheScenarioAtThatWaitNamingIt(t *testing.T) {
+	waiting := aScenarioOn(cluster.DefaultKubernetesVersion())
+	waiting.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName))
+
+	waiting.WaitFor().DeschedulerPassEvictingNothing()
+
+	ended := waiting.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(deschedulerPassEvictingNothingStep()))
+	causeNames(t, ended, "runs no Descheduler on an interval")
+}
