@@ -16,7 +16,7 @@ The high-level laws designs are evaluated against. The `design-validation` skill
 5. **Minimal surface** — prefer module-internal visibility.
 6. **Understandable systems** — if it cannot be reasoned about, it cannot be secured.
 7. **Fail secure** — errors leave the system in a safe state.
-8. **One Timeline, read for what happened** — everything that changes a Simulated Cluster, the lab's own actions included, is recorded in its Timeline. Any account of what happened over time is read from it: a narrative, a terminal line, a judgment across moments. What the cluster looks like now is read from the cluster.
+8. **One Timeline, read for what happened** — everything that changes a Simulated Cluster, the lab's own actions included, is recorded in its Timeline. Any account of what happened over time is read from it: a narrative, a terminal line, a judgment across moments. What the cluster looks like now is read from the cluster. One judgment stands outside it: whether a Descheduler pass evicted anything is read from the Pods listed before and after that pass.
 
 ## Module Boundaries
 
@@ -160,4 +160,4 @@ Before approving a design, verify:
 - [ ] Domain logic testable without framework context; real objects usable in tests
 - [ ] New dependencies justified against the dependency policy
 - [ ] Terms match the canonical vocabulary
-- [ ] Every change to a Simulated Cluster reaches its Timeline; an account of what happened over time reads from the Timeline, with no second record beside it
+- [ ] Every change to a Simulated Cluster reaches its Timeline; an account of what happened over time reads from the Timeline, with no second record beside it, a Descheduler pass's own count of its evictions excepted

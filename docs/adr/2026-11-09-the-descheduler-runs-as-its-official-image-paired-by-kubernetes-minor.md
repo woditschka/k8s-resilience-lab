@@ -4,7 +4,7 @@
 
 ## Context
 
-The control plane places Pods and never moves a running one, so a Placement stays where a Failure left it. The Kubernetes descheduler closes that gap by evicting Pods its policy names. The owner wants it in the lab through the same Step surface, at the Kubernetes version the run mirrors, under policies the Scenarios define and the lab never extends. Its reader is "Someone reading the Scenario source, who wants the intent in a glance and the Kubernetes meaning one jump away", the definition read like the descheduler's own policy file.
+The control plane places Pods and never moves a running one, so a Placement stays where a Failure left it. The Kubernetes descheduler closes that gap by evicting Pods its policy names. The owner wants it in the lab through the same Step surface, at the Kubernetes version the run mirrors, under policies the Scenarios define and the lab never extends. Its reader is "Someone reading the Scenario source, who wants the intent in a glance and the Kubernetes meaning one jump away", the definition read like the YAML the Descheduler itself reads.
 
 The descheduler publishes a multi-arch image per release at `registry.k8s.io/descheduler/descheduler`, and its releases track Kubernetes minors. It reads its policy through the Kubernetes universal decoder, which accepts JSON. A run has to know whether any Scenario declares a policy before it provisions, because a version with no paired descheduler must stop the run there.
 
@@ -25,7 +25,7 @@ How a Scenario writes a policy:
 
 6. **Plugin names and arguments as strings in a map** — a misspelt argument surfaces only in the descheduler's log.
 7. **One keyed literal per plugin, the lab deriving each extension point and configuration entry** — short, but the file the descheduler reads stays hidden, and the lab states what the definition does not.
-8. **The policy file itself as a keyed literal, `descheduler.Policy`**, under its keys and Kubernetes' plugin and argument type names, in a `descheduler` package beside `pod` and `node`. Longer, and read line for line against the descheduler's documentation.
+8. **The YAML the Descheduler itself reads, as a keyed literal, `descheduler.Policy`**, under its keys and Kubernetes' plugin and argument type names, in a `descheduler` package beside `pod` and `node`. Longer, and read line for line against the descheduler's documentation.
 
 How an extension point's plugins are written:
 
@@ -117,7 +117,7 @@ Options 3, 5, 8, 10, 12, 15, 17, 19, 21, 23, 27, 31, 33, 35 and 37.
 
 ## Consequences
 
-A definition reads as the policy file does, and an argument the lab does not offer fails to compile. The definition states every entry and extension point, so it is longer than a list of plugins. The pinned release refuses an enabled plugin with no configuration entry; the descheduler names it and the pass's When ends the Scenario. A limit of zero reads as left out. A plugin, limit or extension point no Scenario has used yet is a reviewed addition to the `descheduler` package.
+A definition reads line for line as the YAML the Descheduler itself reads, and an argument the lab does not offer fails to compile. The definition states every entry and extension point, so it is longer than a list of plugins. The pinned release refuses an enabled plugin with no configuration entry; the descheduler names it and the pass's When ends the Scenario. A limit of zero reads as left out. A plugin, limit or extension point no Scenario has used yet is a reviewed addition to the `descheduler` package.
 
 A Scenario's function runs twice per run. That holds because a Given applies nothing and every other Step carries nothing out without a cluster.
 

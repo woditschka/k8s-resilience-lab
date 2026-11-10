@@ -7,6 +7,8 @@ package lab
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -16,7 +18,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -30,8 +31,9 @@ import (
 )
 
 const (
-	thePanickingScenarioOnACluster = "a-scenario-that-panics-on-a-cluster"
-	whatTheClusterScenarioSaid     = "a Step's own code panicked with the cluster recording"
+	theScenarioEndedBeforeItReports = "a-scenario-ended-before-it-reports"
+	thePanickingScenarioOnACluster  = "a-scenario-that-panics-on-a-cluster"
+	whatTheClusterScenarioSaid      = "a Step's own code panicked with the cluster recording"
 )
 
 func TestAScenarioThatPanicsOnARealCluster_ShouldLeaveNoClusterAndNoSecondPanic(t *testing.T) {
@@ -318,6 +320,22 @@ func TestAnInteractiveRunWhoseStepCannotBeCarriedOut_ShouldHoldTheClusterAsThatS
 	expect.Expect(t, readyWhileHeld).To(expect.HaveLen[scenario.Node](theNodesOfTwoZonesOfTwoEach))
 }
 
+func TestAHeldRunUnderTestEndingBeforeItReports_ShouldFailTheTestNamingTheRunsErrorAndBeSafeToStopTwice(t *testing.T) {
+	t.Parallel()
+	running := aRunnerOnThisMachine(t)
+	holding, stopHolding := context.WithCancel(t.Context())
+	stopHolding()
+
+	held, err := startAHeldRun(holding, stopHolding, running, theScenarioEndedBeforeItReports, func(*Scenario) {})
+	_, firstStop := held.stopTheLab()
+	_, secondStop := held.stopTheLab()
+
+	expect.Expect(t, errors.Is(err, context.Canceled)).To(expect.Equal(true))
+	expect.Expect(t, strings.Contains(fmt.Sprint(err), theScenarioEndedBeforeItReports)).To(expect.Equal(true))
+	expect.Expect(t, errors.Is(firstStop, context.Canceled)).To(expect.Equal(true))
+	expect.Expect(t, errors.Is(secondStop, context.Canceled)).To(expect.Equal(true))
+}
+
 // heldForClicks is a held run the Live view's clicks reach through its
 // Injector, with what its Steps declared.
 type heldForClicks struct {
@@ -374,39 +392,52 @@ func aHeldRunDeclaring(t *testing.T, name string, furtherGivens func(*Scenario))
 func aHeldRunCarryingOut(t *testing.T, name string, steps func(*Scenario)) *heldForClicks {
 	t.Helper()
 
-	running := aRunnerOnThisMachine(t)
-	holding, stopTheLab := context.WithCancel(t.Context())
+	holding, stopHolding := context.WithCancel(t.Context())
+	held, err := startAHeldRun(holding, stopHolding, aRunnerOnThisMachine(t), name, steps)
+	t.Cleanup(func() {
+		// The early end is reported once, by the Fatal below.
+		if _, stopErr := held.stopTheLab(); stopErr != nil && err == nil {
+			t.Errorf("carry out the held Scenario %s: %v", name, stopErr)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return held
+}
+
+// startAHeldRun returns once the held run reports its Outcome, or with the
+// error the run ended with when it ends first. The heldForClicks it returns
+// is never nil, so the caller can stop the lab either way.
+func startAHeldRun(holding context.Context, stopHolding context.CancelFunc, running *Runner, name string, steps func(*Scenario)) (*heldForClicks, error) {
 	held := &heldForClicks{injector: NewInjector()}
 	observer, boards := anObserverHandingOverEachPlacementBoard(holding)
 	held.boards = boards
-	reported, ended := make(chan struct{}), make(chan Carried, 1)
+	reported, ended := make(chan struct{}), make(chan struct{})
+	var stopped Carried
 	go func() {
-		stopped, err := running.holdNamed(holding, name, func(declaring *Scenario) {
+		defer close(ended)
+		outcome, err := running.holdNamed(holding, name, func(declaring *Scenario) {
 			held.provisioned = declaring.provisioned
 			steps(declaring)
 			held.topology, held.deployment, held.descheduling = declaring.topology, declaring.deployment, declaring.descheduling
 		}, observer, held.injector, func(Outcome) { close(reported) }, func(line string) { held.followed = append(held.followed, line) })
-		ended <- Carried{Outcome: stopped, Err: err}
+		stopped = Carried{Outcome: outcome, Err: err}
 	}()
-	held.stopTheLab = sync.OnceValues(func() (Outcome, error) {
-		stopTheLab()
-		stopped := <-ended
+	held.stopTheLab = func() (Outcome, error) {
+		stopHolding()
+		<-ended
 
 		return stopped.Outcome, stopped.Err
-	})
-	t.Cleanup(func() {
-		if _, err := held.stopTheLab(); err != nil {
-			t.Errorf("carry out the held Scenario %s: %v", name, err)
-		}
-	})
+	}
 
 	select {
 	case <-reported:
-	case stopped := <-ended:
-		t.Fatalf("the held Scenario %s ended before it reported: %v", name, stopped.Err)
+		return held, nil
+	case <-ended:
+		return held, fmt.Errorf("the held Scenario %s ended before it reported: %w", name, stopped.Err)
 	}
-
-	return held
 }
 
 // theOutcomeOnceStopped is what the held run hands back once the engineer stops

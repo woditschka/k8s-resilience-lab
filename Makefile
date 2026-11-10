@@ -115,8 +115,10 @@ deps-check:
 # on the clock as Scenarios are added. Every wait the lab makes is bounded by a
 # timeout of its own, so the default guards nothing.
 #
-# The tests needing a Simulated Cluster run in parallel, at most four at a time
-# per package, which bounds how many clusters the gate asks of the engine at once.
+# The tests needing a Simulated Cluster run in parallel, at most two at a time,
+# one package after another, which bounds how many clusters the gate asks of the
+# engine at once. Packages tested side by side multiply that bound, and the
+# engine then drops requests.
 #
 # The check asserts no toolchain prerequisite of its own: no CGO_ENABLED test, no
 # search for a C compiler and no operating-system branch, because each of those is
@@ -124,7 +126,7 @@ deps-check:
 # The Go toolchain refuses where the detector needs cgo and a compiler it cannot
 # find; that refusal is this failure.
 test:
-	@go test -race -parallel 4 -timeout 30m ./... || { \
+	@go test -race -p 1 -parallel 2 -timeout 30m ./... || { \
 		refused=$$?; \
 		echo "test: the tests must pass under the race detector"; \
 		echo "  if the Go toolchain refused the detector above, it needs cgo and a C compiler:"; \
