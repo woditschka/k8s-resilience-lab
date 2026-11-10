@@ -24,7 +24,7 @@ Where the shown Placement comes from:
 
 4. **One observer per Interactive run, polling the held cluster; every request reads its latest board** — API load independent of the browsers open.
 5. **One observation per page request** — API load grows with the browsers and their tabs.
-6. **The Timeline's watch streams** — no polling, but the record stops with the Steps and a board needs the declared Topology besides.
+6. **The Timeline's watch streams** — no polling, but the record delivers changes rather than the whole cluster, and a board needs the declared Topology besides.
 
 Where the server listens:
 

@@ -107,16 +107,15 @@ func openingOf(engine cluster.Endpoint, asked runSetting) reportPart {
 }
 
 // runHeld listens before it provisions, so the address is on the terminal
-// while the Steps run. A Finding, a Step left undone or an unwritten Timeline
-// fails the lab once it stops, as in a run.
+// while the Steps run. The Timeline records until the lab stops, so its line
+// prints then, below the Outcome reported at the hold. A Finding, a Step left
+// undone or an unwritten Timeline fails the lab once it stops, as in a run.
 func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, reported *runReport, asked runSetting) error {
 	if err := cluster.ObtainVersion(ctx, engine, asked.version); err != nil {
 		return err
 	}
 
-	// The When of a click prints under the Injector's lock, so it never
-	// interleaves with the Outcome or another When.
-	injector := lab.NewInjector(reported.printWhen)
+	injector := lab.NewInjector()
 	view := live.NewView()
 	server, err := live.Listen(ctx, view, asked.heldName, func(clicked live.Failure) error {
 		return injected(injector, clicked)
@@ -128,18 +127,24 @@ func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, r
 	opening.addf("Live view:          %s", server.Address())
 	reported.printPart(opening)
 
+	// The lines followed print after the Outcome and before Hold returns, from
+	// one goroutine, so they never interleave with another print.
 	held, err := runner.Hold(ctx, asked.held, lab.Observer{Every: live.RefreshInterval, Observed: view.Observed}, injector,
 		func(outcome lab.Outcome) {
 			var part reportPart
-			writeOutcome(&part, outcome, asked)
+			writeScenario(&part, outcome)
 			reported.printBelowAHeavierSeparator(part)
-		})
+		}, reported.printFollowed)
 	closed := server.Close()
-	if err != nil {
+	if !(lab.Carried{Outcome: held}).Reported() {
 		return errors.Join(err, closed, reported.err)
 	}
 
-	return errors.Join(notFiled(held), didNotHold(held), closed, reported.err)
+	var stopped reportPart
+	writeTimeline(&stopped, held, asked)
+	reported.printPart(stopped)
+
+	return errors.Join(err, notFiled(held), didNotHold(held), closed, reported.err)
 }
 
 // injected hands a click the Live view took to the held run by its kind, which
@@ -258,13 +263,17 @@ func writeCarried(part *reportPart, carried lab.Carried, asked runSetting) {
 // A Scenario that ended at a Step still has its Timeline reported, because that
 // record shows how far its cluster got.
 func writeOutcome(part *reportPart, outcome lab.Outcome, asked runSetting) {
+	writeScenario(part, outcome)
+	writeTimeline(part, outcome, asked)
+}
+
+func writeScenario(part *reportPart, outcome lab.Outcome) {
 	part.addf("Scenario %s, on %s", outcome.Name, outcome.Cluster)
 	writeSteps(part, outcome)
 	if outcome.HoldsASettledPlacement() {
 		part.addf("  Skew of %s: %d over Zones, %d over Nodes", outcome.JudgedDeployment,
 			outcome.Placement.Skew(scenario.SpreadOverZones), outcome.Placement.Skew(scenario.SpreadOverNodes))
 	}
-	writeTimeline(part, outcome, asked)
 }
 
 func writeTimeline(part *reportPart, outcome lab.Outcome, asked runSetting) {
@@ -407,10 +416,11 @@ func (r *runReport) printBelowAHeavierSeparator(part reportPart) {
 	r.printPart(part)
 }
 
-// printWhen prints a clicked When with the indent writeSteps gives a run's, so
-// it reads as one more Step of the held Scenario.
-func (r *runReport) printWhen(when lab.Step) {
-	r.printf("  %s\n", when)
+// printFollowed prints a held cluster's line with the indent writeSteps gives a
+// Step and writeBoard a narrative's line, so a clicked When reads as one more
+// Step of the held Scenario and a moment as one more line of a narrative.
+func (r *runReport) printFollowed(line string) {
+	r.printf("  %s\n", line)
 }
 
 func (r *runReport) printf(format string, args ...any) {

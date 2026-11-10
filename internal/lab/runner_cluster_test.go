@@ -11,8 +11,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -66,14 +70,26 @@ func TestAScenarioThatPanicsOnARealCluster_ShouldLeaveNoClusterAndNoSecondPanic(
 }
 
 const (
-	theHeldScenario             = "a-scenario-held-before-its-first-when"
-	theScenarioStoppedPartWay   = "a-scenario-stopped-while-its-steps-run"
-	theScenarioEndedAtARefusal  = "a-scenario-held-as-a-refused-step-left-it"
-	anObserverIntervalForATest  = 200 * time.Millisecond
-	theNodesOfTwoZonesOfTwoEach = twoZones * twoNodesPerZone
+	theHeldScenario                    = "a-scenario-held-before-its-first-when"
+	theScenarioStoppedPartWay          = "a-scenario-stopped-while-its-steps-run"
+	theScenarioEndedAtARefusal         = "a-scenario-held-as-a-refused-step-left-it"
+	theScenarioFiledWhenStoppedPartWay = "a-scenario-filed-when-stopped-while-its-steps-run"
+	theScenarioWhoseTimelineIsNotFiled = "a-scenario-whose-held-timeline-is-not-filed"
+	aFileInTheFoldersPlace             = "not-a-folder"
+	theStopEndsTheSteps                = true
+	noTimelineReportedAtTheHold        = ""
+	anyFileMode                        = 0o600
+	anObserverIntervalForATest         = 200 * time.Millisecond
+	theNodesOfTwoZonesOfTwoEach        = twoZones * twoNodesPerZone
 )
 
 func aRunnerOnThisMachine(t *testing.T) *Runner {
+	t.Helper()
+
+	return aRunnerFiledIn(t, timeline.NewFolder(t.TempDir()))
+}
+
+func aRunnerFiledIn(t *testing.T, folder timeline.Folder) *Runner {
 	t.Helper()
 
 	engine, err := cluster.DetectEngine(t.Context(), slog.New(slog.DiscardHandler))
@@ -82,7 +98,7 @@ func aRunnerOnThisMachine(t *testing.T) *Runner {
 	}
 	t.Cleanup(engine.Close)
 
-	return NewRunner(engine, cluster.DefaultKubernetesVersion(), timeline.NewFolder(t.TempDir()))
+	return NewRunner(engine, cluster.DefaultKubernetesVersion(), folder)
 }
 
 // observed carries a board as it reads, so a comparison needs no access to its
@@ -109,9 +125,11 @@ func anObserverHandingOverEachBoard(holding context.Context) (Observer, <-chan o
 	}}, boards
 }
 
-func anInjectorReportingNothing() *Injector {
-	return NewInjector(func(Step) {})
+func anInjector() *Injector {
+	return NewInjector()
 }
+
+func ignoringEachLineFollowed(string) {}
 
 func anObserverDiscardingEachBoard() Observer {
 	return Observer{Every: anObserverIntervalForATest, Observed: func(scenario.PlacementBoard, error) {}}
@@ -181,11 +199,11 @@ func TestAnInteractiveRunNamingAScenario_ShouldHoldItsClusterAsTheStepsBeforeIts
 
 		steps.When().NodesFail(oneNodeFailing)
 		steps.WaitFor().AllPodsReady()
-	}, observer, anInjectorReportingNothing(), func(Outcome) {
+	}, observer, anInjector(), func(Outcome) {
 		readyWhileHeld = theReadyNodesOf(t, provisioned)
 		boardWhileHeld = theBoardObservedOnceHeld(boards)
 		stopTheLab()
-	})
+	}, ignoringEachLineFollowed)
 	if err != nil {
 		t.Fatalf("carry out the held Scenario %s: %v", theHeldScenario, err)
 	}
@@ -207,12 +225,73 @@ func TestStoppingAnInteractiveRun_ShouldRemoveItsSimulatedCluster(t *testing.T) 
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		stopTheLab()
 		steps.WaitFor().AllNodesReady()
-	}, anObserverDiscardingEachBoard(), anInjectorReportingNothing(), func(Outcome) {})
+	}, anObserverDiscardingEachBoard(), anInjector(), func(Outcome) {}, ignoringEachLineFollowed)
 	if err != nil {
 		t.Fatalf("carry out the Scenario %s until the lab stopped: %v", theScenarioStoppedPartWay, err)
 	}
 
 	expectRemoved(t, provisioned)
+}
+
+func TestAnInteractiveRunStoppedWhileTheStepsRun_ShouldFileItsTimelineAsAScenarioEndingPartWay(t *testing.T) {
+	t.Parallel()
+	running := aRunnerOnThisMachine(t)
+	holding, stopTheLab := context.WithCancel(t.Context())
+	var atTheHold Outcome
+
+	stopped, err := running.holdNamed(holding, theScenarioFiledWhenStoppedPartWay, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		stopTheLab()
+		steps.WaitFor().AllNodesReady()
+	}, anObserverDiscardingEachBoard(), anInjector(), func(reported Outcome) { atTheHold = reported }, ignoringEachLineFollowed)
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s until the lab stopped: %v", theScenarioFiledWhenStoppedPartWay, err)
+	}
+
+	expect.Expect(t, stopped.Ended()).To(expect.Equal(theStopEndsTheSteps))
+	expect.Expect(t, atTheHold.FiledAt).To(expect.Equal(noTimelineReportedAtTheHold))
+	expect.Expect(t, theTimelineFiledAt(t, stopped, stopped.Steps[0].String())).
+		To(expect.Equal(filedAtTheStop{Entries: len(stopped.Timeline.Entries()), HoldsTheStep: theStepFiled}))
+}
+
+// A file where the Timeline folder should be leaves no folder to file it in.
+func aTimelineFolderTheLabCannotCreate(t *testing.T) timeline.Folder {
+	t.Helper()
+
+	root := filepath.Join(t.TempDir(), aFileInTheFoldersPlace)
+	if err := os.WriteFile(root, nil, anyFileMode); err != nil {
+		t.Fatalf("put a file where the Timeline folder goes: %v", err)
+	}
+
+	return timeline.NewFolder(root)
+}
+
+func TestAnInteractiveRunWhoseTimelineCannotBeWrittenAtTheStop_ShouldNameIt(t *testing.T) {
+	t.Parallel()
+	folder := aTimelineFolderTheLabCannotCreate(t)
+	running := aRunnerFiledIn(t, folder)
+	holding, stopTheLab := context.WithCancel(t.Context())
+	var atTheHold Outcome
+
+	stopped, err := running.holdNamed(holding, theScenarioWhoseTimelineIsNotFiled,
+		func(steps *Scenario) {
+			steps.Given().Zones(twoZones, theGeneralNodePool())
+			steps.WaitFor().AllNodesReady()
+		}, anObserverDiscardingEachBoard(), anInjector(), func(reported Outcome) {
+			atTheHold = reported
+			stopTheLab()
+		}, ignoringEachLineFollowed)
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioWhoseTimelineIsNotFiled, err)
+	}
+
+	expect.Expect(t, atTheHold.NotFiled).To(expect.Equal[error](nil))
+	if stopped.NotFiled == nil {
+		t.Fatalf("the Timeline could not be written at the stop, and the Outcome named nothing")
+	}
+	if !strings.Contains(stopped.NotFiled.Error(), folder.Path()) {
+		t.Errorf("the Timeline could not be written, and the Outcome named %q instead of the folder %s", stopped.NotFiled, folder.Path())
+	}
 }
 
 func TestAnInteractiveRunWhoseStepCannotBeCarriedOut_ShouldHoldTheClusterAsThatStepLeftIt(t *testing.T) {
@@ -227,10 +306,10 @@ func TestAnInteractiveRunWhoseStepCannotBeCarriedOut_ShouldHoldTheClusterAsThatS
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), aSpecificationTheConstructorRefuses())
-	}, anObserverDiscardingEachBoard(), anInjectorReportingNothing(), func(Outcome) {
+	}, anObserverDiscardingEachBoard(), anInjector(), func(Outcome) {
 		readyWhileHeld = theReadyNodesOf(t, provisioned)
 		stopTheLab()
-	})
+	}, ignoringEachLineFollowed)
 	if err != nil {
 		t.Fatalf("carry out the Scenario %s: %v", theScenarioEndedAtARefusal, err)
 	}
@@ -246,10 +325,15 @@ type heldForClicks struct {
 	provisioned *cluster.SimulatedCluster
 	topology    scenario.Topology
 	deployment  scenario.Deployment
-	boards      <-chan scenario.PlacementBoard
-	// whens is written by the Injector while the test's own click runs, so the
-	// test reads it once that click returns.
-	whens []string
+	// descheduling runs the passes of a Descheduler declared on an interval.
+	descheduling *deschedulerInterval
+	boards       <-chan scenario.PlacementBoard
+	// followed is written by the held run's reader of its Timeline, so the test
+	// reads it once the held run has ended.
+	followed []string
+	// stopTheLab may be called by the test and again by its cleanup, so it
+	// stops the held run once and hands back its Outcome each time.
+	stopTheLab func() (Outcome, error)
 }
 
 // aHeldRunTakingClicks returns once the held run's Outcome is reported, so a
@@ -258,38 +342,108 @@ type heldForClicks struct {
 func aHeldRunTakingClicks(t *testing.T, name string) *heldForClicks {
 	t.Helper()
 
+	return aHeldRunDeclaring(t, name, func(*Scenario) {})
+}
+
+// aHeldRunDeschedulingOnAnInterval runs a pass every second under a policy
+// restoring the hostname spread, from its Pods' Wait until the lab stops.
+func aHeldRunDeschedulingOnAnInterval(t *testing.T, name string) *heldForClicks {
+	t.Helper()
+
+	return aHeldRunDeclaring(t, name, func(steps *Scenario) {
+		steps.Given().Descheduler(aPolicyRestoringTheSpread()).EverySeconds(aPassEverySecond)
+	})
+}
+
+// aHeldRunDeclaring declares beside the Deployment whatever further Givens the
+// test needs, before the Wait applying them.
+func aHeldRunDeclaring(t *testing.T, name string, furtherGivens func(*Scenario)) *heldForClicks {
+	t.Helper()
+
+	return aHeldRunCarryingOut(t, name, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+		furtherGivens(steps)
+		steps.WaitFor().AllPodsReady()
+	})
+}
+
+// aHeldRunCarryingOut holds the cluster once the Steps given are carried out,
+// keeping what they declared.
+func aHeldRunCarryingOut(t *testing.T, name string, steps func(*Scenario)) *heldForClicks {
+	t.Helper()
+
 	running := aRunnerOnThisMachine(t)
 	holding, stopTheLab := context.WithCancel(t.Context())
-	held := &heldForClicks{}
-	held.injector = NewInjector(func(when Step) { held.whens = append(held.whens, when.String()) })
+	held := &heldForClicks{injector: NewInjector()}
 	observer, boards := anObserverHandingOverEachPlacementBoard(holding)
 	held.boards = boards
-	reported, ended := make(chan struct{}), make(chan error, 1)
+	reported, ended := make(chan struct{}), make(chan Carried, 1)
 	go func() {
-		_, err := running.holdNamed(holding, name, func(steps *Scenario) {
-			held.provisioned = steps.provisioned
-			steps.Given().Zones(twoZones, theGeneralNodePool())
-			steps.WaitFor().AllNodesReady()
-			steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
-			steps.WaitFor().AllPodsReady()
-			held.topology, held.deployment = steps.topology, steps.deployment
-		}, observer, held.injector, func(Outcome) { close(reported) })
-		ended <- err
+		stopped, err := running.holdNamed(holding, name, func(declaring *Scenario) {
+			held.provisioned = declaring.provisioned
+			steps(declaring)
+			held.topology, held.deployment, held.descheduling = declaring.topology, declaring.deployment, declaring.descheduling
+		}, observer, held.injector, func(Outcome) { close(reported) }, func(line string) { held.followed = append(held.followed, line) })
+		ended <- Carried{Outcome: stopped, Err: err}
 	}()
-	t.Cleanup(func() {
+	held.stopTheLab = sync.OnceValues(func() (Outcome, error) {
 		stopTheLab()
-		if err := <-ended; err != nil {
+		stopped := <-ended
+
+		return stopped.Outcome, stopped.Err
+	})
+	t.Cleanup(func() {
+		if _, err := held.stopTheLab(); err != nil {
 			t.Errorf("carry out the held Scenario %s: %v", name, err)
 		}
 	})
 
 	select {
 	case <-reported:
-	case err := <-ended:
-		t.Fatalf("the held Scenario %s ended before it reported: %v", name, err)
+	case stopped := <-ended:
+		t.Fatalf("the held Scenario %s ended before it reported: %v", name, stopped.Err)
 	}
 
 	return held
+}
+
+// theOutcomeOnceStopped is what the held run hands back once the engineer stops
+// the lab.
+func (h *heldForClicks) theOutcomeOnceStopped(t *testing.T) Outcome {
+	t.Helper()
+
+	stopped, err := h.stopTheLab()
+	if err != nil {
+		t.Fatalf("stop the held Scenario: %v", err)
+	}
+
+	return stopped
+}
+
+// theLinesFollowed stops the held run, so its reader has handed over every line.
+func (h *heldForClicks) theLinesFollowed(t *testing.T) []string {
+	t.Helper()
+
+	h.theOutcomeOnceStopped(t)
+
+	return h.followed
+}
+
+// theWhensFollowed are the lines a click's When gives, the only ones naming a
+// Step.
+func (h *heldForClicks) theWhensFollowed(t *testing.T) []string {
+	t.Helper()
+
+	whens := []string{}
+	for _, line := range h.theLinesFollowed(t) {
+		if strings.HasPrefix(line, string(WhenStep)+" ") {
+			whens = append(whens, line)
+		}
+	}
+
+	return whens
 }
 
 // anObserverHandingOverEachPlacementBoard blocks the observer until the test
@@ -398,6 +552,26 @@ func (h *heldForClicks) thePodNamesOnceReplaced(t *testing.T) []string {
 	return names
 }
 
+func (h *heldForClicks) awaitEveryNodeReady(t *testing.T) {
+	t.Helper()
+
+	if _, err := h.provisioned.AwaitNodesReady(t.Context(), h.topology, h.deployment); err != nil {
+		t.Fatalf("await every Node of the held Scenario Ready: %v", err)
+	}
+}
+
+// awaitAPassEvictingNothing ends at the first pass begun after the call that
+// evicts nothing, so a pass the cluster gave cause to evict has run before it.
+func (h *heldForClicks) awaitAPassEvictingNothing(t *testing.T) {
+	t.Helper()
+
+	waiting, cancel := context.WithTimeout(t.Context(), scenario.WaitingTime)
+	defer cancel()
+	if err := h.descheduling.awaitAPassEvictingNothingAfter(waiting, h.descheduling.passesBegun()); err != nil {
+		t.Fatalf("await a Descheduler pass of the held Scenario evicting nothing: %v", err)
+	}
+}
+
 func nodeNamesOf(nodes []scenario.Node) []string {
 	names := make([]string, 0, len(nodes))
 	for _, node := range nodes {
@@ -433,6 +607,7 @@ const (
 	theScenarioClickedOnARestoredNode  = "a-scenario-clicked-on-a-restored-node"
 	aNameNoNodeZoneOrPodCarries        = "zone-9-node-9"
 	noWhenReported                     = 0
+	noLineFollowed                     = 0
 	theLostPodGone                     = true
 )
 
@@ -480,7 +655,7 @@ func TestAFailureClickedInTheLiveView_ShouldReportAWhenToTheTerminalNamingThePod
 	expectInjected(t, held.injector.ClickNode(stoppedNode))
 	expectInjected(t, held.injector.ClickZone(stoppedZone))
 
-	expect.Expect(t, held.whens).To(expect.Equal([]string{
+	expect.Expect(t, held.theWhensFollowed(t)).To(expect.Equal([]string{
 		"When Pod " + lostPod.BoardName() + " is lost",
 		"When Node " + stoppedNode + " stops responding",
 		"When Zone " + stoppedZone + " stops responding",
@@ -499,20 +674,20 @@ func TestAClickOnAPendingPodOrAnyOtherPartOfTheLiveView_ShouldChangeNothingAndRe
 	expectInjected(t, held.injector.LosePod(aNameNoNodeZoneOrPodCarries))
 
 	expect.Expect(t, held.theReadyNodeNames(t)).To(expect.Equal(held.everyNodeBut()))
-	expect.Expect(t, held.whens).To(expect.HaveLen[string](noWhenReported))
+	expect.Expect(t, held.theWhensFollowed(t)).To(expect.HaveLen[string](noWhenReported))
 }
 
 func TestAClickInTheLiveViewWhileTheStepsStillRun_ShouldChangeNothing(t *testing.T) {
 	t.Parallel()
 	running := aRunnerOnThisMachine(t)
 	holding, stopTheLab := context.WithCancel(t.Context())
-	var whens []string
-	injector := NewInjector(func(when Step) { whens = append(whens, when.String()) })
+	var followed []string
+	injector := NewInjector()
 	var provisioned *cluster.SimulatedCluster
 	var declared scenario.Topology
 	var readyAfterTheClick []scenario.Node
 
-	_, err := running.holdNamed(holding, theScenarioClickedWhileItsStepsRun, func(steps *Scenario) {
+	stopped, err := running.holdNamed(holding, theScenarioClickedWhileItsStepsRun, func(steps *Scenario) {
 		provisioned = steps.provisioned
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
@@ -521,13 +696,14 @@ func TestAClickInTheLiveViewWhileTheStepsStillRun_ShouldChangeNothing(t *testing
 			t.Errorf("click a Node while the Steps run: %v", err)
 		}
 		readyAfterTheClick = theReadyNodesOf(t, provisioned)
-	}, anObserverDiscardingEachBoard(), injector, func(Outcome) { stopTheLab() })
+	}, anObserverDiscardingEachBoard(), injector, func(Outcome) { stopTheLab() }, func(line string) { followed = append(followed, line) })
 	if err != nil {
 		t.Fatalf("carry out the Scenario %s: %v", theScenarioClickedWhileItsStepsRun, err)
 	}
 
 	expect.Expect(t, readyAfterTheClick).To(expect.HaveLen[scenario.Node](theNodesOfTwoZonesOfTwoEach))
-	expect.Expect(t, whens).To(expect.HaveLen[string](noWhenReported))
+	expect.Expect(t, followed).To(expect.HaveLen[string](noLineFollowed))
+	expect.Expect(t, theWhensNotedIn(stopped.Timeline)).To(expect.HaveLen[string](noWhenReported))
 }
 
 func TestAClickOnAZoneWithOnlySomeNodesStopped_ShouldStopTheOthersAndNameTheZone(t *testing.T) {
@@ -540,7 +716,7 @@ func TestAClickOnAZoneWithOnlySomeNodesStopped_ShouldStopTheOthersAndNameTheZone
 	expectInjected(t, held.injector.ClickZone(zone))
 
 	expect.Expect(t, held.theReadyNodeNames(t)).To(expect.Equal(held.everyNodeBut(held.theNodesOfZone(zone)...)))
-	expect.Expect(t, held.whens).To(expect.Equal([]string{
+	expect.Expect(t, held.theWhensFollowed(t)).To(expect.Equal([]string{
 		"When Node " + stoppedFirst + " stops responding",
 		"When Zone " + zone + " stops responding",
 	}))
@@ -568,7 +744,7 @@ func TestAClickOnAStoppedNodesBoxInTheLiveView_ShouldMakeThatNodeRespondAgainAnd
 	expectInjected(t, held.injector.ClickNode(clicked))
 
 	expect.Expect(t, held.theReadyNodeNames(t)).To(expect.Equal(held.everyNodeBut()))
-	expect.Expect(t, held.whens).To(expect.Equal([]string{
+	expect.Expect(t, held.theWhensFollowed(t)).To(expect.Equal([]string{
 		"When Node " + clicked + " stops responding",
 		"When Node " + clicked + " responds again",
 	}))
@@ -583,7 +759,7 @@ func TestAClickOnAZoneWhoseEveryNodeStopped_ShouldMakeEveryNodeOfItRespondAgainA
 	expectInjected(t, held.injector.ClickZone(clicked))
 
 	expect.Expect(t, held.theReadyNodeNames(t)).To(expect.Equal(held.everyNodeBut()))
-	expect.Expect(t, held.whens).To(expect.Equal([]string{
+	expect.Expect(t, held.theWhensFollowed(t)).To(expect.Equal([]string{
 		"When Zone " + clicked + " stops responding",
 		"When Zone " + clicked + " responds again",
 	}))
@@ -599,7 +775,7 @@ func TestAClickOnOneNodeOfAStoppedZone_ShouldMakeThatNodeAloneRespondAgain(t *te
 	expectInjected(t, held.injector.ClickNode(clicked))
 
 	expect.Expect(t, held.theReadyNodeNames(t)).To(expect.Equal(held.everyNodeBut(stillStopped...)))
-	expect.Expect(t, held.whens).To(expect.Equal([]string{
+	expect.Expect(t, held.theWhensFollowed(t)).To(expect.Equal([]string{
 		"When Zone " + zone + " stops responding",
 		"When Node " + clicked + " responds again",
 	}))
@@ -615,10 +791,316 @@ func TestAClickOnANodeThatRespondsAgain_ShouldStopItRespondingOnceMore(t *testin
 	expectInjected(t, held.injector.ClickNode(clicked))
 
 	expect.Expect(t, held.theReadyNodeNames(t)).To(expect.Equal(held.everyNodeBut(clicked)))
-	expect.Expect(t, held.whens).To(expect.Equal([]string{
+	expect.Expect(t, held.theWhensFollowed(t)).To(expect.Equal([]string{
 		"When Node " + clicked + " stops responding",
 		"When Node " + clicked + " responds again",
 		"When Node " + clicked + " stops responding",
+	}))
+}
+
+const (
+	theScenarioJoiningAClickToItsTimeline  = "a-scenario-joining-a-click-to-its-timeline"
+	theScenarioJoiningNoClickToItsTimeline = "a-scenario-joining-no-click-to-its-timeline"
+	theScenarioRecordingWhatAClickChanged  = "a-scenario-recording-what-a-click-changed"
+	theScenarioFilingItsTimelineAtTheStop  = "a-scenario-filing-its-timeline-at-the-stop"
+	thePodScheduled                        = "Scheduled"
+	theScenarioDeschedulingWhileHeld       = "a-scenario-descheduling-while-held"
+	thePassEvicted                         = true
+	theStepFiled                           = true
+)
+
+// The Steps carried out hold no When, so every When the Timeline holds is a
+// click's.
+func theWhensNotedIn(recorded scenario.Timeline) []string {
+	noted := []string{}
+	for _, entry := range recorded.Entries() {
+		if entry.Kind == scenario.StepObject && entry.Name == string(WhenStep) {
+			noted = append(noted, entry.Detail)
+		}
+	}
+
+	return noted
+}
+
+// theReadinessRecordedAfter reads the Node's readiness from the entries after
+// the When's note alone, so a readiness recorded there followed the note.
+func theReadinessRecordedAfter(recorded scenario.Timeline, when, node string) []string {
+	readiness := []string{}
+	noted := false
+	for _, entry := range recorded.Entries() {
+		if entry.Kind == scenario.StepObject && entry.Detail == when {
+			noted = true
+		}
+		if noted && entry.Kind == scenario.NodeObject && entry.Name == node {
+			readiness = append(readiness, entry.Reason)
+		}
+	}
+
+	return readiness
+}
+
+// The API server reports the clicked Node NotReady once the click returns, but
+// the record receives that change on its watch stream later. The Wait a
+// Scenario writes after its When, here for the Pods the Node held, lets the
+// record receive it before the lab stops, as it does for a Scenario's Then.
+func TestAClickOnAHeldCluster_ShouldJoinTheTimelineAsAWhenAtItsMomentWordedAsTheTerminalsWhen(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioJoiningAClickToItsTimeline)
+	clicked := held.theFirstNode()
+
+	expectInjected(t, held.injector.ClickNode(clicked))
+	held.thePodNamesOnceReplaced(t)
+
+	recorded := held.theOutcomeOnceStopped(t).Timeline
+	expect.Expect(t, theWhensNotedIn(recorded)).To(expect.Equal(held.theWhensFollowed(t)))
+	expect.Expect(t, slices.Contains(theReadinessRecordedAfter(recorded, held.theWhensFollowed(t)[0], clicked), string(scenario.NodeNotReady))).
+		To(expect.Equal(true))
+}
+
+// A Pending Pod's box carries no Failure, so a name resolving to nothing stands
+// for every click that changes nothing.
+func TestAClickChangingNothing_ShouldAddNoWhenToTheTimeline(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioJoiningNoClickToItsTimeline)
+
+	expectInjected(t, held.injector.ClickNode(aNameNoNodeZoneOrPodCarries))
+	expectInjected(t, held.injector.ClickZone(aNameNoNodeZoneOrPodCarries))
+	expectInjected(t, held.injector.LosePod(aNameNoNodeZoneOrPodCarries))
+
+	expect.Expect(t, theWhensNotedIn(held.theOutcomeOnceStopped(t).Timeline)).To(expect.HaveLen[string](noWhenReported))
+}
+
+// theScheduledAfter names each Pod the control plane reported Scheduled after
+// the When's note.
+func theScheduledAfter(recorded scenario.Timeline, when string) []string {
+	scheduled := []string{}
+	noted := false
+	for _, entry := range recorded.Entries() {
+		if entry.Kind == scenario.StepObject && entry.Detail == when {
+			noted = true
+		}
+		if noted && entry.Kind == scenario.PodObject && entry.Change == scenario.ChangeReported && entry.Reason == thePodScheduled {
+			scheduled = append(scheduled, entry.Name)
+		}
+	}
+
+	return scheduled
+}
+
+func theNewcomers(before, after []string) []string {
+	newcomers := []string{}
+	for _, name := range after {
+		if !slices.Contains(before, name) {
+			newcomers = append(newcomers, name)
+		}
+	}
+
+	return newcomers
+}
+
+// The lost Pod's replacement is scheduled by the control plane alone, so its
+// reported reason is the control plane's.
+func TestChangesAfterAClickOnAHeldCluster_ShouldBeRecordedInTheTimelineWithTheControlPlanesReason(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioRecordingWhatAClickChanged)
+	clicked := held.aPodPlacedOn(t, held.theFirstNode())
+	placedBefore := held.thePodNamesOnceReplaced(t)
+
+	expectInjected(t, held.injector.LosePod(clicked.Name))
+
+	replacements := theNewcomers(placedBefore, held.thePodNamesOnceReplaced(t))
+	expect.Expect(t, theScheduledAfter(held.theOutcomeOnceStopped(t).Timeline, held.theWhensFollowed(t)[0])).To(expect.Equal(replacements))
+}
+
+// filedAtTheStop is what the file a held run filed holds: its entry count, and
+// whether a Step's line is among them.
+type filedAtTheStop struct {
+	Entries      int
+	HoldsTheStep bool
+}
+
+// theTimelineFiledAt reads the file back, its first line being the header.
+func theTimelineFiledAt(t *testing.T, stopped Outcome, step string) filedAtTheStop {
+	t.Helper()
+
+	filed, err := os.ReadFile(stopped.FiledAt)
+	if err != nil {
+		t.Fatalf("read the Timeline filed at %s: %v", stopped.FiledAt, err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(filed), "\n"), "\n")
+
+	return filedAtTheStop{Entries: len(lines[1:]), HoldsTheStep: strings.Contains(string(filed), step)}
+}
+
+func TestAnInteractiveRunStopped_ShouldFileItsTimelineWithEveryEntryUpToTheStop(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioFilingItsTimelineAtTheStop)
+	expectInjected(t, held.injector.ClickNode(held.theFirstNode()))
+
+	stopped := held.theOutcomeOnceStopped(t)
+
+	expect.Expect(t, stopped.NotFiled).To(expect.Equal[error](nil))
+	expect.Expect(t, theTimelineFiledAt(t, stopped, held.theWhensFollowed(t)[0])).
+		To(expect.Equal(filedAtTheStop{Entries: len(stopped.Timeline.Entries()), HoldsTheStep: theStepFiled}))
+}
+
+// thePodsDescheduledAfter names each Pod the Timeline reports evicted by the
+// Descheduler after the When's note.
+func thePodsDescheduledAfter(recorded scenario.Timeline, when string) []string {
+	descheduled := []string{}
+	noted := false
+	for _, entry := range recorded.Entries() {
+		if entry.Kind == scenario.StepObject && entry.Detail == when {
+			noted = true
+		}
+		if noted && entry.Reason == scenario.EvictedByTheDescheduler {
+			descheduled = append(descheduled, entry.Name)
+		}
+	}
+
+	return descheduled
+}
+
+// evictionsWhileHeld is what a held Timeline says of a Node Failure's Pod and of
+// the Pods a pass evicted once the Node responded again.
+type evictionsWhileHeld struct {
+	DescheduledOnceRespondingAgain bool
+	FailuresPodDescheduled         bool
+}
+
+// A Node that stops responding and responds again leaves it empty and another
+// Node holding two, past the hostname spread, so a pass on the interval evicts
+// a Pod the Failure did not lose. The Descheduler evicts from Ready Nodes
+// alone, so the Pod the Failure lost is never its.
+func TestAPassEvictingPodsOnAHeldCluster_ShouldLeaveEntriesSetApartFromAFailuresEvictions(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunDeschedulingOnAnInterval(t, theScenarioDeschedulingWhileHeld)
+	stopped := held.theFirstNode()
+	lostToTheFailure := held.aPodPlacedOn(t, stopped)
+	expectInjected(t, held.injector.ClickNode(stopped))
+	held.thePodNamesOnceReplaced(t)
+
+	expectInjected(t, held.injector.ClickNode(stopped))
+	held.awaitEveryNodeReady(t)
+	held.awaitAPassEvictingNothing(t)
+
+	recorded := held.theOutcomeOnceStopped(t).Timeline
+	expect.Expect(t, evictionsWhileHeld{
+		DescheduledOnceRespondingAgain: len(thePodsDescheduledAfter(recorded, held.theWhensFollowed(t)[1])) > 0,
+		FailuresPodDescheduled:         slices.Contains(theEvictionsByTheDeschedulerOn(recorded), lostToTheFailure.Name),
+	}).To(expect.Equal(evictionsWhileHeld{DescheduledOnceRespondingAgain: thePassEvicted}))
+}
+
+const (
+	theScenarioFollowingItsMoments    = "a-scenario-following-its-moments"
+	theScenarioFollowedWithNoInterval = "a-scenario-followed-with-no-descheduler-interval"
+	theDeschedulersEviction           = " by the Descheduler"
+	aMomentOpensAfter                 = "  "
+	theMomentsFollowedHaveEntries     = true
+	theNodeNamedNotReady              = true
+	noEvictionByTheDescheduler        = 0
+	noLineBeforeTheClick              = 0
+)
+
+// toTheMillisecond is the elapsed time a narrative's line and an entry's line
+// open with.
+var toTheMillisecond = regexp.MustCompile(`^\+[0-9]+\.[0-9]{3}s$`)
+
+// theMomentsFollowed are the lines no click's When gives.
+func (h *heldForClicks) theMomentsFollowed(t *testing.T) []string {
+	t.Helper()
+
+	moments := []string{}
+	for _, line := range h.theLinesFollowed(t) {
+		if !strings.HasPrefix(line, string(WhenStep)+" ") {
+			moments = append(moments, line)
+		}
+	}
+
+	return moments
+}
+
+// theMomentsWithNoEntry names each moment whose opening time is not to the
+// millisecond, or opens no entry of the Timeline filed.
+func theMomentsWithNoEntry(moments []string, filed scenario.Timeline) []string {
+	entryAt := map[string]bool{}
+	for _, entry := range filed.Entries() {
+		at, _, _ := strings.Cut(entry.Line(), aMomentOpensAfter)
+		entryAt[at] = true
+	}
+	unfiled := []string{}
+	for _, moment := range moments {
+		at, _, _ := strings.Cut(moment, aMomentOpensAfter)
+		if !toTheMillisecond.MatchString(at) || !entryAt[at] {
+			unfiled = append(unfiled, moment)
+		}
+	}
+
+	return unfiled
+}
+
+// momentsFiled is whether any moment was followed, and those the filed
+// Timeline holds no entry for.
+type momentsFiled struct {
+	Followed    bool
+	WithNoEntry []string
+}
+
+func TestAMomentLineFollowed_ShouldOpenWithItsElapsedTimeToTheMillisecondAndHaveAnEntryInTheFiledTimeline(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioFollowingItsMoments)
+	expectInjected(t, held.injector.ClickNode(held.theFirstNode()))
+	held.thePodNamesOnceReplaced(t)
+
+	moments := held.theMomentsFollowed(t)
+
+	expect.Expect(t, momentsFiled{
+		Followed: len(moments) > 0, WithNoEntry: theMomentsWithNoEntry(moments, held.theOutcomeOnceStopped(t).Timeline),
+	}).To(expect.Equal(momentsFiled{Followed: theMomentsFollowedHaveEntries, WithNoEntry: []string{}}))
+}
+
+func theLinesSaying(lines []string, said func(string) bool) []string {
+	saying := []string{}
+	for _, line := range lines {
+		if said(line) {
+			saying = append(saying, line)
+		}
+	}
+
+	return saying
+}
+
+// clicksAndMoments is what the terminal of a held cluster named: the lines
+// before the first click, the clicks, whether the Node clicked was named
+// NotReady, and the Descheduler's evictions.
+type clicksAndMoments struct {
+	BeforeTheClick   int
+	Whens            []string
+	NodeNotReady     bool
+	ByTheDescheduler int
+}
+
+// The cluster settled before the hold, so nothing is named before the click.
+func TestAHeldClusterWithNoDeschedulerInterval_ShouldNameClicksAndTheMomentsAfterThemOnly(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioFollowedWithNoInterval)
+	clicked := held.theFirstNode()
+	expectInjected(t, held.injector.ClickNode(clicked))
+	held.thePodNamesOnceReplaced(t)
+
+	lines := held.theLinesFollowed(t)
+
+	theClick := "When Node " + clicked + " stops responding"
+	expect.Expect(t, clicksAndMoments{
+		BeforeTheClick: slices.Index(lines, theClick),
+		Whens:          held.theWhensFollowed(t),
+		NodeNotReady: len(theLinesSaying(lines, func(line string) bool {
+			return strings.HasSuffix(line, aMomentOpensAfter+"Node "+clicked+" "+string(scenario.NodeNotReady))
+		})) > 0,
+		ByTheDescheduler: len(theLinesSaying(lines, func(line string) bool { return strings.HasSuffix(line, theDeschedulersEviction) })),
+	}).To(expect.Equal(clicksAndMoments{
+		BeforeTheClick: noLineBeforeTheClick, Whens: []string{theClick}, NodeNotReady: theNodeNamedNotReady,
+		ByTheDescheduler: noEvictionByTheDescheduler,
 	}))
 }
 
@@ -1126,6 +1608,79 @@ func TestAZoneThatRespondsAgainUnderADescheduler_ShouldMovePodsBackUntilEveryZon
 	expect.Expect(t, causeOf(ran)).To(expect.Equal(""))
 	expect.Expect(t, ran.Findings).To(expect.Equal([]Finding(nil)))
 	expect.Expect(t, len(theEvictionsByTheDeschedulerOn(ran.Timeline)) > 0).To(expect.Equal(true))
+}
+
+const theHeldTwinOfAZoneThatRespondsAgain = "a-zone-that-responds-again-under-a-descheduler-held"
+
+// theNodesNamedTurning names, in order, each Node a line names turning to the
+// readiness.
+func theNodesNamedTurning(lines []string, readiness scenario.NodeReadiness) []string {
+	turned := []string{}
+	for _, line := range lines {
+		_, said, _ := strings.Cut(line, aMomentOpensAfter)
+		if named, isANode := strings.CutPrefix(said, "Node "); isANode && strings.HasSuffix(named, " "+string(readiness)) {
+			turned = append(turned, strings.TrimSuffix(named, " "+string(readiness)))
+		}
+	}
+	slices.Sort(turned)
+
+	return turned
+}
+
+func theLinesAfter(lines []string, when string) []string {
+	return lines[slices.Index(lines, when)+1:]
+}
+
+// zoneFollowed is what the terminal named while the Zone stopped and responded
+// again: the Nodes turning each way, whether the Descheduler moved a Pod, and
+// whether as many Pods were scheduled after the Zone responded again as the
+// Descheduler evicted.
+type zoneFollowed struct {
+	TurnedNotReady   []string
+	TurnedReady      []string
+	MovedBack        bool
+	MovedAllReplaced bool
+}
+
+// The Steps are the Scenario's up to its first When, written out as its twin's
+// are; the clicks stand for its two Whens.
+func TestAZoneThatRespondsAgainUnderADeschedulerHeld_ShouldNameItsNodesTurningThePodsMovedAndEachReplacementsNode(t *testing.T) {
+	const (
+		threeZones        = 3
+		threeNodesPerZone = 3
+		ninePods          = threeZones * threeNodesPerZone
+		thePodsMovedBack  = true
+		everyMoveReplaced = true
+	)
+	t.Parallel()
+	held := aHeldRunCarryingOut(t, theHeldTwinOfAZoneThatRespondsAgain, func(steps *Scenario) {
+		steps.Given().Zones(threeZones, node.Pool(generalNodePool, node.PerZone(threeNodesPerZone), roomyNodes()))
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, ninePods, askingForNothing(), resilientPlacement()).SurvivesLosing(Zones(oneLost))
+		steps.Given().Descheduler(aPolicyLikeEvenSpreadRestored()).EverySeconds(aPassEveryFiveSeconds)
+		steps.WaitFor().AllPodsReady()
+	})
+	zone := held.theFirstZone()
+	expectInjected(t, held.injector.ClickZone(zone))
+	held.thePodNamesOnceReplaced(t)
+	expectInjected(t, held.injector.ClickZone(zone))
+	held.awaitEveryNodeReady(t)
+	held.awaitAPassEvictingNothing(t)
+	held.thePodNamesOnceReplaced(t)
+
+	onceResponding := theLinesAfter(held.theLinesFollowed(t), "When Zone "+zone+" responds again")
+
+	movedBack := theLinesSaying(onceResponding, func(line string) bool { return strings.HasSuffix(line, theDeschedulersEviction) })
+	scheduled := theLinesSaying(onceResponding, func(line string) bool { return strings.Contains(line, " scheduled on ") })
+	expect.Expect(t, zoneFollowed{
+		TurnedNotReady:   theNodesNamedTurning(held.theLinesFollowed(t), scenario.NodeNotReady),
+		TurnedReady:      theNodesNamedTurning(onceResponding, scenario.NodeReady),
+		MovedBack:        len(movedBack) > 0,
+		MovedAllReplaced: len(scheduled) >= len(movedBack),
+	}).To(expect.Equal(zoneFollowed{
+		TurnedNotReady: held.theNodesOfZone(zone), TurnedReady: held.theNodesOfZone(zone),
+		MovedBack: thePodsMovedBack, MovedAllReplaced: everyMoveReplaced,
+	}))
 }
 
 func theEvictionsByTheDeschedulerOn(recorded scenario.Timeline) []string {

@@ -23,7 +23,7 @@ PROHIBITED_IMPORTS := \
 	sigs.k8s.io/controller-runtime \
 	k8s.io/kubectl
 
-.PHONY: ci run interactive tidy-check fmt fmt-check vet lint lint-fix deps-check test test-race build
+.PHONY: ci run interactive demo tidy-check fmt fmt-check vet lint lint-fix deps-check test test-race build
 
 ci: tidy-check fmt-check vet lint deps-check test build
 
@@ -40,6 +40,34 @@ interactive:
 		exit 2; \
 	fi
 	go run ./cmd/lab --interactive $(SCENARIO) $(ARGS)
+
+# demo is an interactive run of a-zone-that-responds-again-under-a-descheduler,
+# or of the Scenario named in SCENARIO, that opens its Live view in the browser.
+# Every line the lab prints passes through the loop below; the one naming the
+# Live view goes to xdg-open, or open, once. xdg-open comes first because on
+# some Linux machines open is openvt. With neither on the machine the
+# address stays on the terminal. The loop ignores the interrupt and reads until
+# the lab closes its output, so the lab alone handles Ctrl-C and removes its
+# cluster before the loop ends. Only the loopback address with a numeric port
+# reaches the opener. Bash runs the recipe for pipefail, so a Finding fails make.
+DEMO_SCENARIO := a-zone-that-responds-again-under-a-descheduler
+LIVE_VIEW_LINE := ^Live view:[[:space:]]+(http://127\.0\.0\.1:[0-9]+/)$$
+
+demo: SHELL := bash
+demo:
+	@set -o pipefail; \
+	go run ./cmd/lab --interactive $(or $(SCENARIO),$(DEMO_SCENARIO)) $(ARGS) | ( \
+		trap '' INT; \
+		opened=; \
+		pattern='$(LIVE_VIEW_LINE)'; \
+		while IFS= read -r line || [ -n "$$line" ]; do \
+			printf '%s\n' "$$line"; \
+			if [ -z "$$opened" ] && [[ "$$line" =~ $$pattern ]]; then \
+				opened=1; \
+				opener=$$(command -v xdg-open || command -v open || true); \
+				if [ -n "$$opener" ]; then "$$opener" "$${BASH_REMATCH[1]}" >/dev/null 2>&1 & fi; \
+			fi; \
+		done )
 
 tidy-check:
 	go mod tidy -diff

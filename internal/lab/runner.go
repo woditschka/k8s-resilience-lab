@@ -43,7 +43,9 @@ type Outcome struct {
 	EndedAt Step
 	Cause   error
 	// A Timeline the lab could not write is the lab's own failure and leaves
-	// the rest of this Outcome as reported.
+	// the rest of this Outcome as reported. The Outcome a held run reports at
+	// its hold carries none of the three, since the record runs on until the
+	// lab stops.
 	Timeline scenario.Timeline
 	FiledAt  string
 	NotFiled error
@@ -74,23 +76,42 @@ func (s *Scenario) outcome() Outcome {
 	}
 }
 
-// finish notes the line a further call could still have completed, stops the
-// record and gives each Wait Step its narrative.
-//
-// A pass on the Descheduler's interval that failed after the last Step ends the
-// Scenario at the Given that declared the interval.
+// finish stops the record and gives each Wait Step its narrative from it.
 func (s *Scenario) finish() Outcome {
+	s.endTheSteps()
+	recorded := s.provisioned.StopRecording()
+
+	finished := s.narrated(recorded)
+	finished.Timeline = recorded
+
+	return finished
+}
+
+// hold gives each Wait Step its narrative from the Timeline recorded so far and
+// leaves the record running, so the changes while the cluster is held join it.
+// It hands back that Timeline and the channel carrying each later entry.
+func (s *Scenario) hold() (Outcome, scenario.Timeline, <-chan scenario.Entry) {
+	s.endTheSteps()
+	soFar, later := s.provisioned.FollowTimeline()
+
+	return s.narrated(soFar), soFar, later
+}
+
+// endTheSteps notes the line a further call could still have completed. A pass
+// on the Descheduler's interval that failed after the last Step ends the
+// Scenario at the Given that declared the interval.
+func (s *Scenario) endTheSteps() {
 	s.noteTheOpenLine()
 	if failed := s.descheduling.failure(); failed != nil {
 		s.end(s.deschedulerDeclaredAt, failed)
 	}
-	recorded := s.provisioned.StopRecording()
+}
 
-	finished := s.outcome()
-	finished.Timeline = recorded
-	finished.Steps = givenTheirNarratives(finished.Steps, recorded.WaitNarratives())
+func (s *Scenario) narrated(recorded scenario.Timeline) Outcome {
+	narrated := s.outcome()
+	narrated.Steps = givenTheirNarratives(narrated.Steps, recorded.WaitNarratives())
 
-	return finished
+	return narrated
 }
 
 // The k-th narrative is the k-th Wait Step's, since each recorded Wait is
@@ -266,9 +287,14 @@ type Observer struct {
 // has none, and hands its Outcome to reported. It then holds the cluster as the
 // Steps left it until ctx ends, injecting each Failure injector is handed, and
 // removes it. From provisioning until removal observer is handed the cluster's
-// board.
+// board. The Timeline records until ctx ends and is filed then, so the Outcome
+// returned carries it and the Outcome reported does not.
+//
+// Each line scenario.Following reads from the entries recorded while held is
+// handed to followed, after the Outcome and in order, from one goroutine that
+// has ended once Hold returns.
 func (r *Runner) Hold(ctx context.Context, steps func(*Scenario), observer Observer, injector *Injector,
-	reported func(Outcome),
+	reported func(Outcome), followed func(string),
 ) (Outcome, error) {
 	name, err := scenarioNameOfFunction(steps)
 	if err != nil {
@@ -278,7 +304,7 @@ func (r *Runner) Hold(ctx context.Context, steps func(*Scenario), observer Obser
 		return Outcome{}, err
 	}
 
-	return r.holdNamed(ctx, name, steps, observer, injector, reported)
+	return r.holdNamed(ctx, name, steps, observer, injector, reported, followed)
 }
 
 // stopAtAnUnpairedDescheduler stops a run whose Kubernetes version the lab
@@ -306,17 +332,56 @@ func declaresADeschedulerPolicy(steps func(*Scenario)) bool {
 }
 
 func (r *Runner) holdNamed(ctx context.Context, name string, steps func(*Scenario), observer Observer,
-	injector *Injector, reported func(Outcome),
+	injector *Injector, reported func(Outcome), followed func(string),
 ) (Outcome, error) {
-	return r.carryOut(ctx, name, steps, &holding{observer: observer, injector: injector, reported: reported})
+	return r.carryOut(ctx, name, steps, &holding{observer: observer, injector: injector, reported: reported, followed: followed})
 }
 
 // holding is what sets a held run apart from a run: the halt at the first
-// When, the observer, the clicked Failures and the wait for the lab to stop.
+// When, the observer, the clicked Failures, the lines followed and the wait for
+// the lab to stop.
 type holding struct {
 	observer Observer
 	injector *Injector
 	reported func(Outcome)
+	followed func(string)
+}
+
+// hold reports the Outcome at the hold, then follows the Timeline and takes the
+// clicks until ctx ends. The record stops once no click is under way, so no
+// click notes into a stopped record, and its stop ends the following.
+func (h *holding) hold(ctx context.Context, running *Scenario, name string) Outcome {
+	held, soFar, later := running.hold()
+	held.Name, held.Cluster = name, running.provisioned.Name()
+
+	h.injector.takeFailures(
+		&heldCluster{ctx: ctx, provisioned: running.provisioned, topology: running.topology, stopped: slices.Clone(running.failed)},
+		func() { h.reported(held) })
+	joinTheFollowing := h.follow(soFar, later)
+	<-ctx.Done()
+	h.injector.stopTakingFailures()
+
+	held.Timeline = running.provisioned.StopRecording()
+	joinTheFollowing()
+
+	return held
+}
+
+// follow starts once the Outcome is reported, so no line comes before it, and
+// returns the function that waits for the channel's close to end it. The record
+// waits on this reader before it takes the next change, so it runs until then.
+func (h *holding) follow(soFar scenario.Timeline, later <-chan scenario.Entry) (join func()) {
+	var reading sync.WaitGroup
+	reading.Go(func() {
+		following := scenario.NewFollowing(soFar)
+		for entry := range later {
+			for _, line := range following.Read(entry) {
+				h.followed(line)
+			}
+		}
+	})
+
+	return reading.Wait
 }
 
 // Injector takes the clicks an engineer makes in the Live view into a held
@@ -331,9 +396,6 @@ type Injector struct {
 	mu sync.Mutex
 	// held is set while the held run takes Failures, and nil otherwise.
 	held *heldCluster
-	// reportWhen is called under mu, so the When of one Failure prints whole
-	// before the next is taken.
-	reportWhen func(Step)
 	// latest is written by the observer while a click reads it.
 	latest atomic.Pointer[scenario.PlacementBoard]
 }
@@ -347,9 +409,10 @@ type heldCluster struct {
 	stopped     []string
 }
 
-// NewInjector reports each click it takes as a When to reportWhen.
-func NewInjector(reportWhen func(Step)) *Injector {
-	return &Injector{reportWhen: reportWhen}
+// NewInjector notes each click it takes as a When into the held cluster's
+// Timeline, which is where the terminal reads it from.
+func NewInjector() *Injector {
+	return &Injector{}
 }
 
 // takeFailures reports the Outcome under the lock, so a click arriving as the
@@ -435,35 +498,35 @@ func (i *Injector) LosePod(name string) error {
 		return nil
 	}
 
-	lost, err := i.held.provisioned.LosePod(i.held.ctx, failure.Name())
-	if err != nil {
+	// Noted before the deletion, so the Pod's removal stands after its When. A
+	// Pod gone between the board and the deletion leaves its When noted all the
+	// same, so the terminal and the Timeline name the click alike.
+	i.held.note(Step{Kind: WhenStep, Name: "Pod " + failure.BoardName() + " is lost"})
+	if _, err := i.held.provisioned.LosePod(i.held.ctx, failure.Name()); err != nil {
 		return fmt.Errorf("lose the Pod %s clicked: %w", name, err)
-	}
-	if lost {
-		i.reportWhen(Step{Kind: WhenStep, Name: "Pod " + failure.BoardName() + " is lost"})
 	}
 
 	return nil
 }
 
 // stopping and restoring are called under mu, and clicked names the Node or
-// Zone as its When does.
+// Zone as its When does. The When is noted before the first Node changes, as a
+// Scenario's When is.
 func (i *Injector) stopping(nodes []string, clicked string) error {
-	if err := i.held.stop(nodes); err != nil {
-		return err
-	}
-	i.reportWhen(Step{Kind: WhenStep, Name: clicked + " stops responding"})
+	i.held.note(Step{Kind: WhenStep, Name: clicked + " stops responding"})
 
-	return nil
+	return i.held.stop(nodes)
 }
 
 func (i *Injector) restoring(nodes []string, clicked string) error {
-	if err := i.held.restore(nodes); err != nil {
-		return err
-	}
-	i.reportWhen(Step{Kind: WhenStep, Name: clicked + " responds again"})
+	i.held.note(Step{Kind: WhenStep, Name: clicked + " responds again"})
 
-	return nil
+	return i.held.restore(nodes)
+}
+
+// note words the When as the terminal prints it, as a Scenario notes its Steps.
+func (h *heldCluster) note(when Step) {
+	h.provisioned.NoteStep(string(when.Kind), when.String())
 }
 
 // stop keeps every Node it stopped among the stopped, even where a later one
@@ -540,19 +603,15 @@ func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario
 	}
 	steps(running)
 
-	reported = running.finish()
+	if held != nil {
+		reported = held.hold(ctx, running, name)
+	} else {
+		reported = running.finish()
+	}
 	filed.Close()
 
 	reported.Name, reported.Cluster = name, provisioned.Name()
 	reported.FiledAt, reported.NotFiled = filed.Path(), filed.Err()
-
-	if held != nil {
-		held.injector.takeFailures(
-			&heldCluster{ctx: ctx, provisioned: provisioned, topology: running.topology, stopped: slices.Clone(running.failed)},
-			func() { held.reported(reported) })
-		<-ctx.Done()
-		held.injector.stopTakingFailures()
-	}
 
 	return reported, nil
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1502,10 +1503,8 @@ func TestAScenarioReport_ShouldPrintNoSummaryOfEachDeploymentsPods(t *testing.T)
 const (
 	interactive              = "--interactive"
 	aNameNoScenarioCarries   = "a-condition-no-scenario-states"
-	theLiveViewOnLoopback    = "Live view:          http://127.0.0.1:"
 	theFirstScenarioOfTheLab = "a-deployment-placed-for-resilience"
 	aSecondScenarioOfTheLab  = "a-node-that-stops-responding"
-	theTimelineFiled         = "Timeline, "
 )
 
 func everyScenarioNameInOrder(t *testing.T) string {
@@ -1541,39 +1540,97 @@ func TestScenarioNamesAnInteractiveRunCannotTake_ShouldStopTheLabBeforeTheEngine
 	}
 }
 
-// aTerminalStoppingTheLabOnceFiled stands for the engineer who reads the
-// Outcome and then stops the lab: the filing line is the Outcome's last.
-type aTerminalStoppingTheLabOnceFiled struct {
+// aTerminalStoppingTheLabOnceHeld stands for the engineer who reads the
+// Outcome and then stops the lab: the held Scenario's Skew line is its
+// Outcome's last. What it printed by then is kept as printed while held.
+type aTerminalStoppingTheLabOnceHeld struct {
 	bytes.Buffer
 
 	stopTheLab context.CancelFunc
+	whileHeld  string
 }
 
-func (a *aTerminalStoppingTheLabOnceFiled) Write(line []byte) (int, error) {
-	if strings.Contains(string(line), theTimelineFiled) {
-		defer a.stopTheLab()
+func (a *aTerminalStoppingTheLabOnceHeld) Write(line []byte) (int, error) {
+	written, err := a.Buffer.Write(line)
+	if strings.Contains(string(line), aSkewReported) {
+		a.whileHeld = a.String()
+		a.stopTheLab()
 	}
 
-	return a.Buffer.Write(line)
+	return written, err
 }
 
-func TestAnInteractiveRunNamingAScenario_ShouldReportItsStepsBeforeItsFirstWhenAndWhereTheLiveViewIsReached(t *testing.T) {
-	t.Parallel()
-	requireEngine(t)
-	running, stopTheLab := context.WithCancel(t.Context())
-	terminal := &aTerminalStoppingTheLabOnceFiled{stopTheLab: stopTheLab}
+// interactiveRunReported is the whole of what the Interactive run printed, and
+// the part of it printed before the lab stopped.
+type interactiveRunReported struct {
+	whileHeld string
+	whole     string
+}
+
+// theLiveViewLine is the whole line the demo recipe reads: its label, then the
+// loopback address with a numeric port and its path, and nothing after.
+var theLiveViewLine = regexp.MustCompile(`(?m)^Live view:\s+http://127\.0\.0\.1:[0-9]+/$`)
+
+// anInteractiveRunPrintsItsSkewWithin bounds the shared Interactive run. A held
+// Scenario whose Steps ended part-way prints no Skew line, so the terminal
+// never stops the lab, which would otherwise hold its cluster until the test
+// binary times out.
+const anInteractiveRunPrintsItsSkewWithin = 10 * time.Minute
+
+// anInteractiveRunNamingAScenario is shared so its tests hold one Simulated
+// Cluster rather than one each. It runs under its own context, because it
+// outlives the test that starts it.
+var anInteractiveRunNamingAScenario = sync.OnceValues(func() (interactiveRunReported, error) {
+	running, stopTheLab := context.WithTimeout(context.Background(), anInteractiveRunPrintsItsSkewWithin)
+	defer stopTheLab()
+	terminal := &aTerminalStoppingTheLabOnceHeld{stopTheLab: stopTheLab}
 	var warned bytes.Buffer
 
-	err := run(running, []string{interactive, aSecondScenarioOfTheLab}, t.TempDir(), terminal, &warned)
+	err := run(running, []string{interactive, aSecondScenarioOfTheLab}, sharedRunTimelines, terminal, &warned)
+	reported := interactiveRunReported{whileHeld: terminal.whileHeld, whole: terminal.String()}
+	if reported.whileHeld == "" {
+		err = errors.Join(err, fmt.Errorf("no Skew line within %s, so the lab stopped there, having printed:\n%s",
+			anInteractiveRunPrintsItsSkewWithin, reported.whole))
+	}
+
+	return reported, err
+})
+
+func theInteractiveRunNamingAScenario(t *testing.T) interactiveRunReported {
+	t.Helper()
+
+	requireEngine(t)
+	reported, err := anInteractiveRunNamingAScenario()
 	if err != nil {
 		t.Fatalf("the Interactive run of %s: %v", aSecondScenarioOfTheLab, err)
 	}
 
-	reported := terminal.String()
-	reportShows(t, reported, theLiveViewOnLoopback)
+	return reported
+}
+
+func TestAnInteractiveRunNamingAScenario_ShouldReportItsStepsBeforeItsFirstWhen(t *testing.T) {
+	t.Parallel()
+	reported := theInteractiveRunNamingAScenario(t).whole
+
 	reportShows(t, reported, nodeStopsRespondingReported)
 	reportShows(t, reported, threePodsPerZoneJudged)
 	reportLacks(t, reported, oneNodeFailsReported)
+}
+
+func TestAnInteractiveRunNamingAScenario_ShouldNameTheLiveViewAddressAloneOnItsLine(t *testing.T) {
+	t.Parallel()
+	reported := theInteractiveRunNamingAScenario(t).whole
+
+	expect.Expect(t, theLiveViewLine.FindAllString(reported, -1)).To(expect.HaveLen[string](1))
+}
+
+func TestAnInteractiveRun_ShouldPrintItsTimelinesLineWhenStoppedNotWhenTheClusterIsHeld(t *testing.T) {
+	t.Parallel()
+	reported := theInteractiveRunNamingAScenario(t)
+
+	reportLacks(t, reported.whileHeld, timelineReported)
+	reportShows(t, strings.TrimPrefix(reported.whole, reported.whileHeld), timelineReported)
+	reportShows(t, strings.TrimPrefix(reported.whole, reported.whileHeld), filedAt)
 }
 
 func TestArgumentsNamingOneScenarioWithInteractive_ShouldCarryTheScenarioNameIntoTheSetting(t *testing.T) {
@@ -1603,7 +1660,7 @@ const anyNameClicked = "zone-1-node-1"
 // The Live view hands over its closed set alone, so a kind beyond it is a
 // defect that names itself rather than a click silently dropped.
 func TestAClickedFailureOfAKindTheLabDoesNotInject_ShouldBeRefusedNamingTheKind(t *testing.T) {
-	notHolding := lab.NewInjector(func(lab.Step) {})
+	notHolding := lab.NewInjector()
 
 	err := injected(notHolding, live.Failure{Kind: aKindOfFailureTheLabDoesNotInject, Name: anyNameClicked})
 
@@ -1612,13 +1669,26 @@ func TestAClickedFailureOfAKindTheLabDoesNotInject_ShouldBeRefusedNamingTheKind(
 
 // A run prints its When inside the Scenario's part, so the clicked When is
 // held to the line that part gives the same Step.
-func TestAClickedWhenInTheTerminal_ShouldStandIndentedAsARunsWhenDoes(t *testing.T) {
+func TestAClickedWhenFollowedInTheTerminal_ShouldStandIndentedAsARunsWhenDoes(t *testing.T) {
 	clicked := lab.Step{Kind: lab.WhenStep, Name: "Node " + anyNameClicked + " stops responding"}
 	var asARunPrintsIt reportPart
 	writeSteps(&asARunPrintsIt, lab.Outcome{Steps: []lab.Step{clicked}})
 	var reported bytes.Buffer
 
-	(&runReport{to: &reported}).printWhen(clicked)
+	(&runReport{to: &reported}).printFollowed(clicked.String())
+
+	expect.Expect(t, reported.String()).To(expect.Equal(asARunPrintsIt[0] + "\n"))
+}
+
+// A run prints a narrative's line first under its Wait, so a moment followed is
+// held to the line the run gives it.
+func TestAMomentLineFollowedInTheTerminal_ShouldStandIndentedAsAWaitNarrativesLineDoes(t *testing.T) {
+	narrated := aNarrativeOfOnePod()
+	var asARunPrintsIt reportPart
+	writeBoard(&asARunPrintsIt, lab.Step{Kind: lab.WaitStep, Narrative: narrated})
+	var reported bytes.Buffer
+
+	(&runReport{to: &reported}).printFollowed(narrated.Lines()[0])
 
 	expect.Expect(t, reported.String()).To(expect.Equal(asARunPrintsIt[0] + "\n"))
 }

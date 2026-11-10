@@ -415,7 +415,7 @@ func TestAKubernetesVersionPairedWithNoDescheduler_ShouldStopARunDeclaringAPolic
 		},
 		"one Scenario held": func() error {
 			_, err := running.Hold(t.Context(), ADeclaredDeschedulerPolicy_ShouldBeRunByThePairedDescheduler,
-				Observer{}, nil, nil)
+				Observer{}, nil, nil, nil)
 
 			return err
 		},

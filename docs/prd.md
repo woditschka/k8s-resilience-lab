@@ -593,6 +593,61 @@ An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inje
 
 **Design:** [system-design.md](system-design.md)
 
+### Opening the Live view in one command
+
+<a id="req-sim-032"></a>
+One command starts an Interactive run and opens its Live view in the machine's browser once the terminal names its address `[REQ-SIM-032]`. Naming no Scenario, it holds a-zone-that-responds-again-under-a-descheduler, whose Descheduler runs every five seconds and moves the Pods back. Naming one, it holds that Scenario instead `[REQ-SIM-032]`. The terminal reports as in an Interactive run, and an Interactive run started on its own opens no browser `[REQ-SIM-032]`.
+
+**Done when:**
+
+- `[REQ-SIM-032]` given the command naming no Scenario, when it starts, then an Interactive run holds a-zone-that-responds-again-under-a-descheduler. The browser opens its Live view once the terminal names the address.
+- `[REQ-SIM-032]` given the command naming a Scenario, when it starts, then the Interactive run holds that Scenario and the browser opens its Live view.
+- `[REQ-SIM-032]` given the command running, when the terminal is read, then every line stands as the Interactive run reports it, the Live view's address included.
+- `[REQ-SIM-032]` given the command running, when the engineer stops it, however far the Steps got, then the lab stops and its Simulated Cluster is removed.
+- `[REQ-SIM-032]` given a Finding or a Step left undone, when the command ends, then it fails as an Interactive run does.
+- `[REQ-SIM-032]` given an Interactive run, when the terminal line naming the Live view's address is read, then it holds its label and the address alone, with nothing after.
+
+**Edge cases:**
+
+1. The machine offers no way to open a browser. The address stays on the terminal and the run goes on.
+2. The command names a Scenario matching none. It stops before provisioning, names the Scenarios that exist, and opens no browser.
+3. No container runtime is reachable. The command names why and stops, opening no browser.
+
+**Design:** [system-design.md](system-design.md)
+
+### Following a held cluster in its Timeline and terminal
+
+<a id="req-sim-033"></a>
+An Interactive run's Timeline keeps recording while its cluster is held, until the engineer stops the lab `[REQ-SIM-033]`. Each click joins it as a When, at its moment among the Entries. Every change after it, the Descheduler's evictions and their replacements included, joins it as while the Steps ran. The Timeline is filed, and its line printed, when the lab stops.
+
+The terminal names, from that Timeline, every moment that changes the Placement while the cluster is held `[REQ-SIM-033]`. These are the moments a Wait narrative names: Nodes turning Ready or NotReady, Pods scheduled with their Node and reaching Running, and Pods evicted. Each line reads as a Wait narrative's line for the same change, opening with its elapsed time to the millisecond. An Entry changing no Placement prints nothing, so the terminal stays quiet between changes. The Live view and a run stay as they are.
+
+**Done when:**
+
+- `[REQ-SIM-033]` given a held cluster, when a click injects a Failure or makes a Node or Zone respond again, then its Timeline holds that When at its moment, worded as the terminal's When.
+- `[REQ-SIM-033]` given a held cluster, when Nodes or Pods change after a click or a Descheduler pass, then its Timeline holds each change and the control plane's reason as while the Steps ran. It sets the Descheduler's evictions apart from a Failure's.
+- `[REQ-SIM-033]` given a held cluster, when the engineer stops the lab, then the Timeline is filed with every Entry up to the stop. Its line, naming the entry count and file, is printed then and not when the cluster is held.
+- `[REQ-SIM-033]` given a held cluster, when Nodes turn Ready or NotReady after a click, then the terminal names each Node's turn as a Wait narrative names it.
+- `[REQ-SIM-033]` given a held cluster, when a click evicts Pods and others are scheduled, then the terminal names each eviction. It names each Pod scheduled with its Node and when it reached Running, and claims no link between an eviction and a replacement.
+- `[REQ-SIM-033]` given a held cluster whose Descheduler runs on an interval, when a pass evicts Pods, then the terminal names each Pod evicted and each replacement's Node. It sets those evictions apart from a Failure's, as a Wait narrative does.
+- `[REQ-SIM-033]` given a held cluster, when a pass evicts nothing or an Entry changes no Placement, then the terminal prints no line for it.
+- `[REQ-SIM-033]` given a line naming a moment, when the terminal is read, then it stands indented as a Wait narrative's line does and opens with its elapsed time to the millisecond. The filed Timeline holds an Entry for each such line.
+- `[REQ-SIM-033]` given a click on a held cluster, when the terminal is read, then its When is the When the Timeline holds, worded and indented as before.
+- `[REQ-SIM-033]` given a-zone-that-responds-again-under-a-descheduler held, when its Zone is clicked to stop and to respond again, then the terminal names its Nodes turning NotReady and Ready. It names the Pods evicted, those the Descheduler moves back and each replacement's Node.
+- `[REQ-SIM-033]` given any Scenario, when a run carries it out, then its report, its Timeline and its Live view stay as before.
+
+**Edge cases:**
+
+1. The engineer stops the lab while the Steps still run. The Timeline is filed as for a Scenario that fails part-way.
+2. A click that changes nothing, on a Pending Pod or while the Steps run. The Timeline gains no When.
+3. The Timeline cannot be written when the lab stops. The terminal names the Timeline it could not write.
+4. A pass while the Steps still run. The next Wait narrative names its evictions as before, and no further terminal line repeats them.
+5. A replacement no Node has room for. It is never scheduled, so no terminal line names it.
+6. A Scenario declaring no Descheduler, or one running no interval. The held cluster's terminal names the clicks and the moments after them, and no Descheduler eviction.
+7. The Pods the lab places on its own while provisioning the Topology appear in no terminal line.
+
+**Design:** [system-design.md](system-design.md)
+
 ## Superseded
 
 <!-- Retired requirements: each ID maps to its successor (or to the reason it was withdrawn) so existing links still resolve. Keep this a list, so every retired ID stays in a list item. -->
@@ -604,7 +659,9 @@ An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inje
 <!-- Unresolved product questions. Each resolves into a requirement, a non-goal, or an ADR. -->
 
 - Whether the lab scripts a Failure over time, such as a Pod dying after a delay, at the cost of a second injection surface.
-- Whether a Failure injected from the Live view joins the Timeline as a When does.
+- Whether a held cluster's terminal names a Pod left Pending, with the scheduler's reason.
+- Whether a held cluster's terminal lines carry the time of day beside their elapsed time.
+- Whether a Timeline growing while a cluster is held has a bound.
 - Whether the Live view's Timeline sets a Wait narrative's moments apart from other Entries.
 - Whether the Live view is reachable from another machine.
 - Whether a PodDisruptionBudget joins the lab as a Given.

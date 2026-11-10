@@ -57,6 +57,24 @@ func (c *SimulatedCluster) StopRecording() scenario.Timeline {
 	return c.recording.timeline
 }
 
+// FollowTimeline leaves the record running and hands back the Timeline so far
+// with a channel carrying each later entry, in order, until the record stops.
+// The Timeline holds every Step noted before the ask, since the goroutine owning
+// the record answers it in turn with the notes, so no entry is missed or handed
+// twice. The owner waits on the channel's reader before it takes the next
+// change, so the channel is read to its close. A cluster that is not recording
+// holds an empty Timeline and hands on nothing.
+func (c *SimulatedCluster) FollowTimeline() (scenario.Timeline, <-chan scenario.Entry) {
+	if c.recording == nil {
+		nothing := make(chan scenario.Entry)
+		close(nothing)
+
+		return scenario.Timeline{}, nothing
+	}
+
+	return c.recording.follow()
+}
+
 // NoteStep notes a Step into the Timeline, carrying its line, timed on receipt
 // among the changes. A cluster that is not recording, or no cluster at all,
 // notes nothing.
@@ -68,14 +86,23 @@ func (c *SimulatedCluster) NoteStep(step, line string) {
 	c.recording.note(step, line)
 }
 
-// The Timeline is written once, before done is closed, and read once after, so
-// the record holds no shared state and needs no lock.
+// The Timeline is written once, before done is closed, and read once after, and
+// one recorded so far is handed over on its own channel, so the record holds no
+// shared state and needs no lock.
 type recording struct {
 	stop     context.CancelFunc
 	started  time.Time
 	done     chan struct{}
 	notes    chan stepNoted
+	asks     chan followAsked
 	timeline scenario.Timeline
+}
+
+// followAsked carries room for the Timeline so far, and the channel the owner
+// hands each later entry on.
+type followAsked struct {
+	soFar chan<- scenario.Timeline
+	later chan<- scenario.Entry
 }
 
 type stepNoted struct {
@@ -84,7 +111,10 @@ type stepNoted struct {
 }
 
 func newRecording(stop context.CancelFunc) *recording {
-	return &recording{stop: stop, started: time.Now(), done: make(chan struct{}), notes: make(chan stepNoted)}
+	return &recording{
+		stop: stop, started: time.Now(), done: make(chan struct{}),
+		notes: make(chan stepNoted), asks: make(chan followAsked),
+	}
 }
 
 // note returns once the owning goroutine has taken the note, so a change
@@ -96,11 +126,39 @@ func (r *recording) note(step, line string) {
 	}
 }
 
+// follow is answered with room for the Timeline so far, so the owning goroutine
+// never waits on the asker for it. A record already stopped answers with its
+// whole Timeline and hands on nothing.
+func (r *recording) follow() (scenario.Timeline, <-chan scenario.Entry) {
+	soFar, later := make(chan scenario.Timeline, 1), make(chan scenario.Entry)
+	select {
+	case r.asks <- followAsked{soFar: soFar, later: later}:
+		return <-soFar, later
+	case <-r.done:
+		close(later)
+
+		return r.timeline, later
+	}
+}
+
 // own times each change and each Step's note as it reads it, rather than in the
 // streams, so the order of a Timeline is the order the lab received them.
+//
+// One follower is handed each entry once it is recorded and written; a second
+// ask closes the first follower's channel, so no reader waits on it forever.
 func (r *recording) own(changes <-chan watched, into EntrySink) {
 	var recorded []scenario.Entry
+	var follower chan<- scenario.Entry
 	for received := range r.received(changes) {
+		if received.asked != nil {
+			received.asked.soFar <- scenario.NewTimeline(recorded)
+			if follower != nil {
+				close(follower)
+			}
+			follower = received.asked.later
+
+			continue
+		}
 		entry, carried := received.entry(time.Since(r.started))
 		if !carried {
 			continue
@@ -108,8 +166,14 @@ func (r *recording) own(changes <-chan watched, into EntrySink) {
 
 		recorded = append(recorded, entry)
 		into.Write(entry)
+		if follower != nil {
+			follower <- entry
+		}
 	}
 
+	if follower != nil {
+		close(follower)
+	}
 	r.timeline = scenario.NewTimeline(recorded)
 	close(r.done)
 }
@@ -128,6 +192,10 @@ func (r *recording) received(changes <-chan watched) iter.Seq[watched] {
 				if !yield(watched{step: noted}) {
 					return
 				}
+			case asked := <-r.asks:
+				if !yield(watched{asked: &asked}) {
+					return
+				}
 			}
 		}
 	}
@@ -137,6 +205,7 @@ type watched struct {
 	event watch.Event
 	note  string
 	step  stepNoted
+	asked *followAsked
 }
 
 func (w watched) entry(elapsed time.Duration) (scenario.Entry, bool) {

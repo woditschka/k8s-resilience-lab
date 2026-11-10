@@ -471,6 +471,79 @@ func TestATimeline_ShouldRecordEachStepAtItsMoment(t *testing.T) {
 	}))
 }
 
+// followedToTheStop is what a follower of a record reads: the Timeline so far,
+// each entry handed on after it, and whether its channel was still open once
+// the record was done.
+type followedToTheStop struct {
+	SoFar        []scenario.Entry
+	HandedOn     []scenario.Entry
+	OpenWhenDone bool
+}
+
+// The note returns once the owning goroutine has taken it, so the ask after it
+// meets it whether or not the owner has delivered it yet. The owner hands the
+// later change on before it takes the next, so the test reads it before it
+// closes the streams.
+func TestATimelineFollowed_ShouldHoldEveryStepNotedBeforeTheAskAndHandOnEachLaterEntryUntilTheRecordStops(t *testing.T) {
+	changes := make(chan watched)
+	recorded := newRecording(func() {})
+	go recorded.own(changes, &entriesDelivered{})
+	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
+	recorded.note(theStepNoted, theLineNoted)
+
+	soFar, later := recorded.follow()
+
+	changes <- watched{event: aPodChangedAt(aLaterVersion)}
+	handedOn := []scenario.Entry{<-later}
+	close(changes)
+	<-recorded.done
+	_, open := <-later
+	expect.Expect(t, followedToTheStop{
+		SoFar: withoutTheirTimes(soFar.Entries()), HandedOn: withoutTheirTimes(handedOn), OpenWhenDone: open,
+	}).To(expect.Equal(followedToTheStop{
+		SoFar:    []scenario.Entry{aPodChangeRecorded(), theStepNoteRecorded()},
+		HandedOn: []scenario.Entry{aPodChangeRecorded()},
+	}))
+}
+
+func TestATimelineFollowedASecondTime_ShouldCloseTheFirstFollowersChannel(t *testing.T) {
+	changes := make(chan watched)
+	recorded := newRecording(func() {})
+	go recorded.own(changes, &entriesDelivered{})
+	t.Cleanup(func() { close(changes) })
+	_, first := recorded.follow()
+
+	recorded.follow()
+
+	_, open := <-first
+	expect.Expect(t, open).To(expect.Equal(false))
+}
+
+func TestATimelineFollowedOnceStopped_ShouldHoldTheWholeTimelineAndHandOnNothing(t *testing.T) {
+	changes := make(chan watched)
+	recorded := newRecording(func() {})
+	go recorded.own(changes, &entriesDelivered{})
+	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
+	close(changes)
+	<-recorded.done
+
+	soFar, later := recorded.follow()
+
+	_, open := <-later
+	expect.Expect(t, soFar.Entries()).To(expect.Equal(recorded.timeline.Entries()))
+	expect.Expect(t, open).To(expect.Equal(false))
+}
+
+func TestAClusterNotRecording_ShouldBeFollowedAsAnEmptyTimelineHandingOnNothing(t *testing.T) {
+	notRecording := &SimulatedCluster{}
+
+	soFar, later := notRecording.FollowTimeline()
+
+	_, open := <-later
+	expect.Expect(t, soFar.Entries()).To(expect.HaveLen[scenario.Entry](noChange))
+	expect.Expect(t, open).To(expect.Equal(false))
+}
+
 func TestAStepNotedAfterTheRecordStopped_ShouldBeNotedNowhere(t *testing.T) {
 	changes := make(chan watched)
 	recorded := newRecording(func() {})

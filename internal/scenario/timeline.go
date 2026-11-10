@@ -183,7 +183,7 @@ type narration struct {
 	nodes       map[string]NodeReadiness
 	pods        map[string]*podNarrated
 	podOrder    []string
-	moments     []moment
+	moments     []*moment
 }
 
 type podNarrated struct {
@@ -195,22 +195,29 @@ type podNarrated struct {
 	evicted     bool
 	descheduled bool
 	removed     bool
-	scheduled   int
-	eviction    int
+	// scheduled and eviction are nil where the Pod's scheduling or eviction
+	// stands under an earlier Wait, so its Running reads as a moment of its own
+	// and its eviction is not rewritten.
+	scheduled *moment
+	eviction  *moment
 }
-
-// noMoment marks a Pod whose scheduling or eviction stands under an earlier
-// Wait, so its Running reads as a moment of its own and its eviction is not
-// rewritten.
-const noMoment = -1
 
 type moment struct {
 	at      time.Duration
 	says    string
 	running string
+	// scheduling is the Pod a scheduling moment names, whose Running the moment
+	// takes in once read.
+	scheduling *podNarrated
 }
 
-func (m moment) line() string {
+// complete is false for a Pod's scheduling until the Pod runs, or is evicted or
+// removed first, since until then its Running may still join the moment.
+func (m *moment) complete() bool {
+	return m.scheduling == nil || m.scheduling.ran || m.scheduling.evicted || m.scheduling.removed
+}
+
+func (m *moment) line() string {
 	line := elapsedAt(m.at) + "  " + m.says
 	if m.running != "" {
 		line += ", Running at " + m.running
@@ -249,7 +256,7 @@ func (n *narration) readNode(entry Entry) {
 	}
 	n.nodes[entry.Name] = readiness
 	if readiness != last {
-		n.moments = append(n.moments, moment{at: entry.Elapsed, says: "Node " + entry.Name + " " + string(readiness)})
+		n.moments = append(n.moments, &moment{at: entry.Elapsed, says: "Node " + entry.Name + " " + string(readiness)})
 	}
 }
 
@@ -260,7 +267,7 @@ func (n *narration) readPod(entry Entry) {
 		return
 	}
 	if !entry.observed() {
-		n.readReported(pod, entry)
+		pod.readReported(entry)
 
 		return
 	}
@@ -276,8 +283,8 @@ func (n *narration) readPod(entry Entry) {
 	}
 	if pod.node == "" && entry.Detail != "" {
 		pod.node = entry.Detail
-		pod.scheduled = len(n.moments)
-		n.moments = append(n.moments, moment{at: entry.Elapsed, says: "Pod " + pod.named + " scheduled on " + pod.node})
+		pod.scheduled = &moment{at: entry.Elapsed, says: pod.scheduledSaid(), scheduling: pod}
+		n.moments = append(n.moments, pod.scheduled)
 	}
 	pod.phase = phase
 	if phase == PodRunning && !pod.ran {
@@ -294,30 +301,34 @@ func (n *narration) evict(pod *podNarrated, entry Entry) {
 	}
 
 	pod.evicted = true
-	pod.eviction = len(n.moments)
-	n.moments = append(n.moments, moment{at: entry.Elapsed, says: pod.evictionSaid()})
+	pod.eviction = &moment{at: entry.Elapsed, says: pod.evictionSaid()}
+	n.moments = append(n.moments, pod.eviction)
 }
 
 // A reported entry is either the Descheduler's eviction or what the control
 // plane last said about the Pod, which a Pod left Pending is named with.
-func (n *narration) readReported(pod *podNarrated, entry Entry) {
+func (p *podNarrated) readReported(entry Entry) {
 	if entry.Reason == EvictedByTheDescheduler {
-		n.deschedule(pod)
+		p.deschedule()
 
 		return
 	}
 
-	pod.reason = entry.reasonGiven()
+	p.reason = entry.reasonGiven()
 }
 
 // A watch that restarts may deliver the Pod marked for deletion before its
 // descheduled mark, so an eviction already narrated is rewritten as the
 // Descheduler's.
-func (n *narration) deschedule(pod *podNarrated) {
-	pod.descheduled = true
-	if pod.evicted && pod.eviction != noMoment {
-		n.moments[pod.eviction].says = pod.evictionSaid()
+func (p *podNarrated) deschedule() {
+	p.descheduled = true
+	if p.evicted && p.eviction != nil {
+		p.eviction.says = p.evictionSaid()
 	}
+}
+
+func (p *podNarrated) scheduledSaid() string {
+	return "Pod " + p.named + " scheduled on " + p.node
 }
 
 func (p *podNarrated) evictionSaid() string {
@@ -331,13 +342,13 @@ func (p *podNarrated) evictionSaid() string {
 
 func (n *narration) run(pod *podNarrated, at time.Duration) {
 	pod.ran = true
-	if pod.scheduled != noMoment {
-		n.moments[pod.scheduled].running = elapsedAt(at)
+	if pod.scheduled != nil {
+		pod.scheduled.running = elapsedAt(at)
 
 		return
 	}
 
-	n.moments = append(n.moments, moment{at: at, says: "Pod " + pod.named + " Running on " + pod.node})
+	n.moments = append(n.moments, &moment{at: at, says: "Pod " + pod.named + " Running on " + pod.node})
 }
 
 func (n *narration) podOf(name string) (*podNarrated, bool) {
@@ -350,7 +361,7 @@ func (n *narration) podOf(name string) (*podNarrated, bool) {
 		return nil, false
 	}
 
-	pod := &podNarrated{named: boardNameOf(deployment, name), scheduled: noMoment, eviction: noMoment}
+	pod := &podNarrated{named: boardNameOf(deployment, name)}
 	n.pods[name] = pod
 	n.podOrder = append(n.podOrder, name)
 
@@ -372,10 +383,19 @@ func (n *narration) cut() WaitNarrative {
 
 	n.moments = nil
 	for _, pod := range n.pods {
-		pod.scheduled, pod.eviction = noMoment, noMoment
+		pod.scheduled, pod.eviction = nil, nil
 	}
 
 	return WaitNarrative{lines: lines}
+}
+
+// taken hands over the moments read since the last cut or take, and leaves each
+// Pod pointing at its own, so a Running read later still joins its scheduling.
+func (n *narration) taken() []*moment {
+	taken := n.moments
+	n.moments = nil
+
+	return taken
 }
 
 func (p *podNarrated) leftPending() bool {
