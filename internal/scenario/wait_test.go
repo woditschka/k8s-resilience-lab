@@ -18,6 +18,8 @@ const (
 
 	noSecondsAtAll = 0
 	aNegativeTime  = -1
+
+	aSecondBelowTheLeastTimeAWaitStates = int(scenario.LeastStatedTime/time.Second) - 1
 )
 
 func aStatedWaitOf(t *testing.T, seconds int) scenario.StatedWait {
@@ -31,7 +33,7 @@ func aStatedWaitOf(t *testing.T, seconds int) scenario.StatedWait {
 	return stated
 }
 
-func TestAWaitStatingATimeOfNoSeconds_ShouldBeRefused(t *testing.T) {
+func TestAWaitStatingATimeBelowTheLeastTheLabAdmits_ShouldBeRefused(t *testing.T) {
 	refusals := map[string]int{
 		"no seconds at all": noSecondsAtAll,
 		"a negative time":   aNegativeTime,
@@ -51,17 +53,32 @@ func TestAWaitStatingATimeOfNoSeconds_ShouldBeRefused(t *testing.T) {
 	}
 }
 
-func TestAWaitStatingATimeAboveTheLabsOwnWaitingTime_ShouldBeRefusedNamingThatWaitingTime(t *testing.T) {
+func TestAWaitStatingATimeTheLabDoesNotAdmit_ShouldBeRefusedNamingOnlyTimesAWaitCanBeReachedIn(t *testing.T) {
 	aTimeTheLabNeverWaits := theWaitingTimeInSeconds + 1
-
-	_, err := scenario.NewStatedWait(aTimeTheLabNeverWaits)
-
-	if err == nil {
-		t.Fatalf("a Wait stating a time of %d seconds is refused, but it was admitted", aTimeTheLabNeverWaits)
+	refusals := map[string]int{
+		"below the least time admitted": aSecondBelowTheLeastTimeAWaitStates,
+		"above the lab's waiting time":  aTimeTheLabNeverWaits,
 	}
-	if !strings.Contains(err.Error(), scenario.WaitingTime.String()) {
-		t.Errorf("the refusal names the lab's own waiting time %s, but reads: %v", scenario.WaitingTime, err)
+
+	for refused, seconds := range refusals {
+		t.Run(refused, func(t *testing.T) {
+			_, err := scenario.NewStatedWait(seconds)
+
+			if err == nil {
+				t.Fatalf("a Wait stating a time of %d seconds is refused, but it was admitted", seconds)
+			}
+			theRange := scenario.LeastStatedTime.String() + " and " + scenario.WaitingTime.String()
+			if !strings.Contains(err.Error(), theRange) {
+				t.Errorf("the refusal names the range %s, but reads: %v", theRange, err)
+			}
+		})
 	}
+}
+
+func TestAWaitStatingTheLeastTimeTheLabAdmits_ShouldBeAdmitted(t *testing.T) {
+	stated := aStatedWaitOf(t, int(scenario.LeastStatedTime/time.Second))
+
+	expect.Expect(t, stated.HeldTo()).To(expect.Equal(scenario.LeastStatedTime))
 }
 
 func TestAWaitStatingTheLabsOwnWaitingTime_ShouldBeHeldToExactlyThatTime(t *testing.T) {
@@ -118,4 +135,13 @@ func TestTheTimeAWaitTook_ShouldBeReachedOnlyWhereItIsWithinTheTimeStated(t *tes
 			expect.Expect(t, stated.Reached(one.took)).To(expect.Equal(one.reached))
 		})
 	}
+}
+
+func TestAWaitStatingNoTimeThatReachesItsState_ShouldBeReportedReachedNamingNoTimeItWasHeldTo(t *testing.T) {
+	statingNone := scenario.NewWaitStatingNoTime()
+
+	reached := statingNone.Reached(scenario.WaitingTime + aMomentOfIt)
+
+	expect.Expect(t, reached).To(expect.Equal(true))
+	expect.Expect(t, statingNone.Stated()).To(expect.Equal(false))
 }

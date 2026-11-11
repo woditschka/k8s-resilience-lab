@@ -14,6 +14,14 @@ import (
 // validates the lab's values.
 const WaitingTime = 90 * time.Second
 
+// LeastStatedTime is the least time a Wait may state. A cluster already in the
+// state still takes a poll and two agreeing observations to report it, so a
+// shorter time could never be met.
+//
+// It is a code constant of its own because this package cannot import the
+// cluster's poll interval.
+const LeastStatedTime = 2 * time.Second
+
 // StatedWait is resolved at construction and reads no clock, so judging a Wait
 // reaches no cluster. Whether the time was stated travels with it, because a
 // Wait's line marks a stated time and leaves the lab's own waiting time
@@ -23,19 +31,14 @@ type StatedWait struct {
 	stated bool
 }
 
-// NewStatedWait refuses a time of no seconds, because no state is reached in no
-// time, and one above WaitingTime, which the lab cannot wait past. Either
-// refusal names WaitingTime, the bound a reader has to choose inside.
+// NewStatedWait refuses a time below LeastStatedTime, which no cluster can meet,
+// and one above WaitingTime, which the lab cannot wait past. Either refusal
+// names the range a reader has to choose inside.
 func NewStatedWait(seconds int) (StatedWait, error) {
-	if seconds < 1 {
-		return StatedWait{}, fmt.Errorf("no state of the cluster is reached in no time, so a stated time of %d seconds is refused; a Wait states between %s and %s",
-			seconds, time.Second, WaitingTime)
-	}
-
 	heldTo := time.Duration(seconds) * time.Second
-	if heldTo > WaitingTime {
-		return StatedWait{}, fmt.Errorf("the lab waits %s for a state of the cluster, so a stated time of %s is refused",
-			WaitingTime, heldTo)
+	if heldTo < LeastStatedTime || heldTo > WaitingTime {
+		return StatedWait{}, fmt.Errorf("a stated time of %d seconds (%s) is refused; a Wait states between %s and %s",
+			seconds, heldTo, LeastStatedTime, WaitingTime)
 	}
 
 	return StatedWait{heldTo: heldTo, stated: true}, nil
@@ -57,7 +60,9 @@ func (w StatedWait) Stated() bool {
 }
 
 // Reached judges a Wait once it is reached, so measured is the whole wait and
-// one reached exactly at the bound is reached in it.
+// one reached exactly at the bound is reached in it. A Wait stating no time is
+// held to none, because the lab's waiting time already bounds each state it
+// waits for.
 func (w StatedWait) Reached(measured time.Duration) bool {
-	return measured <= w.heldTo
+	return !w.stated || measured <= w.heldTo
 }

@@ -38,6 +38,7 @@ const (
 	theUnobservedBoardScenario = "a-board-that-cannot-be-observed"
 	theUnreachedNarrative      = "a-narrative-of-a-wait-not-reached"
 	theNotedStepsScenario      = "a-scenario-noting-its-steps"
+	theLeastTimeScenario       = "a-wait-stating-the-least-time"
 )
 
 // The control plane is polled rather than watched, so a Wait with nothing to
@@ -590,4 +591,22 @@ func theFirstStepOrNodeNotReadyAfterTheFirstWait(entries []scenario.Entry) seenE
 	}
 
 	return seenEntry{}
+}
+
+// A cluster already in the state needs a poll and two agreeing observations, so
+// the least time a Wait may state is one it is reached inside.
+func TestAWaitStatingTheLeastTimeTheLabAdmits_ShouldBeReachedByAClusterAlreadyInThatState(t *testing.T) {
+	t.Parallel()
+	waiting := aScenarioOnAClusterFor(t, theLeastTimeScenario)
+	theLeastTimeInSeconds := int(scenario.LeastStatedTime / time.Second)
+
+	waiting.WaitFor().PlacementSettled()
+	waiting.WaitFor().PlacementSettledWithinSeconds(theLeastTimeInSeconds)
+
+	reached := waiting.outcome()
+	expect.Expect(t, causeOf(reached)).To(expect.Equal(""))
+	theWait := reached.Steps[len(reached.Steps)-1]
+	expect.Expect(t, theWait.String()).To(expect.Equal(
+		"Wait for " + theWait.Name + ", reached in " + theWait.Waited.Round(100*time.Millisecond).String() +
+			" of the " + scenario.LeastStatedTime.String() + " stated"))
 }

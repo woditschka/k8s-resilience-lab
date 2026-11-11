@@ -477,8 +477,10 @@ An engineer reads every Scenario of the lab in one source, each run and reported
 - `[REQ-SIM-006]` given a declared Topology or Deployment, when its Wait runs, then every declared Node or Pod is Ready and the line names the time taken, whether written with its Given or alone.
 - `[REQ-SIM-006]` given a Then with no Wait since the Given or Failure before it, or a Failure before the first Wait, when run, then the Scenario ends there, naming it.
 - `[REQ-SIM-006]` given a Wait stating no time, when Pods are not all Ready within the lab's waiting time, then the Scenario ends there, naming them.
+- `[REQ-SIM-006]` given a Wait stating no time, when its state is reached, then its line names the time taken and no time it was held to. The Scenario goes on.
 - `[REQ-SIM-006]` given a Wait stating a time, when the state is reached inside it, then its line names that time and the time taken. Otherwise the Scenario ends there, the line naming that time alone.
 - `[REQ-SIM-006]` given a Wait stating a time above the lab's waiting time, when run, then it is refused, naming that waiting time.
+- `[REQ-SIM-006]` given a Wait stating the least time a refusal names as admitted, when the cluster is already in that state, then the Wait is reached inside that time.
 - `[REQ-SIM-006]` given a Scenario that has Waited, when the Thens after it judge, then the Placement has stopped changing, even with Pods still Pending.
 - `[REQ-SIM-006]` given every Failure Scenario, when read, then it states a time on the Wait after its Failure and none on the Waits after its Givens.
 - `[REQ-SIM-006]` given a Step that cannot be carried out, when run, then the Scenario ends there, naming it. An unmet Then only reports a Finding.
@@ -493,6 +495,7 @@ An engineer reads every Scenario of the lab in one source, each run and reported
 4. A Wait for a Settled Placement stands before any Deployment is declared. It is reached at once.
 5. Two Scenarios whose functions name the same condition. The lab's rules refuse them before provisioning, naming both `[REQ-SIM-020]`.
 6. A Scenario whose function names no condition. The lab's rules refuse it before provisioning, naming the function `[REQ-SIM-020]`.
+7. A Wait stating no time reaches its state only after the lab's waiting time has passed. A Wait for a pass evicting nothing can take that long, waiting for the pass and then for Settled. It is reported reached, naming the time taken.
 
 **ADR:** [ADR: Scenarios as Go functions](adr/2026-10-03-scenarios-as-go-functions.md)  ·  **Design:** [system-design.md](system-design.md)
 

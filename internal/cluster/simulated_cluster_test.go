@@ -1386,3 +1386,9 @@ func podsPerDeploymentIn(observed scenario.Placement) map[string]int {
 
 	return counted
 }
+
+// A cluster already settled needs a poll and two agreeing observations, so the
+// least time a Wait may state has to leave room beyond one poll.
+func TestThePollIntervalBetweenObservations_ShouldFitInTheLeastTimeAWaitMayStateWithRoomToSpare(t *testing.T) {
+	expect.Expect(t, pollInterval < scenario.LeastStatedTime).To(expect.Equal(true))
+}

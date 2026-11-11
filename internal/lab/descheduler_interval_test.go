@@ -3,9 +3,15 @@ package lab
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
+	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
+
+// Waiting for the pass and then for Settled takes each the lab's waiting time at
+// most, so the whole wait may outlast one waiting time.
+const aPassWaitOutlastingOneWaitingTime = scenario.WaitingTime + 5*time.Second
 
 const (
 	evictedNothing = false
@@ -34,4 +40,15 @@ func TestAWaitForADeschedulerPassEvictingNothing_ShouldEndAtTheFirstSuchPassBegu
 
 	expect.Expect(t, notYet != nil).To(expect.Equal(true))
 	expect.Expect(t, reached).To(expect.Equal[error](nil))
+}
+
+func TestAWaitForADeschedulerPassEvictingNothingReachedAfterTheLabsWaitingTime_ShouldBeReportedReached(t *testing.T) {
+	waiting := aScenarioAtAWaitFor(aDeschedulerPassEvictingNothing)
+
+	waiting.reached(scenario.NewWaitStatingNoTime(), aPassWaitOutlastingOneWaitingTime)
+
+	reached := waiting.outcome()
+	expect.Expect(t, reached.Ended()).To(expect.Equal(false))
+	expect.Expect(t, reached.Steps[theWaitsOwnStep].String()).
+		To(expect.Equal("Wait for " + aDeschedulerPassEvictingNothing + ", reached in " + aPassWaitOutlastingOneWaitingTime.String()))
 }
