@@ -39,7 +39,7 @@ interactive:
 		echo "interactive: name the Scenario to hold, as in: make interactive SCENARIO=a-node-that-stops-responding"; \
 		exit 2; \
 	fi
-	go run ./cmd/lab --interactive $(SCENARIO) $(ARGS)
+	go run ./cmd/lab $(ARGS) --interactive $(SCENARIO)
 
 # demo is an interactive run of a-zone-that-responds-again-under-a-descheduler,
 # or of the Scenario named in SCENARIO, that opens its Live view in the browser.
@@ -56,7 +56,7 @@ LIVE_VIEW_LINE := ^Live view:[[:space:]]+(http://127\.0\.0\.1:[0-9]+/)$$
 demo: SHELL := bash
 demo:
 	@set -o pipefail; \
-	go run ./cmd/lab --interactive $(or $(SCENARIO),$(DEMO_SCENARIO)) $(ARGS) | ( \
+	go run ./cmd/lab $(ARGS) --interactive $(or $(SCENARIO),$(DEMO_SCENARIO)) | ( \
 		trap '' INT; \
 		opened=; \
 		pattern='$(LIVE_VIEW_LINE)'; \

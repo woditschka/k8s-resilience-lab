@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1691,4 +1692,73 @@ func TestAMomentLineFollowedInTheTerminal_ShouldStandIndentedAsAWaitNarrativesLi
 	(&runReport{to: &reported}).printFollowed(narrated.Lines()[0])
 
 	expect.Expect(t, reported.String()).To(expect.Equal(asARunPrintsIt[0] + "\n"))
+}
+
+const (
+	theRepositoryRootFromThisPackage = "../.."
+	aScenarioTheLabHolds             = "a-node-that-stops-responding"
+	oneMakeInvocationAtMost          = 4 * time.Minute
+	pipesAbandonedAfter              = 10 * time.Second
+	theLabsScenarioCountRefusal      = "takes one Scenario name"
+)
+
+// Variables a gate run exports to its tests would make a nested make dry-run,
+// keep going, or name a jobserver it does not hold; SCENARIO and ARGS would
+// stand in for the assignments the test gives on the command line.
+var variablesAMakeTargetMustNotInherit = []string{"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "SCENARIO", "ARGS"}
+
+func TestTheDemoCommandAskingForAVersion_ShouldHandItToTheInteractiveRunNotReadItAsASecondScenario(t *testing.T) {
+	t.Parallel()
+
+	output, err := makeAskingForAVersion(t, "demo")
+
+	expectTheVersionRefusedAlone(t, output, err)
+}
+
+func TestTheInteractiveCommandAskingForAVersion_ShouldHandItToTheInteractiveRunNotReadItAsASecondScenario(t *testing.T) {
+	t.Parallel()
+
+	output, err := makeAskingForAVersion(t, "interactive")
+
+	expectTheVersionRefusedAlone(t, output, err)
+}
+
+func expectTheVersionRefusedAlone(t *testing.T, output string, err error) {
+	t.Helper()
+
+	if err == nil {
+		t.Errorf("a value that is not a version stops the command, but it reported:\n%s", output)
+	}
+	if !strings.Contains(output, aValueThatIsNotAVersion) {
+		t.Errorf("the refusal names %q, but the command reported:\n%s", aValueThatIsNotAVersion, output)
+	}
+	reportLacks(t, output, theLabsScenarioCountRefusal)
+	reportLacks(t, output, "Live view:")
+}
+
+// The real make target runs from the repository root, so the recipe's own
+// argument order is what the lab receives.
+func makeAskingForAVersion(t *testing.T, target string) (string, error) {
+	t.Helper()
+	for _, program := range []string{"make", "bash"} {
+		if _, err := exec.LookPath(program); err != nil {
+			t.Fatalf("the command is run through %s, which is not on PATH: %v", program, err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), oneMakeInvocationAtMost)
+	defer cancel()
+	command := exec.CommandContext(ctx, "make", target,
+		"SCENARIO="+aScenarioTheLabHolds, "ARGS=--k8s-version "+aValueThatIsNotAVersion)
+	command.Dir = theRepositoryRootFromThisPackage
+	command.Env = slices.DeleteFunc(os.Environ(), func(variable string) bool {
+		return slices.ContainsFunc(variablesAMakeTargetMustNotInherit, func(name string) bool {
+			return strings.HasPrefix(variable, name+"=")
+		})
+	})
+	command.WaitDelay = pipesAbandonedAfter
+
+	output, err := command.CombinedOutput()
+
+	return string(output), err
 }

@@ -584,6 +584,7 @@ One command starts an Interactive run and opens its Live view in the machine's b
 **Done when:**
 
 - `[REQ-SIM-032]` given the command naming a Scenario or none, when it starts, then the Interactive run holds that Scenario or a-zone-that-responds-again-under-a-descheduler. The browser opens its Live view once the terminal names the address.
+- `[REQ-SIM-032]` given the command asking for a Kubernetes version or the whole Timeline, when it starts, then the Interactive run takes each as one started on its own does.
 - `[REQ-SIM-032]` given the command running, when the terminal is read, then every line stands as the Interactive run reports it, the address line holding its label and the address alone.
 - `[REQ-SIM-032]` given the command running, when the engineer stops it at any point, then the lab stops and its Simulated Cluster is removed.
 - `[REQ-SIM-032]` given a Finding or a Step left undone, when the command ends, then it fails as an Interactive run does.
