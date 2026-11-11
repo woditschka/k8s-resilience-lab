@@ -1,3 +1,5 @@
+<a href="https://github.com/woditschka/k8s-resilience-lab/actions/workflows/checks.yml?query=branch%3Amain+event%3Apush"><img align="right" src="https://github.com/woditschka/k8s-resilience-lab/actions/workflows/checks.yml/badge.svg?branch=main&amp;event=push" alt="checks"></a>
+
 # k8s-resilience-lab
 
 *Prove where your Pods land before the outage does.*

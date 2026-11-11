@@ -1,0 +1,49 @@
+# Server-side mirror of the local gate (`make ci`, declared in scripts/layout.toml).
+# Runs the full gate on every push to main and every pull request, then reports
+# the result: a public record that the pushed code passed. It gates a merge only
+# where branch protection requires this check.
+# This workflow is "checks": file, display name, and badge label all match.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the gate only reads the tree.
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    # The gate takes minutes; the bound stops a hung cluster from holding a
+    # runner for the six-hour default.
+    timeout-minutes: 45
+    steps:
+      # Actions are pinned to a full commit SHA (supply-chain hardening); the
+      # comment tracks the release. Bump both together.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The gate needs no git token; do not leave it in the workspace.
+          persist-credentials: false
+      # The Go version comes from go.mod, so the gate and the module agree.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The released binary, never `go run` (see the Makefile). The version
+      # mirrors the Toolchain table in CLAUDE.md, and the install script is read
+      # at that release's commit; it verifies the binary's checksum.
+      - name: Install the pinned golangci-lint
+        env:
+          GOLANGCI_LINT_VERSION: v2.15.0
+          GOLANGCI_LINT_COMMIT: 25c5369a93aacb8cccea0d46e1569ca4a194564d
+        run: |
+          curl -sSfL "https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_LINT_COMMIT}/install.sh" \
+            | sh -s -- -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
+          golangci-lint version
+      # The whole gate: tidy-check, fmt-check, vet, lint, deps-check, the tests
+      # under the race detector, build. The runner carries the C compiler the
+      # detector needs and the Docker engine each Simulated Cluster starts on.
+      - name: Run the gate
+        run: make ci
