@@ -235,9 +235,7 @@ func TestARequestWrittenAfterAnother_ShouldStandAsTheLaterSetting(t *testing.T) 
 }
 
 // The place is the number of settings held when the full access is written,
-// which the mapper transcribes before running it. A setting written after the
-// full access keeps the place its field was first written, so the full access
-// stands where both name one Kubernetes field.
+// which the mapper transcribes before running it.
 func TestASpecificationCustomizedWithFullAccess_ShouldHoldItInThePlaceItWasWrittenIn(t *testing.T) {
 	written := map[string]struct {
 		customizations []Customization
@@ -280,6 +278,29 @@ func TestASpecificationCustomizedWithFullAccess_ShouldHoldItInThePlaceItWasWritt
 	}
 }
 
+// The settings written after a full access are all a specification holds of
+// what follows it, and what the mapper transcribes again once it has run.
+func settingsWrittenAfterTheFullAccesses(held []cluster.PodSpecAccessInPlace) [][]scenario.Setting {
+	written := make([][]scenario.Setting, 0, len(held))
+	for _, access := range held {
+		written = append(written, access.SettingsWrittenAfter)
+	}
+
+	return written
+}
+
+// The specification already holds a Request, so the later one keeps the place
+// written before the full access, and only what follows the full access tells
+// the mapper the later one stands.
+func TestAFullAccessFollowedByACustomizationOfASettingItSets_ShouldHoldTheLaterCustomization(t *testing.T) {
+	declaring := defaultPlacement().Customize(aRequestOf(oneCorePerPod, twoGibibytesPerPod))
+
+	customized := declaring.Customize(aFullAccess(), aRequestOf(twoCoresPerPod, twoGibibytesPerPod))
+
+	expect.Expect(t, settingsWrittenAfterTheFullAccesses(customized.accesses)).
+		To(expect.Equal([][]scenario.Setting{{theRequestOf(twoCoresPerPod, twoGibibytesPerPod)}}))
+}
+
 func TestTwoSpecificationsHoldingFullAccess_ShouldBeEqualOnlyWhereItStandsInTheSamePlace(t *testing.T) {
 	declared := defaultPlacement()
 
@@ -289,6 +310,11 @@ func TestTwoSpecificationsHoldingFullAccess_ShouldBeEqualOnlyWhereItStandsInTheS
 		To(expect.Equal(false))
 	expect.Expect(t, declared.Customize(aFullAccess(), aZoneSpreadAt(aWiderSkew)).
 		Equal(declared.Customize(aZoneSpreadAt(aWiderSkew), aFullAccess()))).
+		To(expect.Equal(false))
+	// Both hold the two-core Request and run the full access after three
+	// settings; only the first transcribes the Request again once it has run.
+	expect.Expect(t, declared.Customize(aRequestOf(oneCorePerPod, twoGibibytesPerPod), aFullAccess(), aRequestOf(twoCoresPerPod, twoGibibytesPerPod)).
+		Equal(declared.Customize(aRequestOf(twoCoresPerPod, twoGibibytesPerPod), aFullAccess()))).
 		To(expect.Equal(false))
 }
 

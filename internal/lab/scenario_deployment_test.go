@@ -14,6 +14,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
@@ -39,6 +40,7 @@ const (
 	theUnreachedNarrative      = "a-narrative-of-a-wait-not-reached"
 	theNotedStepsScenario      = "a-scenario-noting-its-steps"
 	theLeastTimeScenario       = "a-wait-stating-the-least-time"
+	theLaterRequestScenario    = "a-request-after-a-full-access"
 )
 
 // The control plane is polled rather than watched, so a Wait with nothing to
@@ -330,6 +332,56 @@ func TestARequestOnlyOneNodePoolHasRoomFor_ShouldPlacePodsOnThatNodePoolAlone(t 
 		To(expect.HaveLen[scenario.Pod](podsTheGpuNodesHold))
 	expect.Expect(t, settled.Placement.PodsPerNode()).
 		To(expect.Equal(onEveryNodeOf(aTopologyOfNodePools(t, twoZones), string(gpuNodePool), onePodPerGpuNode)))
+}
+
+// Each Request differs from the others, so the one observed tells which stood.
+const (
+	theSpecificationsCores     = 3
+	theSpecificationsGibibytes = 6
+	theFullAccessesCores       = 2
+	theFullAccessesGibibytes   = 4
+	theLinesCores              = 1
+	theLinesGibibytes          = 2
+)
+
+func aFullAccessRequesting(cores, gibibytes int) pod.Customization {
+	return pod.FullAccess(func(spec *corev1.PodSpec) {
+		for at := range spec.Containers {
+			spec.Containers[at].Resources.Requests = corev1.ResourceList{
+				corev1.ResourceCPU:    *resource.NewMilliQuantity(int64(coresOf(cores)), resource.DecimalSI),
+				corev1.ResourceMemory: *resource.NewQuantity(int64(gibibytesOf(gibibytes))*bytesPerMebibyte, resource.BinarySI),
+			}
+		}
+	})
+}
+
+const bytesPerMebibyte = 1 << 20
+
+func requestsOf(pods []scenario.Pod) []scenario.Request {
+	asked := make([]scenario.Request, 0, len(pods))
+	for _, placed := range pods {
+		asked = append(asked, placed.Request)
+	}
+
+	return asked
+}
+
+// The specification holds a Request of its own before the full access, so the
+// line's Request takes that place, ahead of the full access.
+func TestAFullAccessInASpecificationFollowedByTheDeploymentLinesRequest_ShouldPlacePodsAskingForThatRequest(t *testing.T) {
+	t.Parallel()
+	placing := aScenarioOnAClusterFor(t, theLaterRequestScenario)
+	placing.Given().Zones(twoZones, theGeneralNodePool())
+
+	placing.Given().Deployment(someDeploymentName, podsOverEveryNode, aRequestOf(theLinesCores, theLinesGibibytes),
+		defaultPlacement().Customize(aRequestOf(theSpecificationsCores, theSpecificationsGibibytes),
+			aFullAccessRequesting(theFullAccessesCores, theFullAccessesGibibytes)))
+	placing.WaitFor().AllPodsReady()
+
+	placed := placing.outcome()
+	expect.Expect(t, causeOf(placed)).To(expect.Equal(""))
+	expect.Expect(t, requestsOf(placed.Placement.Pods())).To(expect.Equal(slices.Repeat(
+		[]scenario.Request{scenario.NewRequest(coresOf(theLinesCores), gibibytesOf(theLinesGibibytes))}, podsOverEveryNode)))
 }
 
 func onEveryNodeOf(topology scenario.Topology, nodePool string, pods int) map[string]int {

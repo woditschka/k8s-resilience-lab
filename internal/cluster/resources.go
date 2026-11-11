@@ -220,11 +220,15 @@ func toMemoryQuantity(memory scenario.Memory) *resource.Quantity {
 type PodSpecAccess func(pod *corev1.PodSpec)
 
 // PodSpecAccessInPlace pairs a full access with how many settings the mapper
-// transcribes before running it, which makes the later of two Customizations
-// naming one field the one that stands.
+// transcribes before running it, and with the settings written after it, which
+// the mapper transcribes again once it has run. A specification holds a setting
+// where its field was first written, so without them a full access would stand
+// over a later Customization of a field written before it. Together they make
+// the later of two Customizations naming one field the one that stands.
 type PodSpecAccessInPlace struct {
-	Access        PodSpecAccess
-	AfterSettings int
+	Access               PodSpecAccess
+	AfterSettings        int
+	SettingsWrittenAfter []scenario.Setting
 }
 
 // The container, the Deployment label and the selector are the mapper's own,
@@ -262,7 +266,7 @@ func toStartupAnnotations(startup scenario.StartupTime) map[string]string {
 }
 
 // Each full access runs in the place it was written, so what it reads is what
-// the settings before it wrote.
+// the settings before it wrote, and what the settings after it write stands.
 //
 // The specification's tolerations are written once more after the last full
 // access, so a toleration a full access writes does not stand and the waiting
@@ -277,19 +281,23 @@ func toPodSpec(deployment scenario.Deployment, accesses []PodSpecAccessInPlace) 
 		},
 	}
 	for transcribed, setting := range settings {
-		runAccessesWrittenAfter(&pod, transcribed, accesses)
+		runAccessesWrittenAfter(&pod, transcribed, accesses, deployment.Name())
 		transcribeSetting(&pod, setting, deployment.Name())
 	}
-	runAccessesWrittenAfter(&pod, len(settings), accesses)
+	runAccessesWrittenAfter(&pod, len(settings), accesses, deployment.Name())
 	pod.Tolerations = toTolerations(declared.Tolerations())
 
 	return pod
 }
 
-func runAccessesWrittenAfter(pod *corev1.PodSpec, transcribed int, accesses []PodSpecAccessInPlace) {
+func runAccessesWrittenAfter(pod *corev1.PodSpec, transcribed int, accesses []PodSpecAccessInPlace, deploymentName string) {
 	for _, written := range accesses {
-		if written.AfterSettings == transcribed {
-			written.Access(pod)
+		if written.AfterSettings != transcribed {
+			continue
+		}
+		written.Access(pod)
+		for _, later := range written.SettingsWrittenAfter {
+			transcribeSetting(pod, later, deploymentName)
 		}
 	}
 }
@@ -299,7 +307,7 @@ func runAccessesWrittenAfter(pod *corev1.PodSpec, transcribed int, accesses []Po
 func transcribeSetting(pod *corev1.PodSpec, declared scenario.Setting, deploymentName string) {
 	switch setting := declared.(type) {
 	case scenario.TopologySpread:
-		pod.TopologySpreadConstraints = append(pod.TopologySpreadConstraints,
+		pod.TopologySpreadConstraints = holdingTheSpread(pod.TopologySpreadConstraints,
 			toSpreadConstraint(setting, deploymentName))
 	case scenario.Toleration:
 		pod.Tolerations = append(pod.Tolerations, toToleration(setting))
@@ -323,6 +331,22 @@ func toRequestedResources(declared scenario.Request) corev1.ResourceList {
 		corev1.ResourceCPU:    *toCPUQuantity(declared.CPU()),
 		corev1.ResourceMemory: *toMemoryQuantity(declared.Memory()),
 	}
+}
+
+// A specification holds one spread per topology key, so a spread transcribed
+// again, or over constraints a full access wrote, replaces every one over its
+// key, in the place the first of them stood.
+func holdingTheSpread(
+	constraints []corev1.TopologySpreadConstraint, spread corev1.TopologySpreadConstraint,
+) []corev1.TopologySpreadConstraint {
+	overItsKey := func(held corev1.TopologySpreadConstraint) bool { return held.TopologyKey == spread.TopologyKey }
+	first := slices.IndexFunc(constraints, overItsKey)
+	if first < 0 {
+		return append(constraints, spread)
+	}
+	holding := slices.DeleteFunc(slices.Clone(constraints), overItsKey)
+
+	return slices.Insert(holding, first, spread)
 }
 
 // The selector is the mapper's own, so a constraint counts one Deployment's Pods.

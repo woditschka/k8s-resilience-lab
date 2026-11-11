@@ -62,8 +62,21 @@ type Customization interface {
 func (s Specification) holding(setting scenario.Setting) Specification {
 	customized := s
 	customized.declared = s.declared.With(setting)
+	customized.accesses = followedBy(s.accesses, setting)
 
 	return customized
+}
+
+// The domain keeps a setting written again in the place its field was first
+// written, which may come before a full access, so each full access carries the
+// settings written after it for the mapper to transcribe once it has run.
+func followedBy(accesses []cluster.PodSpecAccessInPlace, setting scenario.Setting) []cluster.PodSpecAccessInPlace {
+	followed := slices.Clone(accesses)
+	for at, access := range followed {
+		followed[at].SettingsWrittenAfter = append(slices.Clone(access.SettingsWrittenAfter), setting)
+	}
+
+	return followed
 }
 
 // The first refusal stands, since the Scenario ends at it whatever is written
@@ -174,7 +187,12 @@ func (s Specification) Declared() (scenario.PodSpecification, error) {
 }
 
 func (s Specification) Accesses() []cluster.PodSpecAccessInPlace {
-	return slices.Clone(s.accesses)
+	held := slices.Clone(s.accesses)
+	for at, access := range held {
+		held[at].SettingsWrittenAfter = slices.Clone(access.SettingsWrittenAfter)
+	}
+
+	return held
 }
 
 // Reads reads a refused specification as its name alone, since it holds no
@@ -246,8 +264,10 @@ func (s Specification) Equal(other Specification) bool {
 	return s.declared.Equal(other.declared) && slices.EqualFunc(s.accesses, other.accesses, inTheSamePlace)
 }
 
-// The changes themselves are never compared: Go cannot compare two function
+// A place is where a full access runs and the settings transcribed again after
+// it. The changes themselves are never compared: Go cannot compare two function
 // values.
 func inTheSamePlace(one, another cluster.PodSpecAccessInPlace) bool {
-	return one.AfterSettings == another.AfterSettings
+	return one.AfterSettings == another.AfterSettings &&
+		slices.Equal(one.SettingsWrittenAfter, another.SettingsWrittenAfter)
 }

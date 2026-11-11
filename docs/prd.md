@@ -118,6 +118,7 @@ A run names each Deployment by its Kubernetes kind `[REQ-SIM-025]`. A Scenario's
 3. A Customization names a setting its specification does not hold. The specification gains it.
 4. Full access leaves out a setting the lab depends on. That setting holds and the Deployment is deployed.
 5. Full access names a setting the control plane refuses. The Scenario ends at the Step deploying it, as for any refused Customization.
+6. A specification's full access sets a setting that a later Customization names, such as the Request on the Deployment line. The later Customization stands.
 
 **ADR:** [ADR: Predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
 
@@ -190,6 +191,7 @@ A Zone holds NodePools of identical Nodes, the same in every Zone `[REQ-SIM-013]
 3. A NodePool name Kubernetes cannot hold as a label value.
 4. A NodePool stating no Node capacity.
 5. A NodePool stating no name, or a Topology stating no NodePool.
+6. A second Topology in one Scenario, whether or not the first is provisioned. The refusal names the first, which the cluster keeps.
 
 **Design:** [system-design.md](system-design.md)
 
@@ -405,6 +407,7 @@ A Deployment declares the Zones or Nodes it survives losing `[REQ-SIM-027]`. Its
 1. A count below zero, or reaching the Topology's own. The Scenario ends at that Given, naming it.
 2. A count of none. The Floor is every replica.
 3. A Then with no Failure before it, or no declaring Deployment. The Scenario ends at that Then, naming it.
+4. An Interactive run reaches a Deployment declaring what it survives losing after the first When. That declaration is not carried out, and every Step reported before it stands as reported.
 
 **Design:** [system-design.md](system-design.md)
 

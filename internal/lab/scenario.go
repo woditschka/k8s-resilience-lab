@@ -640,7 +640,7 @@ type Given struct {
 // Zones declares the Topology of Zones the Scenario provisions and the NodePools
 // each of them holds. Zones and Nodes are counts rather than lists of names, so
 // no Scenario names a Zone or Node its Givens do not derive. A line holding no
-// NodePool is refused.
+// NodePool is refused, and so is a second Topology, naming the first.
 func (g Given) Zones(zones int, pools ...node.DeclaredPool) DeclaredTopology {
 	declared := DeclaredTopology{scenario: g.scenario, zones: zones, pools: slices.Clone(pools)}
 	step, open := g.scenario.record(GivenStep, declared.named())
@@ -690,6 +690,7 @@ func (g Given) Deployment(name DeploymentName, replicas int, asks pod.Customizat
 		return declared
 	}
 	g.scenario.declareDeployment(deployment, declares.Accesses(), step.Name)
+	declared.line = step.Name
 
 	return declared
 }
@@ -823,12 +824,15 @@ func asAListWritesIt[V ~string](items []V) string {
 }
 
 // DeclaredDeployment is complete as it stands, so no half-built Deployment ever
-// exists.
+// exists. It holds the line of a Deployment the Scenario took, and no line where
+// the Given was refused or never recorded, so a further call completes only a
+// declared Deployment.
 type DeclaredDeployment struct {
 	scenario *Scenario
 	name     DeploymentName
 	replicas int
 	declares pod.Specification
+	line     string
 }
 
 // FailureTolerance is the Zones or Nodes a Deployment survives losing to a
@@ -852,11 +856,11 @@ func Nodes(count int) FailureTolerance {
 // SurvivesLosing sets this Deployment's Floor from the Topology declared above
 // it, and keeps every replica deployed: declaring it scales nothing.
 func (d DeclaredDeployment) SurvivesLosing(lost FailureTolerance) DeclaredDeployment {
-	if d.scenario.cause != nil {
+	if d.line == "" || d.scenario.cause != nil {
 		return d
 	}
 
-	step := d.scenario.rename(d.named() + ", surviving the loss of " + lost.tolerance.Reads())
+	step := d.scenario.rename(d.line + ", surviving the loss of " + lost.tolerance.Reads())
 
 	declared, err := d.scenario.deployment.WithFailureTolerance(lost.tolerance, d.scenario.topology)
 	if err != nil {
@@ -904,6 +908,12 @@ func (d DeclaredTopology) declareNodePools(step Step) DeclaredTopology {
 func (d DeclaredTopology) declare(step Step, topology scenario.Topology, refused error) DeclaredTopology {
 	if refused != nil {
 		d.scenario.end(step, refused)
+
+		return d
+	}
+	if first := d.scenario.topologyDeclaredAs; first != "" {
+		d.scenario.end(step, fmt.Errorf("a Scenario declares one Topology, "+
+			"which its cluster keeps, so the Topology declared after %s is refused", first))
 
 		return d
 	}

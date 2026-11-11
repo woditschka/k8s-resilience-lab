@@ -224,6 +224,53 @@ func TestFullAccessWrittenBesideTheLabsOwnCustomizations_ShouldWinWhereItIsWritt
 	}
 }
 
+func requestingNothing() PodSpecAccess {
+	return func(pod *corev1.PodSpec) {
+		for at := range pod.Containers {
+			pod.Containers[at].Resources.Requests = nil
+		}
+	}
+}
+
+func spreadingOverTheZonesAt(maxSkew int) PodSpecAccess {
+	return func(pod *corev1.PodSpec) {
+		pod.TopologySpreadConstraints = append(pod.TopologySpreadConstraints, theConstraintOver(corev1.LabelTopologyZone, maxSkew))
+	}
+}
+
+// The setting's field was written before the full access, so the specification
+// holds it in a place the full access runs after. The template expected is the
+// one no full access reached.
+func TestASettingWrittenAfterAFullAccessChangingItsField_ShouldStandOnTheDeployedPodTemplate(t *testing.T) {
+	written := map[string]struct {
+		later  scenario.Setting
+		access PodSpecAccess
+	}{
+		"a Request over requests the full access removed": {
+			later: scenario.NewRequest(someRequestedCPU, someRequestedMemory), access: requestingNothing(),
+		},
+		"a spread over constraints the full access removed": {
+			later: anEvenSpreadOver(scenario.ZoneLabel, evenSkew), access: droppingTheSpreadConstraints(),
+		},
+		"a spread over a constraint the full access wrote over its topology key": {
+			later: anEvenSpreadOver(scenario.ZoneLabel, evenSkew), access: spreadingOverTheZonesAt(widerSkew),
+		},
+	}
+
+	for setting, taken := range written {
+		t.Run(setting, func(t *testing.T) {
+			declared := aSpecificationOf(t, taken.later)
+
+			deployed := toDeployment(aDeployment(t, declared), PodSpecAccessInPlace{
+				Access: taken.access, AfterSettings: afterEverySettingOf(declared),
+				SettingsWrittenAfter: []scenario.Setting{taken.later},
+			})
+
+			expect.Expect(t, deployed.Spec.Template.Spec).To(expect.Equal(toDeployment(aDeployment(t, declared)).Spec.Template.Spec))
+		})
+	}
+}
+
 // The specification's tolerations are transcribed after the last full access,
 // so the unresponsive-Node wait holds whatever full access left out.
 func TestFullAccessLeavingOutASettingTheLabDependsOn_ShouldLeaveThatSettingHolding(t *testing.T) {

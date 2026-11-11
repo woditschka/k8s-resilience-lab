@@ -2155,6 +2155,92 @@ func TestADeploymentNameAlreadyDeclared_ShouldEndTheScenarioAtThatGiven(t *testi
 	causeNames(t, ended, fmt.Sprintf("%q", someDeploymentName))
 }
 
+// A second Topology's Zones differ from the first's, so the two lines differ.
+const zonesOfASecondTopology = 3
+
+// A second Topology applied beside the first would leave the cluster holding
+// Nodes the Scenario no longer reads.
+func TestASecondTopologyInOneScenario_ShouldBeRefusedNamingTheFirstWhetherOrNotItIsProvisioned(t *testing.T) {
+	first := map[string]struct {
+		provisioned bool
+	}{
+		"the first not provisioned": {provisioned: false},
+		"the first provisioned":     {provisioned: true},
+	}
+
+	for state, taken := range first {
+		t.Run(state, func(t *testing.T) {
+			declaring := aScenario()
+			declaring.Given().Zones(twoZones, theGeneralNodePool())
+			declaring.topologyApplied = taken.provisioned
+
+			declaring.Given().Zones(zonesOfASecondTopology, theGeneralNodePool())
+
+			ended := declaring.outcome()
+			expect.Expect(t, ended.EndedAt).To(expect.Equal(topologyStepOf(zonesOfASecondTopology, twoNodesPerZone)))
+			causeNames(t, ended, topologyStepOf(twoZones, twoNodesPerZone).Name)
+		})
+	}
+}
+
+func TestASecondTopologyRefused_ShouldLeaveTheFirstAsTheScenariosTopology(t *testing.T) {
+	declaring := aScenario()
+	declaring.Given().Zones(twoZones, theGeneralNodePool())
+
+	declaring.Given().Zones(zonesOfASecondTopology, theGeneralNodePool())
+
+	theFirst := aTopologyOf(t, twoZones, twoNodesPerZone)
+	expect.Expect(t, declaring.topology.Nodes()).To(expect.Equal(theFirst.Nodes()))
+	expect.Expect(t, declaring.published.Load().Nodes()).To(expect.Equal(theFirst.Nodes()))
+	expect.Expect(t, declaring.topologyDeclaredAs).To(expect.Equal(topologyStepOf(twoZones, twoNodesPerZone).Name))
+}
+
+// The further call completes a line the halt never recorded, so carried out it
+// would rename the last Step reported and redeclare that line's Deployment.
+func TestADeploymentDeclaringWhatItSurvivesLosingAfterAnInteractiveRunsFirstWhen_ShouldLeaveEveryEarlierStepAsReported(
+	t *testing.T,
+) {
+	halting := aScenarioHaltingAtItsFirstWhen()
+	halting.Given().Zones(twoZones, theGeneralNodePool())
+	halting.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
+	halting.When().NodesFail(oneNodeFailing)
+
+	halting.Given().Deployment(anotherDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+		SurvivesLosing(Nodes(oneLost))
+
+	expect.Expect(t, halting.outcome().Steps).To(expect.Equal([]Step{
+		topologyStepOf(twoZones, twoNodesPerZone), resilientPlacementDeploymentStepOf(podsOverEveryNode),
+	}))
+	expect.Expect(t, halting.declaredDeployments).
+		To(expect.Equal([]scenario.Deployment{aDeploymentDeclaringResilientPlacementOf(t, podsOverEveryNode)}))
+}
+
+func TestASurvivalDeclarationInAnInteractiveRunWhoseFirstStepIsAWhen_ShouldNotBeCarriedOut(t *testing.T) {
+	halting := aScenarioHaltingAtItsFirstWhen()
+	halting.When().NodesFail(oneNodeFailing)
+
+	halting.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+		SurvivesLosing(Nodes(oneLost))
+
+	held := halting.outcome()
+	expect.Expect(t, held.Steps).To(expect.HaveLen[Step](0))
+	expect.Expect(t, held.Ended()).To(expect.Equal(false))
+	expect.Expect(t, halting.declaredDeployments).To(expect.HaveLen[scenario.Deployment](0))
+}
+
+// The runner's declaring pass records the Givens alone, and a further call on
+// one of them still declares what it completes.
+func TestADeclaringPassOverADeploymentDeclaringWhatItSurvivesLosing_ShouldStillSetItsFloor(t *testing.T) {
+	declaring := &Scenario{declaringOnly: true}
+	declaring.Given().Zones(twoZones, theGeneralNodePool())
+
+	declaring.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement()).
+		SurvivesLosing(Nodes(oneLost))
+
+	expect.Expect(t, declaring.deployment).To(expect.Equal(
+		aDeploymentSurvivingTheLossOf(t, podsOverEveryNode, Nodes(oneLost), aTopologyOf(t, twoZones, twoNodesPerZone))))
+}
+
 func TestATaintTheLabCannotHold_ShouldBeRefusedWhereItIsStated(t *testing.T) {
 	tests := map[string]struct {
 		taint   node.Taint
