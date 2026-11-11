@@ -262,6 +262,7 @@ A Scenario injects a Failure and judges the Placement on both sides of it `[REQ-
 
 1. A Pod of a Node that stopped responding cannot be placed elsewhere. It stays Pending with the control plane's reason.
 2. A When asks for more failing Nodes or Zones than the Topology holds. The Scenario ends at that Step, naming it.
+3. A Zone holding many Nodes fails, by a When or a click. All its Nodes stop responding at once, the last before the control plane moves the Pods of the first.
 
 **ADR:** [ADR: Node Failure](adr/2026-10-05-node-failure-withholds-the-nodes-status.md)  ·  **Design:** [system-design.md](system-design.md)
 
@@ -594,6 +595,8 @@ An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inje
 2. A Zone with only some Nodes stopped. A click stops the others.
 3. A placed Pod on a stopped Node. A click loses it all the same.
 4. A Node that responds again after a click. A further click stops it once more.
+5. A click whose Failure cannot be injected, wholly or in part. The terminal and the Timeline name that Failure as not injected, and why, in place of its When.
+6. A click whose Failure was injected only in part. The Nodes it stopped stay stopped, and the run goes on holding the cluster.
 
 **Design:** [system-design.md](system-design.md)
 

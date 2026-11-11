@@ -360,6 +360,7 @@ func TestAHeldRunUnderTestEndingBeforeItReports_ShouldFailTheTestNamingTheRunsEr
 // Injector, with what its Steps declared.
 type heldForClicks struct {
 	injector    *Injector
+	engine      cluster.Endpoint
 	provisioned *cluster.SimulatedCluster
 	topology    scenario.Topology
 	deployment  scenario.Deployment
@@ -456,7 +457,9 @@ func aHeldRunPrintingTo(t *testing.T, name string, steps func(*Scenario), termin
 func startAHeldRun(holding context.Context, stopHolding context.CancelFunc, running *Runner, name string,
 	steps func(*Scenario), terminal func(string),
 ) (*heldForClicks, error) {
-	held := &heldForClicks{injector: NewInjector(), terminal: terminal, stopTheLab: func() (Outcome, error) { return Outcome{}, nil }}
+	held := &heldForClicks{
+		injector: NewInjector(), engine: running.engine, terminal: terminal, stopTheLab: func() (Outcome, error) { return Outcome{}, nil },
+	}
 	image, err := running.obtainTheDeschedulerOf(holding, []func(*Scenario){steps})
 	if err != nil {
 		return held, fmt.Errorf("obtain the Descheduler image of the held Scenario %s: %w", name, err)
@@ -929,6 +932,203 @@ func TestAClickOnANodeThatRespondsAgain_ShouldStopItRespondingOnceMore(t *testin
 }
 
 const (
+	theScenarioNamingAClickNotInjected    = "a-scenario-naming-a-click-not-injected"
+	theScenarioRecordingAClickNotInjected = "a-scenario-recording-a-click-not-injected"
+	theScenarioClickedOnAPartlyGoneZone   = "a-scenario-clicked-on-a-zone-partly-gone"
+	theRunNotEnded                        = false
+)
+
+// theAPIAddressOf reads the one port the engine publishes for the cluster's
+// container, the API server's.
+func theAPIAddressOf(t *testing.T, engine cluster.Endpoint, clusterName string) string {
+	t.Helper()
+
+	asked := anEngineClient(engine)
+	defer asked.CloseIdleConnections()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://engine/containers/"+clusterName+"/json", nil)
+	if err != nil {
+		t.Fatalf("build the engine's inspection of %s: %v", clusterName, err)
+	}
+	answer, err := asked.Do(request)
+	if err != nil {
+		t.Fatalf("inspect the container of %s: %v", clusterName, err)
+	}
+	defer func() { _ = answer.Body.Close() }()
+
+	var inspected struct {
+		NetworkSettings struct {
+			Ports map[string][]struct {
+				HostIP   string `json:"HostIp"`
+				HostPort string
+			}
+		}
+	}
+	if err := json.NewDecoder(answer.Body).Decode(&inspected); err != nil {
+		t.Fatalf("read the inspection of %s: %v", clusterName, err)
+	}
+	for _, published := range inspected.NetworkSettings.Ports {
+		if len(published) > 0 && published[0].HostPort != "" {
+			return "http://" + net.JoinHostPort(published[0].HostIP, published[0].HostPort)
+		}
+	}
+	t.Fatalf("the container of %s publishes no port", clusterName)
+
+	return ""
+}
+
+// removeBehindTheLabsBack deletes the Node through the cluster's own API
+// server, so the lab's next write to it fails as one to a Node the cluster no
+// longer holds, while the Topology still derives it.
+func (h *heldForClicks) removeBehindTheLabsBack(t *testing.T, node string) {
+	t.Helper()
+
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodDelete,
+		theAPIAddressOf(t, h.engine, h.provisioned.Name())+"/api/v1/nodes/"+node, nil)
+	if err != nil {
+		t.Fatalf("build the deletion of Node %s: %v", node, err)
+	}
+	answer, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("delete Node %s: %v", node, err)
+	}
+	_ = answer.Body.Close()
+	if answer.StatusCode != http.StatusOK {
+		t.Fatalf("delete Node %s: the API server answered %s", node, answer.Status)
+	}
+}
+
+// expectNotInjected hands back why the click's Failure was not injected.
+func expectNotInjected(t *testing.T, injected error) string {
+	t.Helper()
+
+	if injected == nil {
+		t.Fatal("the Failure clicked was injected, but the cluster no longer holds a Node of it")
+	}
+
+	return injected.Error()
+}
+
+func notInjected(failure, why string) string {
+	return scenario.NotInjectedNamed + ": " + failure + ", because " + why
+}
+
+// theStepLinesFollowed are the lines a click gives on its own: a When, or the
+// Failure named not injected in its place.
+func (h *heldForClicks) theStepLinesFollowed(t *testing.T) []string {
+	t.Helper()
+
+	return theLinesSaying(h.theLinesFollowed(t), func(line string) bool {
+		return strings.HasPrefix(line, string(WhenStep)+" ") || strings.HasPrefix(line, scenario.NotInjectedNamed+": ")
+	})
+}
+
+func TestAClickedFailureThatCannotBeInjected_ShouldBeNamedNotInjectedAndWhyToTheTerminalInPlaceOfItsWhen(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioNamingAClickNotInjected)
+	clicked := held.theFirstNode()
+	held.removeBehindTheLabsBack(t, clicked)
+
+	why := expectNotInjected(t, held.injector.ClickNode(clicked))
+
+	expect.Expect(t, held.theStepLinesFollowed(t)).To(expect.Equal([]string{notInjected("Node "+clicked+" stops responding", why)}))
+}
+
+// notedOfAClick is what a Timeline holds of the clicks: their Whens and the
+// Failures named not injected.
+type notedOfAClick struct {
+	Whens       []string
+	NotInjected []string
+}
+
+func theFailuresNotInjectedIn(recorded scenario.Timeline) []string {
+	noted := []string{}
+	for _, entry := range recorded.Entries() {
+		if entry.Kind == scenario.StepObject && entry.Name == scenario.NotInjectedNamed {
+			noted = append(noted, entry.Detail)
+		}
+	}
+
+	return noted
+}
+
+func TestAClickedFailureThatCannotBeInjected_ShouldBeRecordedNotInjectedAndWhyInTheTimeline(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioRecordingAClickNotInjected)
+	clicked := held.theFirstNode()
+	held.removeBehindTheLabsBack(t, clicked)
+
+	why := expectNotInjected(t, held.injector.ClickNode(clicked))
+
+	recorded := held.theOutcomeOnceStopped(t).Timeline
+	expect.Expect(t, notedOfAClick{Whens: theWhensNotedIn(recorded), NotInjected: theFailuresNotInjectedIn(recorded)}).
+		To(expect.Equal(notedOfAClick{Whens: []string{}, NotInjected: []string{notInjected("Node "+clicked+" stops responding", why)}}))
+}
+
+const (
+	theScenarioClickedIntoAPanic = "a-scenario-clicked-into-a-failure-that-panics"
+	whatTheFailureSaid           = "a Failure's own code panicked mid-injection"
+)
+
+// injectRecoveringItsPanic injects the Failure on the held cluster as a click
+// does, recovering its panic as the Live view's HTTP server does.
+func (h *heldForClicks) injectRecoveringItsPanic(t *testing.T, when Step, failure func() error) {
+	t.Helper()
+
+	defer func() { _ = recover() }()
+	clicked := &heldCluster{ctx: t.Context(), provisioned: h.provisioned, topology: h.topology}
+	_ = clicked.inject(when, failure)
+}
+
+// keptAfterAPanic is what a terminal and a Timeline hold of the clicks once
+// one Failure's injection panicked.
+type keptAfterAPanic struct {
+	Followed []string
+	Recorded notedOfAClick
+}
+
+func TestAClickedFailureWhoseInjectionPanics_ShouldBeNamedNotInjectedAndLetALaterClickReachTheTerminalAndTheTimeline(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioClickedIntoAPanic)
+	clicked := held.theFirstNode()
+	stopsResponding := "Node " + clicked + " stops responding"
+	held.injectRecoveringItsPanic(t, Step{Kind: WhenStep, Name: stopsResponding}, func() error { panic(whatTheFailureSaid) })
+
+	expectInjected(t, held.injector.ClickNode(clicked))
+
+	followed := held.theStepLinesFollowed(t)
+	recorded := held.theOutcomeOnceStopped(t).Timeline
+	panicked := notInjected(stopsResponding, errInjectionUnfinished.Error())
+	expect.Expect(t, keptAfterAPanic{
+		Followed: followed,
+		Recorded: notedOfAClick{Whens: theWhensNotedIn(recorded), NotInjected: theFailuresNotInjectedIn(recorded)},
+	}).To(expect.Equal(keptAfterAPanic{
+		Followed: []string{panicked, "When " + stopsResponding},
+		Recorded: notedOfAClick{Whens: []string{"When " + stopsResponding}, NotInjected: []string{panicked}},
+	}))
+}
+
+// partInjected is what a Zone Failure injected only in part leaves: the Ready
+// Nodes, and whether the run ended once the lab stopped.
+type partInjected struct {
+	Ready []string
+	Ended bool
+}
+
+// The Zone's second Node is gone, so the click stops the first before its
+// Failure fails.
+func TestAClickedZoneFailureInjectedOnlyInPart_ShouldLeaveTheNodesItStoppedStoppedAndTheClusterHeld(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioClickedOnAPartlyGoneZone)
+	zone := held.theFirstZone()
+	held.removeBehindTheLabsBack(t, held.theNodesOfZone(zone)[1])
+
+	expectNotInjected(t, held.injector.ClickZone(zone))
+
+	expect.Expect(t, partInjected{Ready: held.theReadyNodeNames(t), Ended: held.theOutcomeOnceStopped(t).Ended()}).
+		To(expect.Equal(partInjected{Ready: held.everyNodeBut(held.theNodesOfZone(zone)...), Ended: theRunNotEnded}))
+}
+
+const (
 	theScenarioJoiningAClickToItsTimeline  = "a-scenario-joining-a-click-to-its-timeline"
 	theScenarioJoiningNoClickToItsTimeline = "a-scenario-joining-no-click-to-its-timeline"
 	theScenarioRecordingWhatAClickChanged  = "a-scenario-recording-what-a-click-changed"
@@ -1376,6 +1576,68 @@ func TestAWhenMakingZonesRespondAgain_ShouldMakeEveryNodeOfEveryStoppedZoneRespo
 }
 
 const (
+	theScenarioFailingAZoneOfManyNodes = "a-scenario-failing-a-zone-of-many-nodes"
+	// Ten Nodes take forty requests to stop, which a client throttled to the
+	// client-go default spreads over several seconds, past the Pods' wait.
+	manyNodesPerZone  = 10
+	podsOverManyNodes = twoZones * manyNodesPerZone
+	thePodsMoved      = true
+	aZoneFailureWait  = 30
+)
+
+// zoneFailureRecorded is what a Timeline holds of a Zone Failure: the Nodes
+// recorded NotReady before the first Pod was marked for deletion, sorted, and
+// whether any was.
+type zoneFailureRecorded struct {
+	StoppedBeforeThePodsMoved []string
+	PodsMoved                 bool
+}
+
+func theZoneFailureRecordedIn(recorded scenario.Timeline) zoneFailureRecorded {
+	read := zoneFailureRecorded{StoppedBeforeThePodsMoved: []string{}}
+	noted := false
+	for _, entry := range recorded.Entries() {
+		switch {
+		case entry.Kind == scenario.StepObject && entry.Name == string(WhenStep):
+			noted = true
+		case !noted || read.PodsMoved:
+		case entry.Kind == scenario.PodObject && entry.Reason == string(scenario.PodTerminating):
+			read.PodsMoved = true
+		case entry.Kind == scenario.NodeObject && entry.Reason == string(scenario.NodeNotReady) &&
+			!slices.Contains(read.StoppedBeforeThePodsMoved, entry.Name):
+			read.StoppedBeforeThePodsMoved = append(read.StoppedBeforeThePodsMoved, entry.Name)
+		}
+	}
+	slices.Sort(read.StoppedBeforeThePodsMoved)
+
+	return read
+}
+
+// A Pod tolerates its Node stopping for the lab's short wait alone, so the
+// control plane moves the first Node's Pods that long after it stops.
+func TestAZoneOfManyNodesThatFails_ShouldStopEveryNodeRespondingBeforeTheControlPlaneMovesThePodsOfTheFirst(t *testing.T) {
+	t.Parallel()
+	declared := aTopologyOf(t, twoZones, manyNodesPerZone)
+	stopped := nodeNamesOf(theNodesOutside(declared, declared.Zones()[1]))
+	slices.Sort(stopped)
+
+	ran, err := aRunOnThisMachineOf(t, theScenarioFailingAZoneOfManyNodes, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, node.Pool(generalNodePool, node.PerZone(manyNodesPerZone), roomyNodes()))
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Deployment(someDeploymentName, podsOverManyNodes, askingForNothing(), defaultPlacement())
+		steps.WaitFor().AllPodsReady()
+		steps.When().ZonesFail(oneLost)
+		steps.WaitFor().AllPodsReadyWithinSeconds(aZoneFailureWait)
+	})
+	if err != nil {
+		t.Fatalf("carry out the Scenario %s: %v", theScenarioFailingAZoneOfManyNodes, err)
+	}
+
+	expect.Expect(t, theZoneFailureRecordedIn(ran.Timeline)).
+		To(expect.Equal(zoneFailureRecorded{StoppedBeforeThePodsMoved: stopped, PodsMoved: thePodsMoved}))
+}
+
+const (
 	theScenarioLosingPods = "a-scenario-losing-pods-of-its-deployment"
 	twoPodsLost           = 2
 )
@@ -1665,16 +1927,20 @@ func TestADeschedulerOnAnIntervalThatCannotStartOrStops_ShouldEndTheScenarioNami
 	causeNames(t, ran, aPassThatExitedNonZero)
 }
 
+func anEngineClient(engine cluster.Endpoint) *http.Client {
+	return &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", engine.Socket())
+		},
+	}}
+}
+
 // The engine is asked for every container named after the Scenario's cluster,
 // its pass containers included, so the test names no container of its own.
 func theContainersNamedAfter(t *testing.T, engine cluster.Endpoint, clusterName string) []string {
 	t.Helper()
 
-	asked := &http.Client{Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", engine.Socket())
-		},
-	}}
+	asked := anEngineClient(engine)
 	defer asked.CloseIdleConnections()
 	filters, err := json.Marshal(map[string][]string{"name": {clusterName}})
 	if err != nil {

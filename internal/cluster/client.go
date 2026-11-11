@@ -15,11 +15,17 @@ import (
 // recording, which Close stops before removing the container.
 const controlPlaneTimeout = 30 * time.Second
 
+// noClientSideRateLimit is how client-go reads a negative QPS. Its default of
+// five requests a second spaces a Zone's Nodes apart by most of a second each,
+// so a large Zone would stop responding Node by Node rather than at once; the
+// API server is the lab's own, and its limits stand.
+const noClientSideRateLimit float32 = -1
+
 // controlPlaneConfig sets no credential, kubeconfig, exec provider or
 // certificate file and discovers none: the lab drives only the Simulated
 // Cluster it created itself.
 func controlPlaneConfig(address string) *rest.Config {
-	return &rest.Config{Host: address, Timeout: controlPlaneTimeout}
+	return &rest.Config{Host: address, Timeout: controlPlaneTimeout, QPS: noClientSideRateLimit}
 }
 
 // watchConfig drops the deadline alone, since client-go applies it to a

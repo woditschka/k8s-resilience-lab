@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"slices"
 	"sync"
 	"time"
 
@@ -88,6 +89,36 @@ func (c *SimulatedCluster) NoteStep(step, line string) {
 	c.recording.note(step, line)
 }
 
+// HoldStepNote opens a Step's note timed now among the changes, for a Step whose
+// line is known only once its changes are made. Every entry received after it
+// is held back from the sink and the follower alike until the note is given. A
+// cluster that is not recording, or no cluster at all, holds nothing.
+func (c *SimulatedCluster) HoldStepNote() StepNoteHeld {
+	if c == nil || c.recording == nil {
+		return StepNoteHeld{}
+	}
+
+	return c.recording.hold()
+}
+
+// StepNoteHeld is a Step's note held open in a recording, its zero value one
+// held in none.
+type StepNoteHeld struct {
+	recording *recording
+}
+
+// Note records the note held open as the Step given, at the moment it was
+// opened and ahead of every entry held back, and returns once handed on as
+// NoteStep does. A record stopped meanwhile has recorded the entries held back
+// without it.
+func (h StepNoteHeld) Note(step, line string) {
+	if h.recording == nil {
+		return
+	}
+
+	h.recording.give(step, line)
+}
+
 // The Timeline is written once, before done is closed, and read once after, and
 // one recorded so far is handed over on its own channel, so the record holds no
 // shared state and needs no lock.
@@ -100,7 +131,11 @@ type recording struct {
 	done      chan struct{}
 	notes     chan stepNoted
 	asks      chan followAsked
-	timeline  scenario.Timeline
+	// holds opens a note held open, and given gives it; a note is given only
+	// once its opening was taken, so the two never cross.
+	holds    chan struct{}
+	given    chan stepNoted
+	timeline scenario.Timeline
 }
 
 // followAsked carries room for the Timeline so far, and the channel the owner
@@ -121,7 +156,27 @@ type stepNoted struct {
 func newRecording(following context.Context, stop context.CancelFunc) *recording {
 	return &recording{
 		following: following, stop: stop, started: time.Now(), done: make(chan struct{}),
-		notes: make(chan stepNoted), asks: make(chan followAsked),
+		notes: make(chan stepNoted), asks: make(chan followAsked), holds: make(chan struct{}), given: make(chan stepNoted),
+	}
+}
+
+// hold returns once the owning goroutine has taken the opening, so a change
+// received after it is held back. A record already stopped holds nothing.
+func (r *recording) hold() StepNoteHeld {
+	select {
+	case r.holds <- struct{}{}:
+		return StepNoteHeld{recording: r}
+	case <-r.done:
+		return StepNoteHeld{}
+	}
+}
+
+func (r *recording) give(step, line string) {
+	handedOn := make(chan struct{})
+	select {
+	case r.given <- stepNoted{step: step, line: line, handedOn: handedOn}:
+		<-handedOn
+	case <-r.done:
 	}
 }
 
@@ -158,32 +213,114 @@ func (r *recording) follow() (scenario.Timeline, <-chan scenario.Entry) {
 //
 // One follower is handed each entry once it is recorded and written; a second
 // ask closes the first follower's channel, so no reader waits on it forever.
+// Entries held back for a note held open are released when the record stops,
+// so a note never given loses none.
 func (r *recording) own(changes <-chan watched, into EntrySink) {
-	var recorded []scenario.Entry
-	var follower chan<- scenario.Entry
-	mapper := newEntryMapper()
+	owned := &ownedRecord{recording: r, into: into, mapper: newEntryMapper()}
 	for received := range r.received(changes) {
-		if received.asked != nil {
-			received.asked.soFar <- scenario.NewTimeline(recorded)
-			closeFollower(follower)
-			follower = r.followedFrom(received.asked.later)
+		owned.take(received, time.Since(r.started))
+	}
+	owned.release()
 
-			continue
-		}
-		entry, carried := received.entry(time.Since(r.started), mapper)
-		if carried {
-			recorded = append(recorded, entry)
-			into.Write(entry)
-			follower = r.handOn(follower, entry)
-		}
-		if received.step.handedOn != nil {
-			close(received.step.handedOn)
+	closeFollower(owned.follower)
+	r.timeline = scenario.NewTimeline(owned.recorded)
+	close(r.done)
+}
+
+// ownedRecord is what the owning goroutine alone reads and writes.
+type ownedRecord struct {
+	recording *recording
+	into      EntrySink
+	mapper    *entryMapper
+	recorded  []scenario.Entry
+	follower  chan<- scenario.Entry
+	// held is nil unless a note is held open.
+	held *heldBack
+}
+
+// heldBack is a note held open: the moment it was opened, and the entries
+// received since, in order.
+type heldBack struct {
+	at      time.Duration
+	entries []entryHeld
+}
+
+// entryHeld carries a Step note's hand-over beside its entry, nil for any other
+// entry.
+type entryHeld struct {
+	entry    scenario.Entry
+	handedOn chan struct{}
+}
+
+// A Step's note is always carried, so an entry not carried has no hand-over to
+// close.
+func (o *ownedRecord) take(received watched, elapsed time.Duration) {
+	switch {
+	case received.asked != nil:
+		o.answer(*received.asked)
+	case received.holds:
+		o.hold(elapsed)
+	case received.gives:
+		o.give(received.step, elapsed)
+	default:
+		if entry, carried := received.entry(elapsed, o.mapper); carried {
+			o.deliver(entryHeld{entry: entry, handedOn: received.step.handedOn})
 		}
 	}
+}
 
-	closeFollower(follower)
-	r.timeline = scenario.NewTimeline(recorded)
-	close(r.done)
+func (o *ownedRecord) answer(asked followAsked) {
+	asked.soFar <- scenario.NewTimeline(o.recorded)
+	closeFollower(o.follower)
+	o.follower = o.recording.followedFrom(asked.later)
+}
+
+// hold keeps a note already held open, and the entries it holds back, where a
+// second is opened before the first is given.
+func (o *ownedRecord) hold(elapsed time.Duration) {
+	if o.held == nil {
+		o.held = &heldBack{at: elapsed}
+	}
+}
+
+// give stands the note ahead of what was held back, at the moment it was held
+// open, and releases them after it. A note given with none held open stands at
+// its receipt.
+func (o *ownedRecord) give(noted stepNoted, elapsed time.Duration) {
+	o.hold(elapsed)
+	entry, _ := watched{step: noted}.entry(o.held.at, o.mapper)
+	o.held.entries = slices.Insert(o.held.entries, 0, entryHeld{entry: entry, handedOn: noted.handedOn})
+	o.release()
+}
+
+func (o *ownedRecord) release() {
+	held := o.held
+	if held == nil {
+		return
+	}
+
+	o.held = nil
+	for _, entry := range held.entries {
+		o.deliver(entry)
+	}
+}
+
+// deliver closes a Step note's hand-over once its own entry is handed on, so
+// the note returns while a reader that stopped taking entries still holds the
+// ones after it.
+func (o *ownedRecord) deliver(delivered entryHeld) {
+	if o.held != nil {
+		o.held.entries = append(o.held.entries, delivered)
+
+		return
+	}
+
+	o.recorded = append(o.recorded, delivered.entry)
+	o.into.Write(delivered.entry)
+	o.follower = o.recording.handOn(o.follower, delivered.entry)
+	if delivered.handedOn != nil {
+		close(delivered.handedOn)
+	}
 }
 
 // followedFrom hands on nothing to a follower asking once the lab stopped
@@ -241,16 +378,28 @@ func (r *recording) received(changes <-chan watched) iter.Seq[watched] {
 				if !yield(watched{asked: &asked}) {
 					return
 				}
+			case <-r.holds:
+				if !yield(watched{holds: true}) {
+					return
+				}
+			case given := <-r.given:
+				if !yield(watched{step: given, gives: true}) {
+					return
+				}
 			}
 		}
 	}
 }
 
+// watched is one thing the owning goroutine receives: a change, a note about
+// the record, a Step's note, an ask to follow, or a note held open or given.
 type watched struct {
 	event watch.Event
 	note  string
 	step  stepNoted
 	asked *followAsked
+	holds bool
+	gives bool
 }
 
 func (w watched) entry(elapsed time.Duration, mapper *entryMapper) (scenario.Entry, bool) {

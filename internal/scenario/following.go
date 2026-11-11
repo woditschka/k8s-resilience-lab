@@ -23,10 +23,11 @@ func NewFollowing(soFar Timeline) *Following {
 	return &Following{narrating: narrating}
 }
 
-// Read gives the lines one later entry completes: a When's line, and each moment
-// complete with it, a printed moment never printed again. Most give none.
+// Read gives the lines one later entry completes: a When's line, or a clicked
+// Failure's named not injected in its place, and each moment complete with it,
+// a printed moment never printed again. Most give none.
 func (f *Following) Read(entry Entry) []string {
-	if entry.notesAWhen() {
+	if entry.notesAWhen() || entry.notesAFailureNotInjected() {
 		return []string{entry.Detail}
 	}
 

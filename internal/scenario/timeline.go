@@ -35,12 +35,22 @@ const (
 	DeploymentObject ObjectKind = "Deployment"
 	ReplicaSetObject ObjectKind = "ReplicaSet"
 	// StepObject is a Step's note, named by which of Given, When, Wait or Then
-	// the Step is and carrying the Step's line.
+	// the Step is and carrying the Step's line, or a clicked Failure's note in
+	// place of its When where it was not injected.
 	StepObject ObjectKind = "Step"
 )
 
 // WaitStepNamed names a Wait's note, the one each Wait narrative ends at.
 const WaitStepNamed = "Wait"
+
+// NotInjectedNamed names the note standing in place of a clicked Failure's When
+// where the Failure could not be injected, wholly or in part. It is no When, so
+// nothing judged from the Whens counts it.
+const NotInjectedNamed = "Not injected"
+
+func (e Entry) notesAFailureNotInjected() bool {
+	return e.Kind == StepObject && e.Name == NotInjectedNamed
+}
 
 // EvictedByTheDescheduler is the reason a reported entry carries for a Pod the
 // Descheduler evicted, which sets its eviction apart from a Failure's.

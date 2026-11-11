@@ -71,9 +71,20 @@ What the stop does with a terminal that stopped taking lines, the owner having l
 28. **Holding the lines not yet printed** — printed once the terminal resumes, the lab ending only then.
 29. **Dropping them** — the stop waits on no line, and the filed Timeline holds their entries.
 
+How a clicked Failure that cannot be injected, wholly or in part, stands in the Timeline (REQ-SIM-028 edge case 5). The PRD names it not injected, and why, in place of its When:
+
+30. **The When noted once the Failure is injected** — the click's own changes may stand before it, read as moments ahead of the click.
+31. **The When noted before, a not-injected note after it** — the Timeline keeps a When for a Failure never injected.
+32. **The note held open from before the first change until the injection returns** — the owning goroutine holds later entries back, then records the When or the not-injected note at the moment held, ahead of them.
+
+How fast a Failure's Node writes reach the control plane (REQ-SIM-008 edge case 3). client-go's default client-side limit of 5 requests a second spaces a Zone's Nodes about 0.8 seconds apart:
+
+33. **A higher client-side limit** — a number still scaling with the Zone, against a bound no lab user set.
+34. **No client-side limit** — the API server is the lab's own, with one client, and its own limits stand.
+
 ## Decision
 
-Options 3, 8, 10, 12, 14, 17, 22, 24, 27 and 29.
+Options 3, 8, 10, 12, 14, 17, 22, 24, 27, 29, 32 and 34.
 
 - Five streams: Nodes, Pods, Deployments, ReplicaSets, and Events in the Deployment's namespace. One goroutine owns the record and selects over them, so receipt order is the Timeline's order and no lock is needed.
 - A closed stream is re-opened once from the last version seen; a failed re-open is a noted entry. Each entry is mapped into an immutable `internal/scenario` value.
@@ -85,16 +96,20 @@ Options 3, 8, 10, 12, 14, 17, 22, 24, 27 and 29.
 - Every control-plane request, a watch's opening included, keeps the 30-second deadline. A stream runs on a second client with the same address, no credential and no deadline, ending with its recording.
 - An Interactive run records until the lab stops. Each click changing the cluster is noted as a When through the owning goroutine. Its Wait narratives come from the Timeline recorded so far at the hold, and the Timeline is filed at the stop.
 - At the hold the owning goroutine hands over the Timeline so far and then each later entry, until the lab stops. From the stop it hands on none, and the run's reader prints no further line and is waited for only when no line is printing (option 29). A pure reader in `internal/scenario` turns them into the terminal's lines through the Wait narratives' own reading. A click's When is worded as its Step, and every moment as a Wait narrative's line.
+- A click injecting a Failure holds its note open from before its first change (option 32). Once the injection returns, the note is recorded as the When, or as the Failure not injected with its cause. A Node the click stopped stays stopped. A click making Nodes respond again notes its When before its first change.
+- Both control-plane clients set no client-side rate limit (option 34).
 
 ## Consequences
 
 Every change the API server pushed before the Scenario ended, or before an Interactive run's lab stopped, is in the Timeline, and stopping the record drains each stream. A held Timeline grows for as long as the cluster is held; a bound is an open question in the PRD. A held run's terminal stalling holds up its record until the lab stops, as a stalled file write does. Stopping files the Timeline and removes the cluster whatever the terminal does, and a moment recorded after the stop prints no line on any terminal. Cross-stream order is receipt order, not causal order. A filed Timeline narrates as the run that recorded it did. A Wait settles on two observations a poll interval apart, far above a stream's delivery on loopback, so its narrative holds the changes it reflects.
 
+While a click's note is held open, the file and the terminal lag by the injection's length, bounded by the request deadline and its conflict retries. The API server alone paces the lab's requests, so a burst of them waits on its limits rather than the client's.
+
 Timeline files accumulate until an engineer deletes them; retention is an open question in the PRD. A hand-written `watch.Interface` in `internal/cluster`'s test drives the closed-stream and failed-open paths, a real control plane producing none on demand.
 
 ## Implementation
 
-**Requirements:** REQ-SIM-005, REQ-SIM-021, REQ-SIM-033
+**Requirements:** REQ-SIM-005, REQ-SIM-008, REQ-SIM-021, REQ-SIM-028, REQ-SIM-033, REQ-SIM-034
 
 ## References
 

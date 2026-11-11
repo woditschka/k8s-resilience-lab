@@ -553,7 +553,8 @@ type heldCluster struct {
 }
 
 // NewInjector notes each click it takes as a When into the held cluster's
-// Timeline, which is where the terminal reads it from.
+// Timeline, which is where the terminal reads it from, or as its Failure not
+// injected where it could not be, wholly or in part.
 func NewInjector() *Injector {
 	return &Injector{}
 }
@@ -641,24 +642,25 @@ func (i *Injector) LosePod(name string) error {
 		return nil
 	}
 
-	// Noted before the deletion, so the Pod's removal stands after its When. A
-	// Pod gone between the board and the deletion leaves its When noted all the
-	// same, so the terminal and the Timeline name the click alike.
-	i.held.note(Step{Kind: WhenStep, Name: "Pod " + failure.BoardName() + " is lost"})
-	if _, err := i.held.provisioned.LosePod(i.held.ctx, failure.Name()); err != nil {
-		return fmt.Errorf("lose the Pod %s clicked: %w", name, err)
-	}
+	// A Pod gone between the board and the deletion is lost already, so its When
+	// is noted all the same and the terminal and the Timeline name the click
+	// alike.
+	return i.held.inject(Step{Kind: WhenStep, Name: "Pod " + failure.BoardName() + " is lost"}, func() error {
+		if _, err := i.held.provisioned.LosePod(i.held.ctx, failure.Name()); err != nil {
+			return fmt.Errorf("lose the Pod %s clicked: %w", name, err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // stopping and restoring are called under mu, and clicked names the Node or
-// Zone as its When does. The When is noted before the first Node changes, as a
-// Scenario's When is.
+// Zone as its When does. A restoration's When is noted before the first Node
+// changes, as a Scenario's When is.
 func (i *Injector) stopping(nodes []string, clicked string) error {
-	i.held.note(Step{Kind: WhenStep, Name: clicked + " stops responding"})
-
-	return i.held.stop(nodes)
+	return i.held.inject(Step{Kind: WhenStep, Name: clicked + " stops responding"}, func() error {
+		return i.held.stop(nodes)
+	})
 }
 
 func (i *Injector) restoring(nodes []string, clicked string) error {
@@ -670,6 +672,35 @@ func (i *Injector) restoring(nodes []string, clicked string) error {
 // note words the When as the terminal prints it, as a Scenario notes its Steps.
 func (h *heldCluster) note(when Step) {
 	h.provisioned.NoteStep(string(when.Kind), when.String())
+}
+
+// errInjectionUnfinished is why a Failure whose injection never returned, one
+// that panicked and the HTTP server recovered from, is noted not injected.
+var errInjectionUnfinished = errors.New("its injection did not return")
+
+// inject holds the When's note open from before the Failure's first change
+// until the injection returns, so the changes it made stand after it. The note
+// is then given as the When, or as the Failure named not injected and why in its
+// place. It is given on every return, a panic included, since a note never
+// given holds every later entry back from the terminal.
+func (h *heldCluster) inject(when Step, failure func() error) error {
+	held := h.provisioned.HoldStepNote()
+	injected := errInjectionUnfinished
+	defer func() { held.Note(noteOf(when, injected)) }()
+
+	injected = failure()
+
+	return injected
+}
+
+// noteOf words the note as the terminal prints it: the When, or the Failure
+// it names with why it was not injected.
+func noteOf(when Step, injected error) (step, line string) {
+	if injected == nil {
+		return string(when.Kind), when.String()
+	}
+
+	return scenario.NotInjectedNamed, scenario.NotInjectedNamed + ": " + when.Name + ", because " + injected.Error()
 }
 
 // stop keeps every Node it stopped among the stopped, even where a later one

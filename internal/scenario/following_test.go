@@ -176,6 +176,16 @@ func TestAClickedWhenInTheTerminal_ShouldBeTheWhenItsTimelineHolds(t *testing.T)
 	expect.Expect(t, lines).To(expect.Equal([]string{aWhenNotedWhileHeld().Detail}))
 }
 
+const aFailureNotInjectedLine = "Not injected: Node " + aNodeName + " stops responding, because the Node is gone"
+
+func TestAClickedFailureNotInjectedInTheTerminal_ShouldBeTheNoteItsTimelineHoldsInPlaceOfItsWhen(t *testing.T) {
+	notInjected := Entry{Elapsed: whenTheNodeWasLost, Change: ChangeNoted, Kind: StepObject, Name: NotInjectedNamed, Detail: aFailureNotInjectedLine}
+
+	lines := theLinesFollowing(theTimelineAtTheHold(), notInjected)
+
+	expect.Expect(t, lines).To(expect.Equal([]string{aFailureNotInjectedLine}))
+}
+
 // The pass evicted before the Wait the Steps end at, so that Wait's narrative
 // names the eviction; its removal and a mark a restarted watch delivers late
 // follow once the cluster is held.

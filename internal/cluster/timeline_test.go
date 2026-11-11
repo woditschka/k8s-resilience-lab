@@ -286,6 +286,85 @@ func TestATimeline_ShouldRecordEachStepAtItsMoment(t *testing.T) {
 	}))
 }
 
+const theLineGivenOnceHeld = "Not injected: Node zone-1-node-1 stops responding, because the Node is gone"
+
+func theHeldNoteGiven() scenario.Entry {
+	return scenario.Entry{Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: scenario.NotInjectedNamed, Detail: theLineGivenOnceHeld}
+}
+
+// The change received while the note is held is what the click's own first
+// change stands for, and the follower reads entries only once the note is
+// given, so its first entry read is the note.
+func TestAStepNoteHeldOpen_ShouldStandAtItsOpeningAheadOfTheEntriesHeldBackForTheFileAndTheFollowerAlike(t *testing.T) {
+	changes := make(chan watched)
+	delivered := &entriesDelivered{}
+	recorded := newRecording(t.Context(), func() {})
+	go recorded.own(changes, delivered)
+	_, later := recorded.follow()
+	held := recorded.hold()
+	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
+
+	go held.Note(scenario.NotInjectedNamed, theLineGivenOnceHeld)
+
+	handedOn := []scenario.Entry{<-later, <-later}
+	close(changes)
+	<-recorded.done
+	expect.Expect(t, filedAndHandedOn{
+		Filed: withoutTheirTimes(delivered.entries), HandedOn: withoutTheirTimes(handedOn),
+	}).To(expect.Equal(filedAndHandedOn{
+		Filed:    []scenario.Entry{theHeldNoteGiven(), aPodChangeRecorded()},
+		HandedOn: []scenario.Entry{theHeldNoteGiven(), aPodChangeRecorded()},
+	}))
+}
+
+// filedAndHandedOn is what a record wrote into its sink and handed its
+// follower.
+type filedAndHandedOn struct {
+	Filed    []scenario.Entry
+	HandedOn []scenario.Entry
+}
+
+// The follower takes the note and then stops reading, as a stalled terminal
+// does, so the change held back waits on it; the test takes that change only
+// once the note has returned, then stops the record.
+func TestAStepNoteGivenOnceHeld_ShouldReturnOnceItsOwnEntryIsHandedOnWhileTheEntriesHeldBackWait(t *testing.T) {
+	changes := make(chan watched)
+	recorded := newRecording(t.Context(), func() {})
+	go recorded.own(changes, &entriesDelivered{})
+	_, later := recorded.follow()
+	held := recorded.hold()
+	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
+	given := make(chan struct{})
+
+	go func() {
+		held.Note(scenario.NotInjectedNamed, theLineGivenOnceHeld)
+		close(given)
+	}()
+
+	handedOnFirst := <-later
+	<-given
+	<-later
+	close(changes)
+	<-recorded.done
+	expect.Expect(t, withoutTheirTimes([]scenario.Entry{handedOnFirst})).To(expect.Equal([]scenario.Entry{theHeldNoteGiven()}))
+}
+
+// The record stops before the note is given, as it would for a click that
+// never returned; the change held back is recorded all the same.
+func TestARecordStoppedWhileAStepNoteIsHeldOpen_ShouldStillRecordEveryEntryHeldBack(t *testing.T) {
+	changes := make(chan watched)
+	recorded := newRecording(t.Context(), func() {})
+	go recorded.own(changes, &entriesDelivered{})
+	held := recorded.hold()
+	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
+
+	close(changes)
+	<-recorded.done
+	held.Note(scenario.NotInjectedNamed, theLineGivenOnceHeld)
+
+	expect.Expect(t, withoutTheirTimes(recorded.timeline.Entries())).To(expect.Equal([]scenario.Entry{aPodChangeRecorded()}))
+}
+
 // followedToTheStop is what a follower of a record reads: the Timeline so far,
 // each entry handed on after it, and whether its channel was still open once
 // the record was done.
