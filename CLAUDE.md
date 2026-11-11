@@ -161,7 +161,9 @@ go fmt ./...                          # Format code
 Or use Make targets:
 
 ```bash
-make test        # Run all tests with the race detector (Linux: needs a C compiler, see Toolchain)
+make test        # Run all tests with the race detector: test-unit, then test-integration (Linux: needs a C compiler, see Toolchain)
+make test-unit   # Run the tests needing no container engine (files tagged //go:build !integration); starts no Simulated Cluster
+make test-integration  # Run the tests needing the container engine (files tagged //go:build !unit)
 make test-race   # Same as make test
 make lint        # Run golangci-lint
 make lint-fix    # Run golangci-lint with auto-fix

@@ -59,6 +59,9 @@ One command decides whether the lab itself is sound, and the repository holds ex
 <a id="req-sim-007"></a>
 The same command holds the lab to its declared dependencies, free of known vulnerabilities, and to closing every connection it opens `[REQ-SIM-007]`.
 
+<a id="req-sim-035"></a>
+An engineer runs the lab's own tests needing no container runtime on their own, without waiting for any Simulated Cluster `[REQ-SIM-035]`. The tests needing one also run on their own, and the one command still runs both.
+
 **Done when:**
 
 - `[REQ-SIM-001]` given no Simulated Cluster is up, when a-deployment-placed-for-resilience runs, then three Zones each hold three Ready general Nodes. Nine Pods Settle Running, one per Node.
@@ -81,6 +84,10 @@ The same command holds the lab to its declared dependencies, free of known vulne
 - `[REQ-SIM-004]` given the repository, when an engineer looks for the lab, then exactly one implementation is present.
 - `[REQ-SIM-007]` given a dependency differing from its declaration, vulnerable, or named like a permitted one, when the one command runs, then it fails, naming it.
 - `[REQ-SIM-007]` given the lab's own tests, when they end, then no connection the lab opened to a Simulated Cluster stays open.
+- `[REQ-SIM-035]` given no reachable container runtime, when the engineer runs the tests needing no container runtime, then each of them runs and passes, and no Simulated Cluster starts.
+- `[REQ-SIM-035]` given a reachable container runtime, when the engineer runs the tests needing one, then only those run.
+- `[REQ-SIM-035]` given no reachable container runtime, when the one command or the tests needing one run, then each test needing one fails, naming the runtime.
+- `[REQ-SIM-035]` given the one command, when it runs the lab's own tests, then every test of both kinds runs, on a developer machine as in a build.
 
 **Edge cases:**
 
@@ -651,6 +658,7 @@ An Interactive run's Timeline keeps recording while its cluster is held, each cl
 
 <!-- Unresolved product questions. Each resolves into a requirement, a non-goal, or an ADR. -->
 
+- Whether more of the lab's own tests share one Simulated Cluster, once their run times are measured.
 - Whether the lab scripts a Failure over time, such as a Pod dying after a delay, at the cost of a second injection surface.
 - Whether a held cluster's terminal names Pending Pods with the scheduler's reason, or the time of day.
 - Whether a Timeline growing while a cluster is held has a bound.

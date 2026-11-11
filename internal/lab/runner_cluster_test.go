@@ -1,3 +1,5 @@
+//go:build !unit
+
 // These tests cross to a real Simulated Cluster. One judges the order in which
 // a panicking Scenario lets go of the cluster, its recording and the
 // recording's file: no stand-in has a recording to outlive its file. The others
@@ -126,13 +128,6 @@ func aRunOf(t *testing.T, running *Runner, name string, steps func(*Scenario)) (
 	}
 
 	return running.runNamed(t.Context(), name, image, steps)
-}
-
-// observed carries a board as it reads, so a comparison needs no access to its
-// fields.
-type observed struct {
-	Lines       []string
-	NotObserved string
 }
 
 // anObserverHandingOverEachBoard blocks the observer until the test takes the
@@ -1502,13 +1497,6 @@ func aPolicyBalancingTheSpreadUnder(name string, action descheduler.Unsatisfiabl
 	}}}
 }
 
-func deschedulerPassStepUnder(name string) Step {
-	step := deschedulerPassStepNamingNoPolicy()
-	step.Name += " under " + name
-
-	return step
-}
-
 func thePodsDescheduledBeforeTheStepAfter(recorded scenario.Timeline, noted Step) []string {
 	descheduled := []string{}
 	passed := false
@@ -1791,11 +1779,6 @@ func theGivenDeclaringTheFailingInterval(t *testing.T) Step {
 	t.Helper()
 
 	return deschedulerOnAnIntervalStepOf(aPolicyNameThePassRefuses, theDeschedulerPairedByDefault(t), anIntervalLongerThanTheNodesWait)
-}
-
-// theStopNamedFor opens the sentence a Step left undone is named with.
-func theStopNamedFor(name string) string {
-	return "the Scenario " + name + " ended at "
 }
 
 func namingTheStopOf(name string) func(string) bool {

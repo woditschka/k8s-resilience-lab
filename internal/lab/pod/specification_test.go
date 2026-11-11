@@ -1,3 +1,5 @@
+//go:build !integration
+
 // These tests reach no cluster, because a definition is a value.
 //
 // The full-access tests write it as a Scenario does, which is why this file

@@ -1,3 +1,5 @@
+//go:build !unit
+
 // These tests cross to a real Simulated Cluster: a Wait is where a Scenario's
 // declarations reach the control plane, and what the control plane makes of
 // them is its own judgement, which no stand-in could report.
@@ -22,6 +24,10 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 	"github.com/woditschka/k8s-resilience-lab/internal/timeline"
+)
+
+import (
+	"fmt"
 )
 
 // Each container on the engine says which Scenario it serves.
@@ -441,11 +447,6 @@ func namesOfWhensIn(steps []Step) []string {
 	return names
 }
 
-const (
-	gpuTaintKey     = "nvidia.com/gpu"
-	gpuTaintPresent = "present"
-)
-
 func theTaintedGpuNodePool() node.DeclaredPool {
 	return theGpuNodePool().Taints(node.Taint{Key: gpuTaintKey, Value: gpuTaintPresent, Effect: node.NoSchedule})
 }
@@ -661,4 +662,32 @@ func TestAWaitStatingTheLeastTimeTheLabAdmits_ShouldBeReachedByAClusterAlreadyIn
 	expect.Expect(t, theWait.String()).To(expect.Equal(
 		"Wait for " + theWait.Name + ", reached in " + theWait.Waited.Round(100*time.Millisecond).String() +
 			" of the " + scenario.LeastStatedTime.String() + " stated"))
+}
+
+func topologyStepHoldingOnePodOf(zones, nodesPerZone int) Step {
+	return topologyStepHolding(zones, nodesPerZone, fmt.Sprintf("%d Pod", roomForOnePodPerNode))
+}
+
+func settledPlacementStep() Step {
+	return Step{Kind: WaitStep, Name: theSettledPlacement}
+}
+
+func nodesOfNodePool(topology scenario.Topology, nodePool string) []scenario.Node {
+	var pooled []scenario.Node
+	for _, candidate := range topology.Nodes() {
+		if candidate.NodePool == nodePool {
+			pooled = append(pooled, candidate)
+		}
+	}
+
+	return pooled
+}
+
+func namesOf(nodes []scenario.Node) []string {
+	names := make([]string, 0, len(nodes))
+	for _, named := range nodes {
+		names = append(names, named.Name)
+	}
+
+	return names
 }

@@ -1,3 +1,5 @@
+//go:build !integration
+
 package expect_test
 
 import (

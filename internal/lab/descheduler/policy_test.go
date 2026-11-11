@@ -1,3 +1,5 @@
+//go:build !integration
+
 package descheduler_test
 
 import (

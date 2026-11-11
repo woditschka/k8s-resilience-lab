@@ -131,7 +131,9 @@ A held run's Timeline keeps recording until the lab stops, per [the Timeline ADR
 
 | Contract | Purpose | Source | Implements |
 |----------|---------|--------|------------|
-| `make ci` | The gate command, failing on the first check that fails. Its tests run under the race detector, per [ADR: The gate runs the tests under the race detector](adr/2026-10-04-race-detector-in-the-gate.md). Its timeout and `-parallel` flag follow § Scale and Load | `Makefile` | REQ-SIM-004, REQ-SIM-011, REQ-SIM-014 |
+| `make ci` | The gate command, failing on the first check that fails. Its tests run under the race detector, per [ADR: The gate runs the tests under the race detector](adr/2026-10-04-race-detector-in-the-gate.md). Its timeout and `-parallel` flag follow § Scale and Load | `Makefile` | REQ-SIM-004, REQ-SIM-011, REQ-SIM-014, REQ-SIM-035 |
+| `make test-unit`, `make test-integration` | Run the tests needing no container engine, tagged `unit`, or those needing one, tagged `integration`; `make test` runs both, per [ADR: The lab's tests divide at the container engine by build constraint](adr/2026-11-11-the-tests-divide-at-the-container-engine-by-build-constraint.md) | `Makefile` | REQ-SIM-035 |
+| Test-kind rule test | Fails when a test file holding a test function carries not exactly one of the two constraints, or an engine-free one reaches the engine | `internal/cluster/testkinds_test.go` | REQ-SIM-035 |
 | `make demo` | Starts an Interactive run and opens its Live view through the machine's opener | `Makefile` | REQ-SIM-032 |
 | `make deps-check` | Fails, naming the offender, when a prohibited dependency class (§ Dependency Policy) enters the module graph | `Makefile` | REQ-SIM-004 |
 | depguard and `forbidigo` rules | Deny the imports and the in-cluster configuration call § Package Structure rules out | `.golangci.yml` | REQ-SIM-004, REQ-SIM-006, REQ-SIM-022 |
@@ -249,7 +251,7 @@ A Deployment's Pod template transcribes its specification: one spread constraint
 | Terminal lines while a cluster is held (`scenario.Following`, the held run) | one per click and per moment; unrecorded, treated as bounded | with the clicks, the passes and the time held | run-private, one reader | Simplest readable form: the narratives' reading, a map of each object's last reading; O(1) average per entry, O(objects) space |
 | Live view observations (the observer) | one per refresh interval per Interactive run, over 9 Nodes and their Pods | with the Pods and Nodes declared | run-private, one writer, every stream reading | One observation, board and render per interval, a fade count per Pod, swapped in under a lock; O((pods + nodes) log (pods + nodes)), independent of the browsers |
 | Live view streams | an engineer's browsers, unrecorded, treated as bounded, held below the open-stream cap | with the browsers open | shared read-mostly | One held connection per stream, woken on each new fragment, writing the latest alone; O(fragment) per change |
-| Simulated Clusters at once (`lab.Runner`, the gate) | a run: one per Scenario, an Interactive run one. The gate: one package at a time, the tests its `-parallel` flag admits times each test's clusters. The engine's ceiling unrecorded, treated as bounded | with the Scenarios and the cluster-backed tests | run-private, one container and loopback port per cluster | One goroutine per Scenario, joined before the report. A cluster not started within the start timeout ends its own Scenario or test |
+| Simulated Clusters at once (`lab.Runner`, the gate) | a run: one per Scenario, an Interactive run one. `make test-integration`: one package at a time, the tests its `-parallel` flag admits times each test's clusters; `make test-unit` starts none. The engine's ceiling unrecorded, treated as bounded | with the Scenarios and the cluster-backed tests | run-private, one container and loopback port per cluster | One goroutine per Scenario, joined before the report. A cluster not started within the start timeout ends its own Scenario or test |
 <!-- One row per collection or path that scales with use: rows, requests per second, payload size. Access pattern: request-private, shared read-mostly, shared read-write. Form: the structure or algorithm chosen. On a hot path it carries its time and space bound with its kind (worst-case, average, amortized). A hand-written one, or a measured claim, links its ADR. -->
 
 - **Hot paths:** none. A run's cost is the container start, measured in seconds, and no latency figure is a requirement (G-1).
@@ -351,6 +353,7 @@ Before adding a dependency, verify that the standard library cannot solve it and
 | REQ-SIM-032 | The Live view opened in one command | REQ-SIM-022, REQ-SIM-031 |
 | REQ-SIM-033 | A held cluster followed in its Timeline | REQ-SIM-005, REQ-SIM-028, REQ-SIM-031 |
 | REQ-SIM-034 | A run cut short ends cleanly | REQ-SIM-014, REQ-SIM-022 |
+| REQ-SIM-035 | The tests divided at the container engine | REQ-SIM-004, REQ-SIM-014 |
 
 ## State Machine
 

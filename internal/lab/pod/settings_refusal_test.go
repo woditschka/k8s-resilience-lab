@@ -1,3 +1,5 @@
+//go:build !integration
+
 // These tests read a setting as a Scenario writes it, a keyed literal: a field
 // left out is refused at the specification holding it, and a complete setting
 // is reported as a manifest writes it.

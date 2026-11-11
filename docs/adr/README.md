@@ -78,3 +78,4 @@ A non-goal ADR records a *product* decision not to build something — distinct 
 | 2026-10-18 | [Scenario code stays idiomatic Go, read by subject](2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md) | Accepted |
 | 2026-10-21 | [The Live view is served on loopback from one shared observation](2026-10-21-the-live-view-is-served-on-loopback-from-one-shared-observation.md) | Accepted |
 | 2026-11-09 | [The Descheduler runs as its official image, paired by Kubernetes minor, under a policy the Scenarios define](2026-11-09-the-descheduler-runs-as-its-official-image-paired-by-kubernetes-minor.md) | Accepted |
+| 2026-11-11 | [The lab's tests divide at the container engine by build constraint](2026-11-11-the-tests-divide-at-the-container-engine-by-build-constraint.md) | Accepted |

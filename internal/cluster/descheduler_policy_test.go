@@ -1,3 +1,5 @@
+//go:build !integration
+
 package cluster
 
 import (
@@ -6,21 +8,6 @@ import (
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
-)
-
-const (
-	// No test here turns on a profile's name beyond telling two apart.
-	someProfileName    = "a-descheduler-profile"
-	anotherProfileName = "another-descheduler-profile"
-
-	oneEvictionPerNode uint = 1
-	oneEvictionPerPass uint = 1
-	// No test here turns on the per-Node eviction limit but the one encoding it.
-	anyLimitPerNode uint = 0
-
-	theNodeFitArgument     = "nodeFit"
-	theConstraintsArgument = "constraints"
-	aConstraintAction      = "DoNotSchedule"
 )
 
 // The document is decoded generically and compared whole, so a key the lab
@@ -96,30 +83,6 @@ func TestADeschedulerPolicyLeavingItsLimitsAndEntriesOut_ShouldLeaveTheirKeysOut
 			"plugins": map[string]any{"balance": map[string]any{"enabled": []any{string(scenario.RemoveDuplicates)}}},
 		}},
 	}))
-}
-
-func aDeschedulerProfileOf(t *testing.T, name string, configured []scenario.DeschedulerPluginConfig,
-	enabled ...scenario.DeschedulerPluginSet,
-) scenario.DeschedulerProfile {
-	t.Helper()
-
-	profile, err := scenario.NewDeschedulerProfile(name, configured, enabled)
-	if err != nil {
-		t.Fatalf("build the Descheduler profile %q: %v", name, err)
-	}
-
-	return profile
-}
-
-func aDeschedulerPolicyOf(t *testing.T, maxPodsToEvictPerNode uint, profiles ...scenario.DeschedulerProfile) scenario.DeschedulerPolicy {
-	t.Helper()
-
-	policy, err := scenario.NewDeschedulerPolicy(maxPodsToEvictPerNode, profiles...)
-	if err != nil {
-		t.Fatalf("build a Descheduler policy: %v", err)
-	}
-
-	return policy
 }
 
 func decoded(t *testing.T, encoded []byte) map[string]any {

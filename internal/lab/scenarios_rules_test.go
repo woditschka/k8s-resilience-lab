@@ -1,3 +1,5 @@
+//go:build !integration
+
 // These rules govern the Scenarios' place. They live with the machinery rather
 // than in the place itself, so the place stays Scenarios alone.
 package lab

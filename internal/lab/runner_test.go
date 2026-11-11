@@ -1,3 +1,5 @@
+//go:build !integration
+
 // These tests reach no engine: an underivable or duplicate Scenario name stops
 // the run before a cluster is provisioned, and carrying out Scenarios at once
 // is driven with functions in memory.
@@ -247,27 +249,6 @@ func theNamesReportedIn(carried []Carried) []string {
 	return named
 }
 
-func theScenariosThatWentWrongIn(carried []Carried) []string {
-	var wentWrong []string
-	for _, each := range carried {
-		if each.Err != nil {
-			wentWrong = append(wentWrong, each.Outcome.Name)
-		}
-	}
-
-	return wentWrong
-}
-
-func theFailureOf(carried []Carried, named string) string {
-	for _, each := range carried {
-		if each.Outcome.Name == named && each.Err != nil {
-			return each.Err.Error()
-		}
-	}
-
-	return ""
-}
-
 // Which Node changed and when does not bear on the pairing, only that each
 // Wait's note closes a narrative of its own.
 const (
@@ -316,15 +297,6 @@ func TestEachWaitStep_ShouldBeGivenTheNarrativeEndingAtItsOwnNoteInOrder(t *test
 
 func aScenarioHaltingAtItsFirstWhen() *Scenario {
 	return &Scenario{haltsAtTheFirstWhen: true}
-}
-
-func theKindsOf(steps []Step) []StepKind {
-	kinds := make([]StepKind, 0, len(steps))
-	for _, step := range steps {
-		kinds = append(kinds, step.Kind)
-	}
-
-	return kinds
 }
 
 // Without the halt, this When would be recorded and end the Scenario, since no

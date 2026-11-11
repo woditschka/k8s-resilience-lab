@@ -1,3 +1,5 @@
+//go:build !integration
+
 // These tests reach no cluster and no engine: a Given is judged by the
 // internal/scenario value it constructs, and a Then by a Placement the test
 // built, so no stand-in for the Simulated Cluster exists.
@@ -8,7 +10,6 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,88 +19,6 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/node"
 	"github.com/woditschka/k8s-resilience-lab/internal/lab/pod"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
-)
-
-const (
-	// More than one Node per Zone makes an even Placement a decision rather
-	// than the only one available.
-	twoZones        = 2
-	twoNodesPerZone = 2
-
-	podsOverEveryNode = twoZones * twoNodesPerZone
-
-	podsPerZoneWhenEven = podsOverEveryNode / twoZones
-	podsPerNodeWhenEven = 1
-
-	// twoPodsPerNode is below roomyPodsPerNode, so a Topology declared at it
-	// differs from one naming Roomy. No test here turns on the cpu and memory.
-	twoPodsPerNode       = 2
-	someCoresPerNode     = 4
-	someGibibytesPerNode = 16
-	someCPUSpelled       = "4"
-	someMemorySpelled    = "16Gi"
-
-	roomForOnePodPerNode = 1
-	onePodLeftPending    = 1
-	podsBeyondEveryNode  = podsOverEveryNode + onePodLeftPending
-	noPodPending         = 0
-
-	noNodeDeclared = 0
-
-	// A Topology of two Zones of two Nodes, so one Node holds one Pod of an
-	// even spread and one Zone two.
-	floorSurvivingOneNode = podsOverEveryNode - podsPerNodeWhenEven
-	floorSurvivingOneZone = podsOverEveryNode - podsPerZoneWhenEven
-
-	oneLost = 1
-
-	// A loss reads as a report line states it, after the count it is written
-	// with.
-	oneNodeLost   = "1 Node"
-	oneZoneLost   = "1 Zone"
-	everyZoneLost = "2 Zones"
-
-	noNodesPerZone = 0
-	noPods         = 0
-	noReplicas     = 0
-
-	moreNodesThanTheTopologyHolds = twoZones*twoNodesPerZone + 1
-	moreZonesThanTheTopologyHolds = twoZones + 1
-
-	theWhenThatNeverRan = "no When"
-
-	oneNodeFailing = 1
-
-	theToleranceNeverDeclared = "no Deployment declares one"
-
-	noSpecificationAtAll = ""
-
-	onePodLeftBehind       = 1
-	podLeftOnTheFailedNode = string(someDeploymentName) + "-left-behind"
-
-	podLeftPending = string(someDeploymentName) + "-left-pending"
-
-	// aFinelyStatedWait is stated more finely than a report states it, so the
-	// rounding is read on it.
-	aFinelyStatedWait = 6234 * time.Millisecond
-
-	aTimeAWaitStates         = 15
-	aWaitPastTheTimeItStates = 25500 * time.Millisecond
-
-	// A Wait with nothing to wait for takes no measured time, so whether it was
-	// reached is read off the Step rather than off this time.
-	aWaitOfNoMeasuredTime = 0
-
-	theWaitsOwnStep = 0
-
-	theWaitingTimeInSeconds = int(scenario.WaitingTime / time.Second)
-
-	theSecondsAboveTheLabsWaitingTime = theWaitingTimeInSeconds + 1
-	noSecondsAtAll                    = 0
-
-	// someDeploymentName is named here rather than taken from the Scenarios'
-	// place, which internal/lab does not import.
-	someDeploymentName DeploymentName = "some-deployment"
 )
 
 func aWaitStating(t *testing.T, seconds int) scenario.StatedWait {
@@ -146,37 +65,6 @@ func aScenarioAfterFailingAZone(placed scenario.Placement, stopped string) *Scen
 	return &Scenario{observed: placed, settled: true, failedZones: []string{stopped}}
 }
 
-// The lab defines no Named Node capacity, so this suite defines its own. Its
-// Pod count leaves room for more than one Pod per Node.
-const roomyName node.CapacityName = "Roomy"
-
-const (
-	roomyCoresPerNode     = 16
-	roomyGibibytesPerNode = 64
-	roomyPodsPerNode      = 10
-)
-
-func roomyNodes() node.Capacity {
-	return node.Named(roomyName, node.Capacity{CPU: roomyCoresPerNode, Memory: roomyGibibytesPerNode * node.Gi, Pods: roomyPodsPerNode})
-}
-
-func aTopologyOf(t *testing.T, zones, nodesPerZone int) scenario.Topology {
-	t.Helper()
-
-	return aTopologyHolding(t, zones, nodesPerZone, theCapacityRoomyStandsFor(t))
-}
-
-func theCapacityRoomyStandsFor(t *testing.T) scenario.NodeCapacity {
-	t.Helper()
-
-	capacity, err := scenario.NewNodeCapacity(roomyPodsPerNode, coresOf(roomyCoresPerNode), gibibytesOf(roomyGibibytesPerNode))
-	if err != nil {
-		t.Fatalf("build the capacity Roomy stands for: %v", err)
-	}
-
-	return capacity
-}
-
 func aTopologyAt(t *testing.T, zones, nodesPerZone, podsPerNode int) scenario.Topology {
 	t.Helper()
 
@@ -186,21 +74,6 @@ func aTopologyAt(t *testing.T, zones, nodesPerZone, podsPerNode int) scenario.To
 	}
 
 	return aTopologyHolding(t, zones, nodesPerZone, capacity)
-}
-
-func aTopologyHolding(t *testing.T, zones, nodesPerZone int, capacity scenario.NodeCapacity) scenario.Topology {
-	t.Helper()
-
-	pool, err := scenario.NewNodePool(string(generalNodePool), nodesPerZone, capacity)
-	if err != nil {
-		t.Fatalf("build a NodePool of %d Nodes per Zone: %v", nodesPerZone, err)
-	}
-	topology, err := scenario.NewTopology(zones, pool)
-	if err != nil {
-		t.Fatalf("build a Topology of %d Zones of %d Nodes: %v", zones, nodesPerZone, err)
-	}
-
-	return topology
 }
 
 func aDeploymentDeclaringResilientPlacementOf(t *testing.T, pods int) scenario.Deployment {
@@ -224,27 +97,6 @@ func aDeploymentSurvivingTheLossOf(t *testing.T, pods int, lost FailureTolerance
 	return aDeploymentNamedSurvivingTheLossOf(t, someDeploymentName, pods, lost, against)
 }
 
-func aDeploymentNamedSurvivingTheLossOf(t *testing.T, name DeploymentName, pods int, lost FailureTolerance,
-	against scenario.Topology,
-) scenario.Deployment {
-	t.Helper()
-
-	specification, err := resilientPlacement().Declared()
-	if err != nil {
-		t.Fatalf("define Resilient placement: %v", err)
-	}
-	declared, err := scenario.NewDeployment(string(name), pods, specification)
-	if err != nil {
-		t.Fatalf("build a Deployment %s of %d replicas declaring Resilient placement: %v", name, pods, err)
-	}
-	deployment, err := declared.WithFailureTolerance(lost.tolerance, against)
-	if err != nil {
-		t.Fatalf("declare a Failure tolerance of %s: %v", lost.tolerance.Reads(), err)
-	}
-
-	return deployment
-}
-
 func onePodPerNodeOf(topology scenario.Topology) scenario.Placement {
 	nodes := topology.Nodes()
 	placed := make([]scenario.Pod, 0, len(nodes))
@@ -264,11 +116,6 @@ func onePodLeftPendingBesideOnePerNodeOf(topology scenario.Topology) scenario.Pl
 	pending := scenario.Pod{Name: podLeftPending, Phase: scenario.PodPending}
 
 	return scenario.NewPlacement(topology.Nodes(), append(placed, pending))
-}
-
-// The first Node the Topology derives is the pick internal/scenario makes.
-func theNodeThatStopped(topology scenario.Topology) string {
-	return topology.Nodes()[0].Name
 }
 
 // The stopped Node is no Ready Node, so the observation is read against the
@@ -311,18 +158,6 @@ func onePodLeftInTheFailedZoneOf(topology scenario.Topology, stopped string) sce
 	leftBehind := scenario.Pod{Name: podLeftOnTheFailedNode, Node: stillReady.Name, Phase: scenario.PodRunning}
 
 	return scenario.NewPlacement(append(responding, stillReady), append(moved, leftBehind))
-}
-
-func theNodesOutside(topology scenario.Topology, zone string) []scenario.Node {
-	declared := topology.Nodes()
-	outside := make([]scenario.Node, 0, len(declared))
-	for _, node := range declared {
-		if node.Zone != zone {
-			outside = append(outside, node)
-		}
-	}
-
-	return outside
 }
 
 func theFirstNodeIn(topology scenario.Topology, zone string) scenario.Node {
@@ -372,79 +207,12 @@ func everyPodOnOneNodeOf(topology scenario.Topology) scenario.Placement {
 	return scenario.NewPlacement(nodes, crowded)
 }
 
-// A Step's name is what a report shows and what a Finding points at, so this
-// suite states it.
-func topologyStepOf(zones, nodesPerZone int) Step {
-	return Step{
-		Kind: GivenStep,
-		Name: fmt.Sprintf("a Topology of %d Zones of a NodePool %s of %d %s Nodes holding %d cpu, %dGi memory and %d Pods each",
-			zones, generalNodePool, nodesPerZone, roomyName, roomyCoresPerNode, roomyGibibytesPerNode, roomyPodsPerNode),
-	}
-}
-
 func topologyStepHoldingOf(zones, nodesPerZone, podsPerNode int) Step {
 	return topologyStepHolding(zones, nodesPerZone, fmt.Sprintf("%d Pods", podsPerNode))
 }
 
-func topologyStepHoldingOnePodOf(zones, nodesPerZone int) Step {
-	return topologyStepHolding(zones, nodesPerZone, fmt.Sprintf("%d Pod", roomForOnePodPerNode))
-}
-
-func topologyStepHolding(zones, nodesPerZone int, podsSpelled string) Step {
-	return topologyStepHoldingCapacity(zones, nodesPerZone,
-		fmt.Sprintf("%s cpu, %s memory and %s", someCPUSpelled, someMemorySpelled, podsSpelled))
-}
-
-// One template, so the lines cannot drift apart here.
-func topologyStepHoldingCapacity(zones, nodesPerZone int, capacity string) Step {
-	return Step{
-		Kind: GivenStep,
-		Name: fmt.Sprintf("a Topology of %d Zones of a NodePool %s of %d Nodes holding %s each",
-			zones, generalNodePool, nodesPerZone, capacity),
-	}
-}
-
 func deploymentStepOf(pods int, declaring string) Step {
 	return deploymentStepNamedOf(someDeploymentName, pods, declaring)
-}
-
-func deploymentStepNamedOf(name DeploymentName, pods int, declaring string) Step {
-	return Step{
-		Kind: GivenStep,
-		Name: fmt.Sprintf("a Deployment %s of %d replicas declaring %s", name, pods, declaring),
-	}
-}
-
-func resilientPlacementDeploymentStepOf(pods int) Step {
-	return resilientPlacementDeploymentStepNamed(someDeploymentName, pods)
-}
-
-func resilientPlacementDeploymentStepNamed(name DeploymentName, pods int) Step {
-	return carrying(deploymentStepNamedOf(name, pods, resilientPlacementReads()), resilientPlacementCarries()...)
-}
-
-func resilientPlacementReads() string {
-	return fmt.Sprintf("%s, each Pod starting in %s to %s", resilientPlacementNamed,
-		someShortestStartupMillis*time.Millisecond, someLongestStartupMillis*time.Millisecond)
-}
-
-func carrying(step Step, settings ...string) Step {
-	step.Settings = settings
-
-	return step
-}
-
-// A toleration is reported at the lab's waiting time, the one time the domain
-// holds it at.
-func aTolerationLine(taint string) string {
-	return fmt.Sprintf("tolerations: {key: %s, operator: Exists, effect: NoExecute, tolerationSeconds: %d}",
-		taint, theLabsWaitInSeconds())
-}
-
-func aSpreadLine(topologyKey string, maxSkew int) string {
-	return fmt.Sprintf(
-		"topologySpreadConstraints: {topologyKey: %s, maxSkew: %d, whenUnsatisfiable: DoNotSchedule, nodeTaintsPolicy: Honor}",
-		topologyKey, maxSkew)
 }
 
 func aRequestLine(cores, gibibytes int) string {
@@ -452,14 +220,6 @@ func aRequestLine(cores, gibibytes int) string {
 }
 
 const aFullAccessLine = "a full access to the Kubernetes Pod specification applies"
-
-func theLeavingLines() []string {
-	return []string{aTolerationLine(scenario.TaintNodeNotReady), aTolerationLine(scenario.TaintNodeUnreachable)}
-}
-
-func resilientPlacementCarries() []string {
-	return append(theLeavingLines(), aSpreadLine(scenario.ZoneLabel, anEvenSkew), aSpreadLine(scenario.HostnameLabel, anEvenSkew))
-}
 
 // Naming the Failure tolerance renames the line rather than adding one.
 func deploymentStepSurvivingTheLossOf(pods int, lost string) Step {
@@ -473,16 +233,8 @@ func namedDeploymentStepSurvivingTheLossOf(name DeploymentName, pods int, lost s
 	return surviving
 }
 
-func allPodsRunningStep() Step {
-	return Step{Kind: ThenStep, Name: "every Pod Running"}
-}
-
 func podsPerZoneStepOf(pods int) Step {
 	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pods per Zone", pods)}
-}
-
-func podsPerNodeStepOf(pods int) Step {
-	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pod per Node", pods)}
 }
 
 // Once a When resolves what it stops it renames its line, which only a run
@@ -499,18 +251,6 @@ func zonesFailStepOf(zones int) Step {
 	return Step{Kind: WhenStep, Name: fmt.Sprintf("%d Zones fail", zones)}
 }
 
-func allNodesReadyStep() Step {
-	return Step{Kind: WaitStep, Name: allNodesReady}
-}
-
-func allPodsReadyStep() Step {
-	return Step{Kind: WaitStep, Name: allPodsReady}
-}
-
-func settledPlacementStep() Step {
-	return Step{Kind: WaitStep, Name: theSettledPlacement}
-}
-
 func podsPendingStepOf(pods int) Step {
 	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pods Pending", pods)}
 }
@@ -525,27 +265,6 @@ func noPodsOnTheFailedNodesStep() Step {
 
 func noPodsInTheFailedZonesStep() Step {
 	return Step{Kind: ThenStep, Name: "no Pod in the Zones that failed"}
-}
-
-// enoughPodsStayedReadyStep is also the line a Scenario with nothing to judge
-// ends at, recorded before any reading.
-func enoughPodsStayedReadyStep(readings ...string) Step {
-	return Step{Kind: ThenStep, Name: "enough Pods stayed Ready from the first Failure", Readings: readings}
-}
-
-// The mismatch text is internal/expect's and is not this suite's to pin.
-type judgedFinding struct {
-	Step        Step
-	Mismatching bool
-}
-
-func asJudged(findings []Finding) []judgedFinding {
-	judged := make([]judgedFinding, 0, len(findings))
-	for _, finding := range findings {
-		judged = append(judged, judgedFinding{Step: finding.Step, Mismatching: finding.Mismatch != ""})
-	}
-
-	return judged
 }
 
 // A reader of a restore time must never read one time for the other.
@@ -1118,52 +837,6 @@ func TestAGivenTopologyNamingItsNodeCapacity_ShouldDeclareThatCapacityAndRenameI
 		To(expect.Equal([]Step{topologyStepHoldingOf(twoZones, twoNodesPerZone, twoPodsPerNode)}))
 }
 
-// The gpu NodePool's cpu and memory are double Roomy's, so its Nodes differ in
-// both; no test here turns on its Pod count.
-const (
-	generalNodePool node.PoolName = "general"
-	gpuNodePool     node.PoolName = "gpu"
-)
-
-const (
-	oneGpuNodePerZone  = 1
-	gpuCoresPerNode    = 32
-	gpuGibibytesNode   = 128
-	someGpuPodsPerNode = 10
-)
-
-func theGpuNodePool() node.DeclaredPool {
-	return node.Pool(gpuNodePool, node.PerZone(oneGpuNodePerZone),
-		node.Capacity{CPU: gpuCoresPerNode, Memory: gpuGibibytesNode * node.Gi, Pods: someGpuPodsPerNode})
-}
-
-func theGeneralNodePool() node.DeclaredPool {
-	return node.Pool(generalNodePool, node.PerZone(twoNodesPerZone), roomyNodes())
-}
-
-func aTopologyOfNodePools(t *testing.T, zones int) scenario.Topology {
-	t.Helper()
-
-	gpuCapacity, err := scenario.NewNodeCapacity(someGpuPodsPerNode, coresOf(gpuCoresPerNode), gibibytesOf(gpuGibibytesNode))
-	if err != nil {
-		t.Fatalf("build the gpu NodePool's capacity: %v", err)
-	}
-	general, err := scenario.NewNodePool(string(generalNodePool), twoNodesPerZone, theCapacityRoomyStandsFor(t))
-	if err != nil {
-		t.Fatalf("build the general NodePool: %v", err)
-	}
-	gpu, err := scenario.NewNodePool(string(gpuNodePool), oneGpuNodePerZone, gpuCapacity)
-	if err != nil {
-		t.Fatalf("build the gpu NodePool: %v", err)
-	}
-	topology, err := scenario.NewTopology(zones, general, gpu)
-	if err != nil {
-		t.Fatalf("build a Topology of %d Zones of two NodePools: %v", zones, err)
-	}
-
-	return topology
-}
-
 func topologyStepOfNodePools(zones int) Step {
 	return Step{Kind: GivenStep, Name: fmt.Sprintf(
 		"a Topology of %d Zones of a NodePool %s of %d %s Nodes holding %d cpu, %dGi memory and %d Pods each; "+
@@ -1255,21 +928,9 @@ func TestARefusedNodePoolDeclaration_ShouldBeRefusedWhereItIsStated(t *testing.T
 	}
 }
 
-const (
-	capacityTypeLabel    = "capacity-type"
-	onDemandCapacity     = "on-demand"
-	spotCapacity         = "spot"
-	oneNodePerZoneOfEach = 1
-)
-
 func theOnDemandNodePool() node.DeclaredPool {
 	return node.Pool(onDemandCapacity, node.PerZone(oneNodePerZoneOfEach), roomyNodes()).
 		Labels(node.Labels{capacityTypeLabel: onDemandCapacity})
-}
-
-func theSpotNodePool() node.DeclaredPool {
-	return node.Pool(spotCapacity, node.PerZone(oneNodePerZoneOfEach), roomyNodes()).
-		Labels(node.Labels{capacityTypeLabel: spotCapacity})
 }
 
 func aTopologyOfLabelledNodePools(t *testing.T, zones int) scenario.Topology {
@@ -1581,15 +1242,6 @@ func theReadingsOf(t *testing.T, recorded []scenario.Entry, stopped []string, ju
 	}
 
 	return readings
-}
-
-func linesOf(readings []scenario.FloorReading) []string {
-	lines := make([]string, 0, len(readings))
-	for _, reading := range readings {
-		lines = append(lines, reading.Line())
-	}
-
-	return lines
 }
 
 // The second Deployment declares no Failure tolerance, so it is not judged.
@@ -1943,22 +1595,6 @@ func TestAThenReadingAFailureWithNoWhenBeforeIt_ShouldEndTheScenarioNamingThatTh
 	}
 }
 
-func causeOf(reported Outcome) string {
-	if reported.Cause == nil {
-		return ""
-	}
-
-	return reported.Cause.Error()
-}
-
-func causeNames(t *testing.T, ended Outcome, named string) {
-	t.Helper()
-
-	if !strings.Contains(causeOf(ended), named) {
-		t.Errorf("the Scenario ended for a reason naming %q, but it reads: %s", named, causeOf(ended))
-	}
-}
-
 func TestAnEvenExpectation_ShouldGiveEveryDomainTheSameShare(t *testing.T) {
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 	nodes := declared.Nodes()
@@ -2037,26 +1673,6 @@ func TestAFailureByLabelNamingWhatNoNodePoolStates_ShouldEndTheScenarioAtThatWhe
 	}
 }
 
-func nodesOfNodePool(topology scenario.Topology, nodePool string) []scenario.Node {
-	var pooled []scenario.Node
-	for _, candidate := range topology.Nodes() {
-		if candidate.NodePool == nodePool {
-			pooled = append(pooled, candidate)
-		}
-	}
-
-	return pooled
-}
-
-func namesOf(nodes []scenario.Node) []string {
-	names := make([]string, 0, len(nodes))
-	for _, named := range nodes {
-		names = append(names, named.Name)
-	}
-
-	return names
-}
-
 func podsOnNodePoolStep(pods int, pool node.PoolName) Step {
 	return Step{Kind: ThenStep, Name: fmt.Sprintf("%d Pods on the NodePool %s", pods, pool)}
 }
@@ -2118,8 +1734,6 @@ func TestAThenNamingANodePoolTheTopologyLacks_ShouldEndTheScenarioAtThatThen(t *
 	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
 	causeNames(t, ended, fmt.Sprintf("%q", aNodePoolTheTopologyLacks))
 }
-
-const anotherDeploymentName DeploymentName = "another-deployment"
 
 // The Placement observed before belongs to the earlier Deployment, so a Then
 // before the next Wait has none of the newest to judge.
@@ -2520,28 +2134,6 @@ func theVersionPairedWithNoDescheduler(t *testing.T) cluster.KubernetesVersion {
 	return version
 }
 
-func theDeschedulerPairedByDefault(t *testing.T) cluster.DeschedulerVersion {
-	t.Helper()
-
-	paired, err := cluster.DefaultKubernetesVersion().PairedDescheduler()
-	if err != nil {
-		t.Fatalf("pair a Descheduler with the default Kubernetes version: %v", err)
-	}
-
-	return paired
-}
-
-func deschedulerPolicyStepNaming(name string) Step {
-	return Step{Kind: GivenStep, Name: "a Descheduler policy " + name}
-}
-
-func deschedulerPolicyStepOf(name string, paired cluster.DeschedulerVersion) Step {
-	named := deschedulerPolicyStepNaming(name)
-	named.Name += " for Descheduler " + paired.String()
-
-	return named
-}
-
 func TestADeclaredDeschedulerPolicysGivenLine_ShouldNameThePolicyAndTheDeschedulerVersion(t *testing.T) {
 	declaring := aScenarioOn(cluster.DefaultKubernetesVersion())
 
@@ -2630,10 +2222,6 @@ func TestADeschedulerPolicyDeclaredOnAVersionPairedWithNoDescheduler_ShouldEndTh
 	causeNames(t, ended, aVersionPairedWithNoDescheduler)
 }
 
-func deschedulerPassStepNamingNoPolicy() Step {
-	return Step{Kind: WhenStep, Name: "one Descheduler pass"}
-}
-
 func TestAWhenRunningADeschedulerPassInAScenarioDeclaringNoPolicy_ShouldEndTheScenarioAtThatWhenNamingIt(t *testing.T) {
 	running := aScenarioOn(cluster.DefaultKubernetesVersion())
 
@@ -2642,19 +2230,6 @@ func TestAWhenRunningADeschedulerPassInAScenarioDeclaringNoPolicy_ShouldEndTheSc
 	ended := running.outcome()
 	expect.Expect(t, ended.EndedAt).To(expect.Equal(deschedulerPassStepNamingNoPolicy()))
 	causeNames(t, ended, "declares no Descheduler policy")
-}
-
-// No test turns on the interval but those naming or refusing it.
-const (
-	aPassEveryFiveSeconds = 5
-	anIntervalOfNoSeconds = 0
-)
-
-func deschedulerOnAnIntervalStepOf(name string, paired cluster.DeschedulerVersion, seconds int) Step {
-	step := deschedulerPolicyStepOf(name, paired)
-	step.Name += fmt.Sprintf(", a pass every %d seconds", seconds)
-
-	return step
 }
 
 func TestADeschedulerOnAnIntervalsGivenLine_ShouldNameTheInterval(t *testing.T) {

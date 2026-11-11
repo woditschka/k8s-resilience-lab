@@ -98,7 +98,9 @@ make run ARGS="--whole-timeline"         # print every Timeline entry under each
 make run ARGS="--k8s-version <version>"  # mirror another patch of the pinned Kubernetes minor
 make interactive SCENARIO=a-node-that-stops-responding  # hold one Scenario's cluster and watch it live
 make demo                                # the same, for the Descheduler Scenario, with the Live view opened in your browser
-make ci                                  # the full quality gate, the Scenarios included
+make test-unit                           # the lab's tests needing no container engine
+make test-integration                    # the lab's tests needing one, each starting Simulated Clusters
+make ci                                  # the full quality gate, both kinds of test and the Scenarios included
 ```
 
 All Scenarios run at once, so a run lasts about as long as its slowest Scenario, and each reports as the section What It Looks Like in Practice shows.

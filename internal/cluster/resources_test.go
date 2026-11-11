@@ -1,3 +1,5 @@
+//go:build !integration
+
 package cluster
 
 import (
@@ -19,28 +21,6 @@ import (
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
 )
 
-const (
-	deployedDeploymentName = "web"
-	somePodsPerNode        = 10
-	somePodCount           = 9
-	evenSkew               = 1
-	widerSkew              = 2
-
-	someCPUPerNode      = scenario.CPU(4 * millicoresPerCore)
-	someMemoryPerNode   = scenario.Memory(16 * mebibytesPerGibibyte)
-	someRequestedCPU    = scenario.CPU(1 * millicoresPerCore)
-	someRequestedMemory = scenario.Memory(2 * mebibytesPerGibibyte)
-
-	// internal/lab converts whole units to the lab's quantities, and this suite
-	// converts the same way rather than importing internal/lab, which imports
-	// this package.
-	millicoresPerCore    = 1000
-	mebibytesPerGibibyte = 1024
-
-	// No test of this suite turns on the specification name.
-	someSpecificationName = "a Pod specification"
-)
-
 func aDeployment(t *testing.T, declaring scenario.PodSpecification) scenario.Deployment {
 	t.Helper()
 
@@ -50,37 +30,6 @@ func aDeployment(t *testing.T, declaring scenario.PodSpecification) scenario.Dep
 	}
 
 	return deployment
-}
-
-// The predefined specifications live in the Scenarios' place, which imports
-// internal/lab, which imports this package, so this suite builds its own.
-func aSpecificationOf(t *testing.T, settings ...scenario.Setting) scenario.PodSpecification {
-	t.Helper()
-
-	declared, err := scenario.NewPodSpecification(someSpecificationName,
-		aStartupTimeBetween(t, someShortestStartup, someLongestStartup), settings...)
-	if err != nil {
-		t.Fatalf("build the Pod specification %q: %v", someSpecificationName, err)
-	}
-
-	return declared
-}
-
-const (
-	someShortestStartup = 500 * time.Millisecond
-	someLongestStartup  = time.Second
-)
-
-func anEvenSpreadOver(topologyKey string, maxSkew int) scenario.TopologySpread {
-	return scenario.NewTopologySpread(topologyKey, maxSkew, scenario.DoNotSchedule, scenario.Honor)
-}
-
-func aNodeConditionToleration(taint string) scenario.Toleration {
-	return scenario.NewToleration(taint, scenario.Exists, "", scenario.NoExecute, theLabsWaitInSeconds())
-}
-
-func theLabsWaitInSeconds() int64 {
-	return int64(scenario.UnresponsiveNodeWait.Seconds())
 }
 
 func deploymentSelector() *metav1.LabelSelector {
@@ -766,11 +715,6 @@ func TestAnObservedLabelledNode_ShouldBeReadWithTheLabelsItsNodePoolStated(t *te
 	expect.Expect(t, observed).To(expect.Equal([]scenario.Node{declared}))
 }
 
-const (
-	capacityTypeLabel = "capacity-type"
-	spotCapacity      = "spot"
-)
-
 func aNodeLabelled(t *testing.T, stated map[string]string) scenario.Node {
 	t.Helper()
 
@@ -1090,15 +1034,6 @@ func aNodeHolding(t *testing.T, capacity scenario.NodeCapacity) scenario.Node {
 	return topology.Nodes()[0]
 }
 
-func topologyOfTheGeneralNodePool(zones, nodesPerZone int, capacity scenario.NodeCapacity) (scenario.Topology, error) {
-	pool, err := scenario.NewNodePool("general", nodesPerZone, capacity)
-	if err != nil {
-		return scenario.Topology{}, err
-	}
-
-	return scenario.NewTopology(zones, pool)
-}
-
 func aNodeOfTheNodePool(t *testing.T, name string) scenario.Node {
 	t.Helper()
 
@@ -1115,40 +1050,12 @@ func aNodeOfTheNodePool(t *testing.T, name string) scenario.Node {
 	return topology.Nodes()[0]
 }
 
-func aCapacity(t *testing.T) scenario.NodeCapacity {
-	t.Helper()
-
-	return aCapacityOf(t, somePodsPerNode, someCPUPerNode, someMemoryPerNode)
-}
-
-func aCapacityOf(t *testing.T, pods int, cpu scenario.CPU, memory scenario.Memory) scenario.NodeCapacity {
-	t.Helper()
-
-	capacity, err := scenario.NewNodeCapacity(pods, cpu, memory)
-	if err != nil {
-		t.Fatalf("build a Node capacity of %d Pods, %s cpu and %s memory: %v", pods, cpu, memory, err)
-	}
-
-	return capacity
-}
-
 // The times differ from each other and from this suite's default, so what a
 // template carries is read back as the one stated.
 const (
 	aShortStartupMillis  = 300
 	aLongerStartupMillis = 1700
 )
-
-func aStartupTimeBetween(t *testing.T, shortest, longest time.Duration) scenario.StartupTime {
-	t.Helper()
-
-	stated, err := scenario.NewStartupTime(int(shortest.Milliseconds()), int(longest.Milliseconds()))
-	if err != nil {
-		t.Fatalf("build a Startup time between %s and %s: %v", shortest, longest, err)
-	}
-
-	return stated
-}
 
 func theStartupAnnotations(shortest, longest time.Duration) map[string]string {
 	return map[string]string{
@@ -1188,15 +1095,6 @@ func TestADeploymentsPodTemplate_ShouldCarryItsStartupTimeWhateverFullAccessName
 			expect.Expect(t, taken.template.Spec.Template.Annotations).To(expect.Equal(taken.carries))
 		})
 	}
-}
-
-const (
-	gpuTaintKey   = "nvidia.com/gpu"
-	gpuTaintValue = "present"
-)
-
-func aGPUTaint() scenario.Taint {
-	return scenario.Taint{Key: gpuTaintKey, Value: gpuTaintValue, Effect: scenario.NoSchedule}
 }
 
 func aNodeTainted(t *testing.T, stated ...scenario.Taint) scenario.Node {

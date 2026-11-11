@@ -23,7 +23,7 @@ PROHIBITED_IMPORTS := \
 	sigs.k8s.io/controller-runtime \
 	k8s.io/kubectl
 
-.PHONY: ci run interactive demo tidy-check fmt fmt-check vet lint lint-fix deps-check test test-race build
+.PHONY: ci run interactive demo tidy-check fmt fmt-check vet lint lint-fix deps-check test test-unit test-integration test-race build
 
 ci: tidy-check fmt-check vet lint deps-check test build
 
@@ -105,10 +105,36 @@ deps-check:
 	done; \
 	exit $$status
 
-# The gate's test check runs the tests once, under the race detector. The lab's
+# The gate's test check runs every test once, under the race detector. The lab's
 # subject is the order in which a control plane reacts, and the detector's slower
 # timing is the regime a wrong order shows in.
 #
+# The tests divide at the container engine by build constraint: a test file
+# needing the engine carries `//go:build !unit`, one needing none
+# `//go:build !integration`. test-unit compiles the second kind alone and starts
+# no Simulated Cluster, test-integration the first kind alone, and test runs
+# both. A build with no tag compiles every file, so vet, lint and the dependency
+# check see both kinds.
+test: test-unit test-integration
+
+# The check asserts no toolchain prerequisite of its own: no CGO_ENABLED test, no
+# search for a C compiler and no operating-system branch, because each of those is
+# a second rule about where the detector needs a compiler and macOS needs none.
+# The Go toolchain refuses where the detector needs cgo and a compiler it cannot
+# find; that refusal is this failure.
+define RACE_REFUSED
+refused=$$?; \
+echo "$@: the tests must pass under the race detector"; \
+echo "  if the Go toolchain refused the detector above, it needs cgo and a C compiler:"; \
+echo "    Debian, Ubuntu: sudo apt-get install gcc"; \
+echo "    Fedora, RHEL:   sudo dnf install gcc"; \
+echo "  macOS needs neither"; \
+exit $$refused
+endef
+
+test-unit:
+	@go test -race -tags unit ./... || { $(RACE_REFUSED); }
+
 # The run states a timeout of its own, above what a cluster-backed package takes
 # for every Scenario the lab ships: a package running the lab pays one container
 # start per Scenario per case, so Go's own per-package default would fail the gate
@@ -119,22 +145,8 @@ deps-check:
 # one package after another, which bounds how many clusters the gate asks of the
 # engine at once. Packages tested side by side multiply that bound, and the
 # engine then drops requests.
-#
-# The check asserts no toolchain prerequisite of its own: no CGO_ENABLED test, no
-# search for a C compiler and no operating-system branch, because each of those is
-# a second rule about where the detector needs a compiler and macOS needs none.
-# The Go toolchain refuses where the detector needs cgo and a compiler it cannot
-# find; that refusal is this failure.
-test:
-	@go test -race -p 1 -parallel 2 -timeout 30m ./... || { \
-		refused=$$?; \
-		echo "test: the tests must pass under the race detector"; \
-		echo "  if the Go toolchain refused the detector above, it needs cgo and a C compiler:"; \
-		echo "    Debian, Ubuntu: sudo apt-get install gcc"; \
-		echo "    Fedora, RHEL:   sudo dnf install gcc"; \
-		echo "  macOS needs neither"; \
-		exit $$refused; \
-	}
+test-integration:
+	@go test -race -tags integration -p 1 -parallel 2 -timeout 30m ./... || { $(RACE_REFUSED); }
 
 # test-race is an alias for the detector run.
 # The gate's own test check is that run, so the two names are one target.

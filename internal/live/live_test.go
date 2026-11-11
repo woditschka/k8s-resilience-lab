@@ -1,3 +1,5 @@
+//go:build !integration
+
 // These tests drive a real server on a loopback port with a real client and
 // hand it real Placement boards through the method the observer calls, so no
 // stand-in for either side exists. A fragment is well-formed markup, so each is
