@@ -4,6 +4,7 @@
 package lab
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -2368,8 +2369,58 @@ func theLinesOfAPolicyNamed(name string) []string {
 	return []string{"profile: " + name, "pluginConfig: RemoveDuplicates", "balance: [RemoveDuplicates]"}
 }
 
+// aScenarioOn is handed the paired Descheduler's image as obtained, as a run
+// declaring a policy hands it once the image is held.
 func aScenarioOn(version cluster.KubernetesVersion) *Scenario {
-	return &Scenario{kubernetes: version}
+	return aScenarioHanded(version, deschedulerImageAttempted(nil))
+}
+
+func aScenarioHanded(version cluster.KubernetesVersion, image deschedulerImage) *Scenario {
+	return &Scenario{kubernetes: version, deschedulerImage: image}
+}
+
+var errAnyRegistryRefusal = errors.New("the registry holds no such Descheduler image")
+
+// whatAnUnobtainedImageLeft is how a Scenario declaring a policy and one
+// declaring none stand after a run could not obtain the Descheduler image.
+type whatAnUnobtainedImageLeft struct {
+	DeclaringEndedAt    Step
+	DeclaringNamedWhy   bool
+	DeclaringNoneRunsOn bool
+}
+
+const theOthersRunOn = true
+
+func TestADeschedulerImageTheLabCannotObtain_ShouldEndEachScenarioDeclaringAPolicyNamingWhyWhileTheOthersRunOn(t *testing.T) {
+	unobtained := deschedulerImageAttempted(errAnyRegistryRefusal)
+	declaring := aScenarioHanded(cluster.DefaultKubernetesVersion(), unobtained)
+	declaringNone := aScenarioHanded(cluster.DefaultKubernetesVersion(), unobtained)
+
+	declaring.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName))
+	declaringNone.Given().Zones(twoZones, theGeneralNodePool())
+
+	ended := declaring.outcome()
+	expect.Expect(t, whatAnUnobtainedImageLeft{
+		DeclaringEndedAt:    ended.EndedAt,
+		DeclaringNamedWhy:   errors.Is(ended.Cause, errAnyRegistryRefusal),
+		DeclaringNoneRunsOn: !declaringNone.outcome().Ended(),
+	}).To(expect.Equal(whatAnUnobtainedImageLeft{
+		DeclaringEndedAt:    deschedulerPolicyStepOf(somePolicyName, theDeschedulerPairedByDefault(t)),
+		DeclaringNamedWhy:   theCauseWrapped,
+		DeclaringNoneRunsOn: theOthersRunOn,
+	}))
+}
+
+// A run entry that skips the attempt hands the zero value, so the skip fails
+// on a machine already holding the image as on one that does not.
+func TestADeschedulerPolicyInAScenarioHandedNoDeschedulerImage_ShouldEndTheScenarioAtItsGivenNamingThatNoneWasObtained(t *testing.T) {
+	declaring := aScenarioHanded(cluster.DefaultKubernetesVersion(), deschedulerImage{})
+
+	declaring.Given().Descheduler(aDeschedulerPolicyNamed(somePolicyName))
+
+	ended := declaring.outcome()
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(deschedulerPolicyStepOf(somePolicyName, theDeschedulerPairedByDefault(t))))
+	causeNames(t, ended, "obtained no Descheduler image")
 }
 
 func theVersionPairedWithNoDescheduler(t *testing.T) cluster.KubernetesVersion {
@@ -2570,4 +2621,22 @@ func TestAWaitForAPassEvictingNothingWithNoDeschedulerOnAnInterval_ShouldEndTheS
 	ended := waiting.outcome()
 	expect.Expect(t, ended.EndedAt).To(expect.Equal(deschedulerPassEvictingNothingStep()))
 	causeNames(t, ended, "runs no Descheduler on an interval")
+}
+
+var errAnyPassFailure = errors.New("a Descheduler pass failed")
+
+// The Wait reaches no cluster, since the Scenario changed none before the pass
+// failed, so its board lists the declared Nodes with no Pod on them.
+func TestAWaitEndedByAFailedDeschedulerPass_ShouldStillDrawItsPlacementBoard(t *testing.T) {
+	everyDeclaredNodeAndNoPod := scenario.NewPlacementBoard(aTopologyOf(t, twoZones, twoNodesPerZone), scenario.Placement{}, scenario.PlacementBoard{}).Lines()
+	ending := aScenario()
+	ending.Given().Zones(twoZones, theGeneralNodePool())
+	ending.descheduling = newDeschedulerInterval()
+	ending.descheduling.passFailed(errAnyPassFailure)
+
+	ending.WaitFor().PlacementSettled()
+
+	ended := ending.outcome()
+	expect.Expect(t, ended.EndedAt.Kind).To(expect.Equal(WaitStep))
+	expect.Expect(t, ended.Steps[len(ended.Steps)-1].Board.Lines()).To(expect.Equal(everyDeclaredNodeAndNoPod))
 }

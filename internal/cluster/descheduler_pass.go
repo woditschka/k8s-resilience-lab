@@ -100,8 +100,13 @@ func deschedulerPassNameFor(clusterName string) string {
 
 // RunDeschedulerPass returns once the pass's container exited zero and was
 // removed, reporting whether the pass evicted a Pod. The container is removed
-// on every path, under a context its caller cannot cancel, so a Scenario
-// stopped mid-pass leaves nothing behind.
+// by its name on every path, under a context its caller cannot cancel, so a
+// Scenario stopped mid-pass leaves nothing behind, even one stopped while the
+// engine was still creating the container and had not yet answered.
+//
+// A pass fetches no image, so none waits on a registry inside a Scenario's
+// timed Steps: ObtainDescheduler fetched it before any Scenario started, and
+// an engine lacking it refuses the pass's creation.
 //
 // The eviction is read from the Pods listed before the pass starts and after it
 // exits rather than from its log, whose wording is the Descheduler's own.
@@ -111,19 +116,19 @@ func (c *SimulatedCluster) RunDeschedulerPass(ctx context.Context, policy scenar
 		return false, err
 	}
 
-	image := deschedulerImage(version)
-	if err := (Engine{endpoint: c.container.endpoint}).pullWhenAbsent(ctx, image); err != nil {
-		return false, fmt.Errorf("obtain the Descheduler %s: %w", version, err)
-	}
+	defer func() {
+		err = errors.Join(err, c.container.removeDeschedulerPass(context.WithoutCancel(ctx)))
+	}()
 
-	pass, err := c.container.createDeschedulerPass(ctx, image)
+	// A creation an earlier pass of this cluster abandoned may have taken
+	// effect, and its container would refuse this one its name.
+	if err := c.container.removeDeschedulerPass(ctx); err != nil {
+		return false, err
+	}
+	pass, err := c.container.createDeschedulerPass(ctx, deschedulerImage(version))
 	if err != nil {
 		return false, err
 	}
-	c.pass.Store(pass)
-	defer func() {
-		err = errors.Join(err, c.removeHeldDeschedulerPass(context.WithoutCancel(ctx)))
-	}()
 
 	before, err := c.everyDeploymentsPods(ctx)
 	if err != nil {
@@ -149,21 +154,6 @@ func (c *SimulatedCluster) everyDeploymentsPods(ctx context.Context) ([]corev1.P
 	}
 
 	return listed.Items, nil
-}
-
-// A removal that fails leaves the pass held, so Close tries it once more.
-func (c *SimulatedCluster) removeHeldDeschedulerPass(ctx context.Context) error {
-	held := c.pass.Swap(nil)
-	if held == nil {
-		return nil
-	}
-	if err := held.remove(ctx); err != nil {
-		c.pass.CompareAndSwap(nil, held)
-
-		return err
-	}
-
-	return nil
 }
 
 func deschedulerPassArchive(policy scenario.DeschedulerPolicy) ([]byte, error) {
@@ -326,13 +316,25 @@ func (p *deschedulerPass) lastLogLines(ctx context.Context) string {
 	return strings.Join(lines, "\n")
 }
 
-func (p *deschedulerPass) remove(ctx context.Context) error {
-	return removeContainer(ctx, p.endpoint, p.identifier, "the Descheduler pass "+p.name)
+// The pass is removed by the name its cluster gives it rather than by the
+// identifier its creation answers, since a creation can take effect on the
+// engine without its answer reaching the lab. A pass that is not there counts
+// as removed, which only the pass's removal tolerates: there may be none.
+func (c *ClusterContainer) removeDeschedulerPass(ctx context.Context) error {
+	name := deschedulerPassNameFor(c.name)
+	err := removeContainer(ctx, c.endpoint, name, "the Descheduler pass "+name)
+	if isNoLongerHeld(err) {
+		return nil
+	}
+
+	return err
 }
 
 // lastLinesOf reads the engine's log frames and keeps the last lines of both
 // streams in the order they were written. A frame the read limit cut ends the
-// lines read.
+// lines read, and so does a frame stating more than the limit, before anything
+// is allocated for it: unframed text read as a header states hundreds of
+// megabytes.
 func lastLinesOf(frames io.Reader, most int) ([]string, error) {
 	var lines []string
 	header := make([]byte, logFrameHeaderLength)
@@ -345,7 +347,12 @@ func lastLinesOf(frames io.Reader, most int) ([]string, error) {
 			return nil, fmt.Errorf("read a log frame's header: %w", err)
 		}
 
-		payload := make([]byte, binary.BigEndian.Uint32(header[logFrameLengthAt:]))
+		stated := binary.BigEndian.Uint32(header[logFrameLengthAt:])
+		if stated > logBytesReadAtMost {
+			return lines, nil
+		}
+
+		payload := make([]byte, stated)
 		if _, err := io.ReadFull(frames, payload); err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				return lines, nil

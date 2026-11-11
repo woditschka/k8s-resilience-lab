@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -64,9 +63,6 @@ type SimulatedCluster struct {
 	// The runner starts and stops recording on one goroutine, so the field is
 	// never shared.
 	recording *recording
-	// pass is a Descheduler pass container while it exists. Close may run on
-	// another goroutine than the pass, so the handle is swapped atomically.
-	pass atomic.Pointer[deschedulerPass]
 }
 
 // ObtainVersion lets a run learn once, before any Scenario starts, whether
@@ -75,6 +71,17 @@ type SimulatedCluster struct {
 func ObtainVersion(ctx context.Context, endpoint Endpoint, version KubernetesVersion) error {
 	if err := (Engine{endpoint: endpoint}).pullWhenAbsent(ctx, clusterImage(version)); err != nil {
 		return fmt.Errorf("obtain Kubernetes version %s: %w", version, err)
+	}
+
+	return nil
+}
+
+// ObtainDescheduler lets a run declaring a Descheduler policy fetch the paired
+// Descheduler's image before any Scenario starts, since a pass fetches none. It
+// pulls only when the engine lacks the image.
+func ObtainDescheduler(ctx context.Context, endpoint Endpoint, version DeschedulerVersion) error {
+	if err := (Engine{endpoint: endpoint}).pullWhenAbsent(ctx, deschedulerImage(version)); err != nil {
+		return fmt.Errorf("obtain the Descheduler %s: %w", version, err)
 	}
 
 	return nil
@@ -718,10 +725,10 @@ func hasSettled(previous, current scenario.Placement, deployment scenario.Deploy
 //
 // A Timeline still recording is stopped first, since a record outliving its
 // cluster would only record its own disconnection. A Descheduler pass still
-// held goes before the cluster, since it joined the cluster's network
+// on the engine goes before the cluster, since it joined the cluster's network
 // namespace and would outlive its owner.
 func (c *SimulatedCluster) Close(ctx context.Context) error {
 	c.StopRecording()
 
-	return errors.Join(c.removeHeldDeschedulerPass(ctx), c.container.Remove(ctx))
+	return errors.Join(c.container.removeDeschedulerPass(ctx), c.container.Remove(ctx))
 }

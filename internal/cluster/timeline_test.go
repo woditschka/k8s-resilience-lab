@@ -372,7 +372,7 @@ func TestAChangeCarryingNoVersion_ShouldLeaveTheReopenResumingFromTheLastVersion
 func TestANoteAboutTheRecord_ShouldBecomeOneNotedEntryCarryingIt(t *testing.T) {
 	noted := watched{note: theNoteTakenAboutTheRecord}
 
-	entry, carried := noted.entry(observedAfter)
+	entry, carried := noted.entry(observedAfter, newEntryMapper())
 
 	expect.Expect(t, carried).To(expect.Equal(true))
 	expect.Expect(t, entry).To(expect.Equal(scenario.Entry{
@@ -586,4 +586,39 @@ func TestAStepNotedOnAClusterNotRecording_ShouldBeNotedNowhere(t *testing.T) {
 	notRecording.NoteStep(theStepNoted, theLineNoted)
 
 	expect.Expect(t, notRecording.StopRecording().Entries()).To(expect.HaveLen[scenario.Entry](noChange))
+}
+
+func withoutElapsed(entries []scenario.Entry) []scenario.Entry {
+	untimed := slices.Clone(entries)
+	for i := range untimed {
+		untimed[i].Elapsed = 0
+	}
+
+	return untimed
+}
+
+func TestAPodTheDeschedulerMarkedThatChangesTwiceThenIsRemoved_ShouldBeRecordedAsOneEvictionThenModifiedThenRemoved(t *testing.T) {
+	t.Parallel()
+	marked := aPodMarkedADisruptionTarget(theEvictionAPIsReason)
+	changes := make(chan watched, 3)
+	changes <- watched{event: watch.Event{Type: watch.Modified, Object: marked}}
+	changes <- watched{event: watch.Event{Type: watch.Modified, Object: marked}}
+	changes <- watched{event: watch.Event{Type: watch.Deleted, Object: marked}}
+	close(changes)
+	delivered := &entriesDelivered{}
+	recorded := newRecording(t.Context(), func() {})
+
+	recorded.own(changes, delivered)
+
+	untimed := func(change scenario.Change, reason string) scenario.Entry {
+		return scenario.Entry{
+			Change: change, Kind: scenario.PodObject, Name: watchedPodName, Reason: reason, Detail: watchedNodeName,
+		}
+	}
+	expect.Expect(t, withoutElapsed(recorded.timeline.Entries())).To(expect.Equal([]scenario.Entry{
+		untimed(scenario.ChangeReported, scenario.EvictedByTheDescheduler),
+		untimed(scenario.ChangeModified, string(scenario.PodRunning)),
+		untimed(scenario.ChangeRemoved, string(scenario.PodRunning)),
+	}))
+	expect.Expect(t, delivered.entries).To(expect.Equal(recorded.timeline.Entries()))
 }

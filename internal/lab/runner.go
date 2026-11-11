@@ -55,6 +55,17 @@ func (o Outcome) Ended() bool {
 	return o.Cause != nil
 }
 
+// StepLeftUndone names the Step the Scenario ended at and why, wrapping the
+// cause, and is nil for a Scenario that carried out every Step. A run's exit
+// and a held cluster's terminal name an ending in these words alike.
+func (o Outcome) StepLeftUndone() error {
+	if !o.Ended() {
+		return nil
+	}
+
+	return fmt.Errorf("the Scenario %s ended at %s: %w", o.Name, o.EndedAt, o.Cause)
+}
+
 // HoldsASettledPlacement is false after a Failure no Wait followed, since the
 // Failure discarded the Placement, and before any Deployment's Pods were observed.
 func (o Outcome) HoldsASettledPlacement() bool {
@@ -89,22 +100,44 @@ func (s *Scenario) finish() Outcome {
 
 // hold gives each Wait Step its narrative from the Timeline recorded so far and
 // leaves the record running, so the changes while the cluster is held join it.
-// It hands back that Timeline and the channel carrying each later entry.
-func (s *Scenario) hold() (Outcome, scenario.Timeline, <-chan scenario.Entry) {
-	s.endTheSteps()
+// It hands back that Timeline, the channel carrying each later entry, and the
+// channel closed as the Descheduler's interval stops while held. That channel
+// is nil where the Outcome already ends at the interval's stop, so the stop is
+// named once.
+func (s *Scenario) hold() (Outcome, scenario.Timeline, <-chan scenario.Entry, <-chan struct{}) {
+	var stopsWhileHeld <-chan struct{}
+	if !s.endTheSteps() {
+		stopsWhileHeld = s.descheduling.aPassFailed()
+	}
 	soFar, later := s.provisioned.FollowTimeline()
 
-	return s.narrated(soFar), soFar, later
+	return s.narrated(soFar), soFar, later, stopsWhileHeld
 }
 
-// endTheSteps notes the line a further call could still have completed. A pass
-// on the Descheduler's interval that failed after the last Step ends the
-// Scenario at the Given that declared the interval.
-func (s *Scenario) endTheSteps() {
+// endTheSteps notes the line a further call could still have completed, and
+// reports whether the Descheduler's interval had stopped by then.
+func (s *Scenario) endTheSteps() (intervalStopped bool) {
 	s.noteTheOpenLine()
-	if failed := s.descheduling.failure(); failed != nil {
-		s.end(s.deschedulerDeclaredAt, failed)
+
+	return s.endAtAStoppedInterval()
+}
+
+// endAtAStoppedInterval ends the Scenario at the Given that declared the
+// Descheduler's interval where a pass on it failed after the last Step.
+func (s *Scenario) endAtAStoppedInterval() (stopped bool) {
+	failed := s.descheduling.failure()
+	if failed == nil {
+		return false
 	}
+	s.end(s.deschedulerDeclaredAt, failed)
+
+	return true
+}
+
+// intervalStop is how the Descheduler's interval stopping ends the Scenario
+// named, kept apart from the Scenario's own ending, which keeps its first stop.
+func (s *Scenario) intervalStop(name string) Outcome {
+	return Outcome{Name: name, EndedAt: s.deschedulerDeclaredAt, Cause: s.descheduling.failure()}
 }
 
 func (s *Scenario) narrated(recorded scenario.Timeline) Outcome {
@@ -203,31 +236,35 @@ func NewRunner(engine cluster.Endpoint, version cluster.KubernetesVersion, timel
 // The returned error is the lab's own failure. A name it cannot derive, or a
 // Descheduler policy it declares on a version the lab pairs no Descheduler
 // with, stops the run before anything is provisioned, so no cluster is named
-// after nothing.
+// after nothing. A Scenario declaring a policy has its Descheduler's image
+// obtained before it is provisioned.
 func (r *Runner) Run(ctx context.Context, steps func(*Scenario)) (Outcome, error) {
 	name, err := scenarioNameOfFunction(steps)
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := r.stopAtAnUnpairedDescheduler([]func(*Scenario){steps}); err != nil {
+	image, err := r.obtainTheDeschedulerOf(ctx, []func(*Scenario){steps})
+	if err != nil {
 		return Outcome{}, err
 	}
 
-	return r.runNamed(ctx, name, steps)
+	return r.runNamed(ctx, name, image, steps)
 }
 
-// RunAtOnce derives every Scenario name, pairs the Descheduler and obtains the
-// Kubernetes version before provisioning anything, so an underivable or
-// duplicate name, a Descheduler policy declared on a version the lab pairs no
-// Descheduler with, or a version the lab cannot obtain, stops the run before
-// any Scenario starts. Past that, one Scenario's failure ends that Scenario
-// alone.
+// RunAtOnce derives every Scenario name, pairs and obtains the Descheduler
+// and obtains the Kubernetes version before provisioning anything, so an
+// underivable or duplicate name, a Descheduler policy declared on a version
+// the lab pairs no Descheduler with, or a version the lab cannot obtain, stops
+// the run before any Scenario starts. Past that, one Scenario's failure ends
+// that Scenario alone, and a Descheduler image the lab could not obtain ends
+// each Scenario declaring a policy.
 func (r *Runner) RunAtOnce(ctx context.Context, scenarios []func(*Scenario)) ([]Carried, error) {
 	names, err := scenarioNamesOfEach(scenarios)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.stopAtAnUnpairedDescheduler(scenarios); err != nil {
+	image, err := r.obtainTheDeschedulerOf(ctx, scenarios)
+	if err != nil {
 		return nil, err
 	}
 
@@ -236,7 +273,7 @@ func (r *Runner) RunAtOnce(ctx context.Context, scenarios []func(*Scenario)) ([]
 	}
 
 	return carryOutAtOnce(names, func(declared int) (Outcome, error) {
-		return r.runNamed(ctx, names[declared], scenarios[declared])
+		return r.runNamed(ctx, names[declared], image, scenarios[declared])
 	}), nil
 }
 
@@ -295,6 +332,13 @@ type Observer struct {
 // line is handed once Hold returns, but a line followed is still taking when
 // the lab stops may finish after it, so a terminal that stopped taking lines
 // keeps no cluster from being removed.
+//
+// A Scenario declaring a Descheduler policy has its image obtained, as for a
+// run, before the cluster is provisioned.
+//
+// A Descheduler interval that stops while the cluster is held is named to
+// followed as the Scenario ending at the Given that declared it, and the
+// Outcome returned ends there. The cluster stays held until ctx ends.
 func (r *Runner) Hold(ctx context.Context, steps func(*Scenario), observer Observer, injector *Injector,
 	reported func(Outcome), followed func(string),
 ) (Outcome, error) {
@@ -302,25 +346,42 @@ func (r *Runner) Hold(ctx context.Context, steps func(*Scenario), observer Obser
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := r.stopAtAnUnpairedDescheduler([]func(*Scenario){steps}); err != nil {
+	image, err := r.obtainTheDeschedulerOf(ctx, []func(*Scenario){steps})
+	if err != nil {
 		return Outcome{}, err
 	}
 
-	return r.holdNamed(ctx, name, steps, observer, injector, reported, followed)
+	return r.holdNamed(ctx, name, image, steps, observer, injector, reported, followed)
 }
 
-// stopAtAnUnpairedDescheduler stops a run whose Kubernetes version the lab
-// pairs no Descheduler with only where one of its Scenarios declares a
-// Descheduler policy, so a run declaring none keeps every version. The
-// declaring pass runs only on such a version, so a run on a paired one carries
-// out each Scenario's function once.
-func (r *Runner) stopAtAnUnpairedDescheduler(scenarios []func(*Scenario)) error {
-	_, unpaired := r.version.PairedDescheduler()
-	if unpaired == nil || !slices.ContainsFunc(scenarios, declaresADeschedulerPolicy) {
-		return nil
+// deschedulerToObtain names the Descheduler a run obtains before any Scenario
+// starts, which is none where no Scenario declares a policy, so a run declaring
+// none keeps every Kubernetes version and fetches nothing for it. A declaring
+// run on a version the lab pairs no Descheduler with is stopped.
+func (r *Runner) deschedulerToObtain(scenarios []func(*Scenario)) (paired cluster.DeschedulerVersion, obtains bool, err error) {
+	if !slices.ContainsFunc(scenarios, declaresADeschedulerPolicy) {
+		return cluster.DeschedulerVersion{}, false, nil
 	}
 
-	return fmt.Errorf("a Scenario of this run declares a Descheduler policy: %w", unpaired)
+	paired, unpaired := r.version.PairedDescheduler()
+	if unpaired != nil {
+		return cluster.DeschedulerVersion{}, false, fmt.Errorf("a Scenario of this run declares a Descheduler policy: %w", unpaired)
+	}
+
+	return paired, true, nil
+}
+
+// obtainTheDeschedulerOf makes the run's one attempt at the image of the
+// Descheduler deschedulerToObtain names, and makes none where it names none.
+// The attempt's failure is handed to each Scenario rather than returned, so
+// the Scenarios declaring no policy run on; the error returned is the stop.
+func (r *Runner) obtainTheDeschedulerOf(ctx context.Context, scenarios []func(*Scenario)) (deschedulerImage, error) {
+	paired, obtains, err := r.deschedulerToObtain(scenarios)
+	if err != nil || !obtains {
+		return deschedulerImage{}, err
+	}
+
+	return deschedulerImageAttempted(cluster.ObtainDescheduler(ctx, r.engine, paired)), nil
 }
 
 // declaresADeschedulerPolicy runs the Scenario's function over a Scenario
@@ -333,10 +394,10 @@ func declaresADeschedulerPolicy(steps func(*Scenario)) bool {
 	return declaring.declaresADeschedulerPolicy
 }
 
-func (r *Runner) holdNamed(ctx context.Context, name string, steps func(*Scenario), observer Observer,
+func (r *Runner) holdNamed(ctx context.Context, name string, image deschedulerImage, steps func(*Scenario), observer Observer,
 	injector *Injector, reported func(Outcome), followed func(string),
 ) (Outcome, error) {
-	return r.carryOut(ctx, name, steps, &holding{observer: observer, injector: injector, reported: reported, followed: followed})
+	return r.carryOut(ctx, name, image, steps, &holding{observer: observer, injector: injector, reported: reported, followed: followed})
 }
 
 // holding is what sets a held run apart from a run: the halt at the first
@@ -352,16 +413,25 @@ type holding struct {
 // hold reports the Outcome at the hold, then follows the Timeline and takes the
 // clicks until ctx ends. The record stops once no click is under way, so no
 // click notes into a stopped record, and its stop ends the following.
+//
+// The Descheduler's interval is stopped and joined before its failure is read,
+// so a pass failing as the lab stops still ends the Scenario at the Given that
+// declared the interval.
 func (h *holding) hold(ctx context.Context, running *Scenario, name string) Outcome {
-	held, soFar, later := running.hold()
+	held, soFar, later, stopsWhileHeld := running.hold()
 	held.Name, held.Cluster = name, running.provisioned.Name()
 
 	h.injector.takeFailures(
 		&heldCluster{ctx: ctx, provisioned: running.provisioned, topology: running.topology, stopped: slices.Clone(running.failed)},
 		func() { h.reported(held) })
-	stopTheFollowing := h.follow(soFar, later)
+	stopTheFollowing := h.follow(soFar, later, stopsWhileHeld, func() string {
+		return running.intervalStop(name).StepLeftUndone().Error()
+	})
 	<-ctx.Done()
 	h.injector.stopTakingFailures()
+	running.stopDescheduling()
+	running.endAtAStoppedInterval()
+	held.EndedAt, held.Cause = running.endedAt, running.cause
 
 	held.Timeline = running.provisioned.StopRecording()
 	stopTheFollowing()
@@ -371,18 +441,31 @@ func (h *holding) hold(ctx context.Context, running *Scenario, name string) Outc
 
 // follow starts once the Outcome is reported, so no line comes before it, and
 // returns the function that ends it once the record has stopped. The record
-// waits on this reader until the lab stops, then hands it nothing more.
-func (h *holding) follow(soFar scenario.Timeline, later <-chan scenario.Entry) (stop func()) {
+// waits on this reader until the lab stops, then hands it nothing more. The
+// interval's stop is named through the same reader, so it takes its place
+// among the lines and keeps a stalled terminal from holding up the lab's stop
+// as they do.
+func (h *holding) follow(soFar scenario.Timeline, later <-chan scenario.Entry,
+	intervalStopped <-chan struct{}, intervalStop func() string,
+) (stop func()) {
 	lines := &linesFollowed{}
 	lines.reading.Go(func() {
 		following := scenario.NewFollowing(soFar)
-		for entry := range later {
-			for _, line := range following.Read(entry) {
-				if !lines.startPrinting() {
+		for {
+			var handed []string
+			select {
+			case entry, recording := <-later:
+				if !recording {
 					return
 				}
-				h.followed(line)
-				lines.donePrinting()
+				handed = following.Read(entry)
+			case <-intervalStopped:
+				// Named once: a nil channel is never ready again.
+				intervalStopped = nil
+				handed = []string{intervalStop()}
+			}
+			if !lines.hand(handed, h.followed) {
+				return
 			}
 		}
 	})
@@ -398,6 +481,20 @@ type linesFollowed struct {
 	stopped  bool
 	printing bool
 	reading  sync.WaitGroup
+}
+
+// hand reports false once the stop came before a line, and nothing more is to
+// be handed.
+func (l *linesFollowed) hand(lines []string, followed func(string)) bool {
+	for _, line := range lines {
+		if !l.startPrinting() {
+			return false
+		}
+		followed(line)
+		l.donePrinting()
+	}
+
+	return true
 }
 
 func (l *linesFollowed) startPrinting() bool {
@@ -601,13 +698,14 @@ func (h *heldCluster) restore(nodes []string) error {
 	return nil
 }
 
-func (r *Runner) runNamed(ctx context.Context, name string, steps func(*Scenario)) (Outcome, error) {
-	return r.carryOut(ctx, name, steps, nil)
+func (r *Runner) runNamed(ctx context.Context, name string, image deschedulerImage, steps func(*Scenario)) (Outcome, error) {
+	return r.carryOut(ctx, name, image, steps, nil)
 }
 
 // Every Outcome carryOut returns names the Scenario, including one returned
 // with the lab's own error before the Scenario reported.
-func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario), held *holding) (reported Outcome, err error) {
+func (r *Runner) carryOut(ctx context.Context, name string, image deschedulerImage, steps func(*Scenario), held *holding,
+) (reported Outcome, err error) {
 	provisioned, err := cluster.Provision(ctx, r.engine, r.version, name)
 	if err != nil {
 		return Outcome{Name: name}, fmt.Errorf("the Scenario %s: %w", name, err)
@@ -637,7 +735,7 @@ func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario
 	}
 
 	running := newScenario(ctx, provisioned, copied)
-	running.kubernetes = r.version
+	running.kubernetes, running.deschedulerImage = r.version, image
 	// Deferred after the removal, so it runs before it: no pass starts on a
 	// removed cluster, and Close finds no pass but one already held.
 	defer running.stopDescheduling()
@@ -660,6 +758,29 @@ func (r *Runner) carryOut(ctx context.Context, name string, steps func(*Scenario
 	reported.FiledAt, reported.NotFiled = filed.Path(), filed.Err()
 
 	return reported, nil
+}
+
+// deschedulerImage is what the run's one attempt at the paired Descheduler's
+// image, made before any Scenario starts, left. Its zero value is no attempt at
+// all, which a Scenario declaring a policy refuses as it refuses a failed one,
+// so a run that skips the attempt fails on every machine, one already holding
+// the image included.
+type deschedulerImage struct {
+	attempted bool
+	failed    error
+}
+
+func deschedulerImageAttempted(failed error) deschedulerImage {
+	return deschedulerImage{attempted: true, failed: failed}
+}
+
+// unobtained is nil once the image is held, and why it is not otherwise.
+func (i deschedulerImage) unobtained() error {
+	if !i.attempted {
+		return errors.New("the run obtained no Descheduler image before its Scenarios started")
+	}
+
+	return i.failed
 }
 
 // observe starts one goroutine observing the cluster at the observer's interval

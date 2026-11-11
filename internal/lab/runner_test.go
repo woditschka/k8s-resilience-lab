@@ -5,6 +5,7 @@ package lab
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -438,9 +439,17 @@ func TestAKubernetesVersionPairedWithNoDescheduler_ShouldStopARunDeclaringAPolic
 func TestAKubernetesVersionPairedWithNoDescheduler_ShouldNotStopARunDeclaringNoPolicy(t *testing.T) {
 	running := aRunnerOn(t, theVersionPairedWithNoDescheduler(t))
 
-	err := running.stopAtAnUnpairedDescheduler([]func(*Scenario){NoDeschedulerPolicy_ShouldRunOnAnyVersion})
+	_, _, err := running.deschedulerToObtain([]func(*Scenario){NoDeschedulerPolicy_ShouldRunOnAnyVersion})
 
 	expect.Expect(t, err).To(expect.Equal[error](nil))
+}
+
+func TestARunCarryingNoScenarioDeclaringAPolicy_ShouldObtainNoDeschedulerImage(t *testing.T) {
+	running := aRunnerOn(t, cluster.DefaultKubernetesVersion())
+
+	_, obtains, _ := running.deschedulerToObtain([]func(*Scenario){NoDeschedulerPolicy_ShouldRunOnAnyVersion})
+
+	expect.Expect(t, obtains).To(expect.Equal(false))
 }
 
 func TestADeclaringPassOverStepsOfEveryKind_ShouldFindThePolicyDeclaredAfterThemWithoutACluster(t *testing.T) {
@@ -465,4 +474,34 @@ func TestADeclaringPassOverStepsOfEveryKind_ShouldFindThePolicyDeclaredAfterThem
 	declared := declaresADeschedulerPolicy(everyKind)
 
 	expect.Expect(t, declared).To(expect.Equal(true))
+}
+
+const (
+	someEndedScenarioName = "a-scenario-ending-at-its-topology"
+	someCauseOfTheEnding  = "the Topology was refused"
+	theCauseWrapped       = true
+)
+
+// stepLeftUndone is how an Outcome ended at a Step words that ending.
+type stepLeftUndone struct {
+	Worded       string
+	CauseWrapped bool
+}
+
+func TestAnOutcomeEndedAtAStep_ShouldNameTheScenarioTheStepAndWhyWrappingTheCause(t *testing.T) {
+	why := errors.New(someCauseOfTheEnding)
+	ended := Outcome{Name: someEndedScenarioName, EndedAt: Step{Kind: GivenStep, Name: someTopologyName}, Cause: why}
+
+	undone := ended.StepLeftUndone()
+
+	expect.Expect(t, stepLeftUndone{Worded: undone.Error(), CauseWrapped: errors.Is(undone, why)}).To(expect.Equal(stepLeftUndone{
+		Worded:       theStopNamedFor(someEndedScenarioName) + someTopologyLine + ": " + someCauseOfTheEnding,
+		CauseWrapped: theCauseWrapped,
+	}))
+}
+
+func TestAnOutcomeThatCarriedOutEveryStep_ShouldLeaveNoStepUndone(t *testing.T) {
+	carriedOut := Outcome{Name: someEndedScenarioName, Steps: []Step{{Kind: GivenStep, Name: someTopologyName}}}
+
+	expect.Expect(t, carriedOut.StepLeftUndone()).To(expect.Equal[error](nil))
 }

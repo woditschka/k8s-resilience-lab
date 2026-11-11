@@ -24,13 +24,16 @@ type deschedulerInterval struct {
 	begun          int
 	evictedPerPass []bool
 	failed         error
+	// failing is closed as a pass fails, which only the one pass that stops the
+	// interval does.
+	failing chan struct{}
 	// published is closed and replaced at every change, which wakes each Wait
 	// holding the one closed.
 	published chan struct{}
 }
 
 func newDeschedulerInterval() *deschedulerInterval {
-	return &deschedulerInterval{stop: func() {}, published: make(chan struct{})}
+	return &deschedulerInterval{stop: func() {}, failing: make(chan struct{}), published: make(chan struct{})}
 }
 
 // startDeschedulerInterval starts the first pass one interval from now and each
@@ -86,7 +89,10 @@ func (d *deschedulerInterval) passEnded(evicted bool) {
 }
 
 func (d *deschedulerInterval) passFailed(failed error) {
-	d.publish(func() { d.failed = failed })
+	d.publish(func() {
+		d.failed = failed
+		close(d.failing)
+	})
 }
 
 func (d *deschedulerInterval) publish(change func()) {
@@ -115,6 +121,16 @@ func (d *deschedulerInterval) failure() error {
 	defer d.guard.Unlock()
 
 	return d.failed
+}
+
+// aPassFailed is closed once a pass failed, so failure holds it from then on.
+// A Scenario running no interval has a nil channel, which is never closed.
+func (d *deschedulerInterval) aPassFailed() <-chan struct{} {
+	if d == nil {
+		return nil
+	}
+
+	return d.failing
 }
 
 // awaitAPassEvictingNothingAfter ends at the first pass numbered past

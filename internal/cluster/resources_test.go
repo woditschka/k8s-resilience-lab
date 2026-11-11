@@ -888,7 +888,7 @@ func TestAnObservedChangeToAKindATimelineReads_ShouldBecomeOneEntryOfThatChange(
 
 	for change, observed := range changes {
 		t.Run(change, func(t *testing.T) {
-			entry, recorded := toEntry(observedAfter, observed.observed)
+			entry, recorded := newEntryMapper().toEntry(observedAfter, observed.observed)
 
 			expect.Expect(t, recorded).To(expect.Equal(true))
 			expect.Expect(t, entry).To(expect.Equal(observed.recorded))
@@ -906,7 +906,7 @@ const (
 
 func aPodMarkedADisruptionTarget(reason string) *corev1.Pod {
 	return &corev1.Pod{
-		Name: watchedPodName,
+		Name: watchedPodName, UID: aPodsUID,
 		Spec: corev1.PodSpec{NodeName: watchedNodeName},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
@@ -920,7 +920,7 @@ func aPodMarkedADisruptionTarget(reason string) *corev1.Pod {
 func TestAPodTheEvictionAPIMarkedADisruptionTargetBeforeItsDeletion_ShouldBecomeAnEntryReadingThatPodEvictedByTheDescheduler(t *testing.T) {
 	marked := watch.Event{Type: watch.Modified, Object: aPodMarkedADisruptionTarget(theEvictionAPIsReason)}
 
-	entry, recorded := toEntry(observedAfter, marked)
+	entry, recorded := newEntryMapper().toEntry(observedAfter, marked)
 
 	expect.Expect(t, recorded).To(expect.Equal(true))
 	expect.Expect(t, entry).To(expect.Equal(scenario.Entry{
@@ -933,7 +933,7 @@ func TestAPodTheEvictionAPIMarkedADisruptionTargetAndForDeletion_ShouldStillRead
 	pod := aPodMarkedADisruptionTarget(theEvictionAPIsReason)
 	pod.DeletionTimestamp = markedForDeletion()
 
-	entry, recorded := toEntry(observedAfter, watch.Event{Type: watch.Modified, Object: pod})
+	entry, recorded := newEntryMapper().toEntry(observedAfter, watch.Event{Type: watch.Modified, Object: pod})
 
 	expect.Expect(t, recorded).To(expect.Equal(true))
 	expect.Expect(t, entry).To(expect.Equal(scenario.Entry{
@@ -942,10 +942,51 @@ func TestAPodTheEvictionAPIMarkedADisruptionTargetAndForDeletion_ShouldStillRead
 	}))
 }
 
+func theDeschedulersEvictionOfTheWatchedPod() scenario.Entry {
+	return scenario.Entry{
+		Elapsed: observedAfter, Change: scenario.ChangeReported, Kind: scenario.PodObject,
+		Name: watchedPodName, Reason: scenario.EvictedByTheDescheduler, Detail: watchedNodeName,
+	}
+}
+
+// The Deleted event carries the Pod as last stored, still marked and with no
+// deletion mark, when the cluster removes it before any graceful deletion.
+func TestAPodTheDeschedulerMarkedThatIsRemoved_ShouldBecomeARemovedEntryNotAnEviction(t *testing.T) {
+	mapper := newEntryMapper()
+	marked := aPodMarkedADisruptionTarget(theEvictionAPIsReason)
+
+	markedEntry, _ := mapper.toEntry(observedAfter, watch.Event{Type: watch.Modified, Object: marked})
+	removedEntry, _ := mapper.toEntry(observedAfter, watch.Event{Type: watch.Deleted, Object: marked})
+
+	expect.Expect(t, []scenario.Entry{markedEntry, removedEntry}).To(expect.Equal([]scenario.Entry{
+		theDeschedulersEvictionOfTheWatchedPod(),
+		{
+			Elapsed: observedAfter, Change: scenario.ChangeRemoved, Kind: scenario.PodObject,
+			Name: watchedPodName, Reason: string(scenario.PodRunning), Detail: watchedNodeName,
+		},
+	}))
+}
+
+func TestAPodTheDeschedulerMarkedThatChangesAgainBeforeItsRemoval_ShouldBeOneDeschedulerEvictionInTheTimeline(t *testing.T) {
+	mapper := newEntryMapper()
+	marked := watch.Event{Type: watch.Modified, Object: aPodMarkedADisruptionTarget(theEvictionAPIsReason)}
+
+	markedEntry, _ := mapper.toEntry(observedAfter, marked)
+	changedAgainEntry, _ := mapper.toEntry(observedAfter, marked)
+
+	expect.Expect(t, []scenario.Entry{markedEntry, changedAgainEntry}).To(expect.Equal([]scenario.Entry{
+		theDeschedulersEvictionOfTheWatchedPod(),
+		{
+			Elapsed: observedAfter, Change: scenario.ChangeModified, Kind: scenario.PodObject,
+			Name: watchedPodName, Reason: string(scenario.PodRunning), Detail: watchedNodeName,
+		},
+	}))
+}
+
 func TestAPodTheTaintManagerMarkedADisruptionTarget_ShouldReadAsAnyPodOfItsPhase(t *testing.T) {
 	marked := watch.Event{Type: watch.Modified, Object: aPodMarkedADisruptionTarget(theTaintManagersReason)}
 
-	entry, recorded := toEntry(observedAfter, marked)
+	entry, recorded := newEntryMapper().toEntry(observedAfter, marked)
 
 	expect.Expect(t, recorded).To(expect.Equal(true))
 	expect.Expect(t, entry).To(expect.Equal(scenario.Entry{
@@ -976,7 +1017,7 @@ func TestAnObservedChangeNoTimelineRecords_ShouldBecomeNoEntry(t *testing.T) {
 
 	for change, observed := range changes {
 		t.Run(change, func(t *testing.T) {
-			entry, recorded := toEntry(observedAfter, observed)
+			entry, recorded := newEntryMapper().toEntry(observedAfter, observed)
 
 			expect.Expect(t, recorded).To(expect.Equal(false))
 			expect.Expect(t, entry).To(expect.Equal(scenario.Entry{}))

@@ -276,7 +276,7 @@ func (n *narration) readPod(entry Entry) {
 		pod.removed = true
 	}
 	phase := PodPhase(entry.Reason)
-	if phase == PodTerminating {
+	if phase == PodTerminating || (pod.removed && pod.descheduled) {
 		n.evict(pod, entry)
 
 		return
@@ -293,7 +293,8 @@ func (n *narration) readPod(entry Entry) {
 }
 
 // The lab deletes no Deployment Pod, so the first entry marking one for deletion
-// is its eviction.
+// is its eviction. A descheduled Pod the cluster removes before any graceful
+// deletion has no such entry, so its removal is its eviction.
 func (n *narration) evict(pod *podNarrated, entry Entry) {
 	pod.phase = PodTerminating
 	if pod.evicted {

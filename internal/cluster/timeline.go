@@ -161,6 +161,7 @@ func (r *recording) follow() (scenario.Timeline, <-chan scenario.Entry) {
 func (r *recording) own(changes <-chan watched, into EntrySink) {
 	var recorded []scenario.Entry
 	var follower chan<- scenario.Entry
+	mapper := newEntryMapper()
 	for received := range r.received(changes) {
 		if received.asked != nil {
 			received.asked.soFar <- scenario.NewTimeline(recorded)
@@ -169,7 +170,7 @@ func (r *recording) own(changes <-chan watched, into EntrySink) {
 
 			continue
 		}
-		entry, carried := received.entry(time.Since(r.started))
+		entry, carried := received.entry(time.Since(r.started), mapper)
 		if carried {
 			recorded = append(recorded, entry)
 			into.Write(entry)
@@ -252,7 +253,7 @@ type watched struct {
 	asked *followAsked
 }
 
-func (w watched) entry(elapsed time.Duration) (scenario.Entry, bool) {
+func (w watched) entry(elapsed time.Duration, mapper *entryMapper) (scenario.Entry, bool) {
 	if w.step.step != "" {
 		return scenario.Entry{
 			Elapsed: elapsed, Change: scenario.ChangeNoted, Kind: scenario.StepObject, Name: w.step.step, Detail: w.step.line,
@@ -262,7 +263,7 @@ func (w watched) entry(elapsed time.Duration) (scenario.Entry, bool) {
 		return scenario.Entry{Elapsed: elapsed, Change: scenario.ChangeNoted, Detail: w.note}, true
 	}
 
-	return toEntry(elapsed, w.event)
+	return mapper.toEntry(elapsed, w.event)
 }
 
 type stream struct {

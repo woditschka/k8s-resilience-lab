@@ -599,10 +599,21 @@ var reportedKinds = map[string]scenario.ObjectKind{
 	"ReplicaSet": scenario.ReplicaSetObject,
 }
 
-// toEntry is the one place a watched object becomes a Timeline entry: only the
-// named fields cross into internal/scenario, so no foreign type or unread field
-// reaches a printed or filed Timeline.
-func toEntry(elapsed time.Duration, event watch.Event) (scenario.Entry, bool) {
+// entryMapper is the one place a watched object becomes a Timeline entry: only
+// the named fields cross into internal/scenario, so no foreign type or unread
+// field reaches a printed or filed Timeline. One recording goroutine owns each
+// mapper, so the Pods it keeps need no lock.
+type entryMapper struct {
+	// descheduled holds the Pods read as the Descheduler's eviction and not yet
+	// removed, so a Pod changing again before its removal is evicted once.
+	descheduled map[types.UID]bool
+}
+
+func newEntryMapper() *entryMapper {
+	return &entryMapper{descheduled: map[types.UID]bool{}}
+}
+
+func (m *entryMapper) toEntry(elapsed time.Duration, event watch.Event) (scenario.Entry, bool) {
 	if reported, isEvent := event.Object.(*corev1.Event); isEvent {
 		return fromReportedEvent(elapsed, reported)
 	}
@@ -619,7 +630,7 @@ func toEntry(elapsed time.Duration, event watch.Event) (scenario.Entry, bool) {
 			Reason: string(readinessOf(*object)), Detail: capacityOf(*object),
 		}, true
 	case *corev1.Pod:
-		return fromPod(elapsed, change, *object), true
+		return m.fromPod(elapsed, change, *object), true
 	case *appsv1.Deployment:
 		return scenario.Entry{
 			Elapsed: elapsed, Change: change, Kind: scenario.DeploymentObject, Name: object.Name,
@@ -642,19 +653,30 @@ const evictionByEvictionAPI = "EvictionByEvictionAPI"
 // Only the Descheduler evicts through the eviction subresource in a Simulated
 // Cluster, since a Failure and the taint manager delete. The API server marks
 // the Pod in an update of its own before it marks the Pod for deletion, and
-// that marking still reads Terminating.
-func fromPod(elapsed time.Duration, change scenario.Change, pod corev1.Pod) scenario.Entry {
-	if pod.DeletionTimestamp == nil && isEvictedThroughTheEvictionAPI(pod) {
+// that marking still reads Terminating. A Pod removed before any graceful
+// deletion leaves a Deleted event still carrying the mark, which reads removed.
+func (m *entryMapper) fromPod(elapsed time.Duration, change scenario.Change, pod corev1.Pod) scenario.Entry {
+	if m.newlyDescheduled(change, pod) {
+		m.descheduled[pod.UID] = true
+
 		return scenario.Entry{
 			Elapsed: elapsed, Change: scenario.ChangeReported, Kind: scenario.PodObject, Name: pod.Name,
 			Reason: scenario.EvictedByTheDescheduler, Detail: pod.Spec.NodeName,
 		}
+	}
+	if change == scenario.ChangeRemoved {
+		delete(m.descheduled, pod.UID)
 	}
 
 	return scenario.Entry{
 		Elapsed: elapsed, Change: change, Kind: scenario.PodObject, Name: pod.Name,
 		Reason: string(observedPhaseOf(pod)), Detail: pod.Spec.NodeName,
 	}
+}
+
+func (m *entryMapper) newlyDescheduled(change scenario.Change, pod corev1.Pod) bool {
+	return change != scenario.ChangeRemoved && pod.DeletionTimestamp == nil &&
+		isEvictedThroughTheEvictionAPI(pod) && !m.descheduled[pod.UID]
 }
 
 // anyEvicted judges a pass by the Pods it could evict: those listed before it

@@ -195,9 +195,14 @@ func TestPodsTheDeschedulerEvicted_ShouldBeNamedApartFromAFailuresWithTheirRepla
 		Elapsed: whenThePodWasEvicted, Change: ChangeModified, Kind: PodObject, Name: aPodName,
 		Reason: string(PodTerminating), Detail: aNodeName,
 	}
+	removedAtOnce := Entry{
+		Elapsed: whenThePodWasEvicted, Change: ChangeRemoved, Kind: PodObject, Name: aPodName,
+		Reason: string(PodRunning), Detail: aNodeName,
+	}
 	arrivals := map[string][]Entry{
 		"the descheduled mark recorded before the Pod marked for deletion": {descheduled, terminating},
 		"the descheduled mark recorded after the Pod marked for deletion":  {terminating, descheduled},
+		"the descheduled mark followed by the Pod removed at once":         {descheduled, removedAtOnce},
 	}
 
 	for arrival, evicted := range arrivals {
@@ -234,6 +239,28 @@ func TestPodsTheDeschedulerEvicted_ShouldBeNamedApartFromAFailuresWithTheirRepla
 			}))
 		})
 	}
+}
+
+// A Failure deletes a Pod with no grace, so no deletion mark comes before its
+// removal, and the removal alone names no eviction.
+func TestAPodRemovedWithNoDeschedulerMarkAndNoDeletionMark_ShouldBeNamedNoEviction(t *testing.T) {
+	recorded := []Entry{
+		theDeploymentDeployed(),
+		{
+			Elapsed: whenTheFirstPodRan, Change: ChangeAdded, Kind: PodObject, Name: aPodName,
+			Reason: string(PodRunning), Detail: aNodeName,
+		},
+		aWaitNoteAt(whenTheFirstWaitEnded),
+		{
+			Elapsed: whenThePodWasEvicted, Change: ChangeRemoved, Kind: PodObject, Name: aPodName,
+			Reason: string(PodRunning), Detail: aNodeName,
+		},
+		aWaitNoteAt(whenTheSecondWaitEnded),
+	}
+
+	narrated := NewTimeline(recorded).WaitNarratives()
+
+	expect.Expect(t, linesOf(narrated)[1]).To(expect.Equal([]string{}))
 }
 
 func TestAWaitNarrative_ShouldNameEachPodLeftPendingWithTheSchedulersReason(t *testing.T) {

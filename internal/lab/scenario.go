@@ -234,6 +234,9 @@ type Scenario struct {
 	deschedulerPolicy          scenario.DeschedulerPolicy
 	pairedDescheduler          cluster.DeschedulerVersion
 	declaresADeschedulerPolicy bool
+	// deschedulerImage is handed by the runner, which obtains the image before
+	// any Scenario starts, so no pass waits on a fetch.
+	deschedulerImage deschedulerImage
 	// deschedulerInterval is set by a further call on the Descheduler's Given,
 	// and descheduling runs it from the Wait applying it until the runner
 	// stops it. deschedulerDeclaredAt is the line a failed pass ends the
@@ -290,7 +293,11 @@ func (s *Scenario) record(kind StepKind, name string) (Step, bool) {
 	s.steps = append(s.steps, step)
 	if failed := s.descheduling.failure(); failed != nil {
 		s.end(step, failed)
-		s.note(step)
+		if kind == WaitStep {
+			s.endWait()
+		} else {
+			s.note(step)
+		}
 
 		return step, false
 	}
@@ -700,6 +707,11 @@ func (g Given) Descheduler(defined descheduler.Policy) DeclaredDescheduler {
 	g.scenario.declaresADeschedulerPolicy = true
 	if unpaired != nil {
 		g.scenario.end(step, unpaired)
+
+		return declared
+	}
+	if unobtained := g.scenario.deschedulerImage.unobtained(); unobtained != nil {
+		g.scenario.end(step, unobtained)
 
 		return declared
 	}

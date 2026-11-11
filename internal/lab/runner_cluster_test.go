@@ -52,7 +52,7 @@ func TestAScenarioThatPanicsOnARealCluster_ShouldLeaveNoClusterAndNoSecondPanic(
 	// recording when the panic unwinds, which is what a file closed too early
 	// would meet.
 	carried := carryOutAtOnce([]string{thePanickingScenarioOnACluster}, func(int) (Outcome, error) {
-		return running.runNamed(t.Context(), thePanickingScenarioOnACluster, func(steps *Scenario) {
+		return running.runNamed(t.Context(), thePanickingScenarioOnACluster, noDeschedulerImage, func(steps *Scenario) {
 			provisioned = steps.provisioned
 			declared := aTopologyOf(t, twoZones, twoNodesPerZone)
 			if err := provisioned.ApplyTopology(steps.ctx, declared); err != nil {
@@ -103,6 +103,29 @@ func aRunnerFiledIn(t *testing.T, folder timeline.Folder) *Runner {
 	t.Cleanup(engine.Close)
 
 	return NewRunner(engine, cluster.DefaultKubernetesVersion(), folder)
+}
+
+// noDeschedulerImage is what a run declaring no Descheduler policy hands its
+// Scenario.
+var noDeschedulerImage = deschedulerImage{}
+
+// aRunOnThisMachineOf carries out the named Scenario as a run of it alone does,
+// obtaining the Descheduler image first where it declares a policy.
+func aRunOnThisMachineOf(t *testing.T, name string, steps func(*Scenario)) (Outcome, error) {
+	t.Helper()
+
+	return aRunOf(t, aRunnerOnThisMachine(t), name, steps)
+}
+
+func aRunOf(t *testing.T, running *Runner, name string, steps func(*Scenario)) (Outcome, error) {
+	t.Helper()
+
+	image, err := running.obtainTheDeschedulerOf(t.Context(), []func(*Scenario){steps})
+	if err != nil {
+		t.Fatalf("obtain the Descheduler image of the Scenario %s: %v", name, err)
+	}
+
+	return running.runNamed(t.Context(), name, image, steps)
 }
 
 // observed carries a board as it reads, so a comparison needs no access to its
@@ -193,7 +216,7 @@ func TestAnInteractiveRunNamingAScenario_ShouldHoldItsClusterAsTheStepsBeforeIts
 	var readyWhileHeld []scenario.Node
 	var boardWhileHeld observed
 
-	held, err := running.holdNamed(holding, theHeldScenario, func(steps *Scenario) {
+	held, err := running.holdNamed(holding, theHeldScenario, noDeschedulerImage, func(steps *Scenario) {
 		provisioned = steps.provisioned
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
@@ -224,7 +247,7 @@ func TestStoppingAnInteractiveRun_ShouldRemoveItsSimulatedCluster(t *testing.T) 
 	holding, stopTheLab := context.WithCancel(t.Context())
 	var provisioned *cluster.SimulatedCluster
 
-	_, err := running.holdNamed(holding, theScenarioStoppedPartWay, func(steps *Scenario) {
+	_, err := running.holdNamed(holding, theScenarioStoppedPartWay, noDeschedulerImage, func(steps *Scenario) {
 		provisioned = steps.provisioned
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		stopTheLab()
@@ -243,7 +266,7 @@ func TestAnInteractiveRunStoppedWhileTheStepsRun_ShouldFileItsTimelineAsAScenari
 	holding, stopTheLab := context.WithCancel(t.Context())
 	var atTheHold Outcome
 
-	stopped, err := running.holdNamed(holding, theScenarioFiledWhenStoppedPartWay, func(steps *Scenario) {
+	stopped, err := running.holdNamed(holding, theScenarioFiledWhenStoppedPartWay, noDeschedulerImage, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		stopTheLab()
 		steps.WaitFor().AllNodesReady()
@@ -277,7 +300,7 @@ func TestAnInteractiveRunWhoseTimelineCannotBeWrittenAtTheStop_ShouldNameIt(t *t
 	holding, stopTheLab := context.WithCancel(t.Context())
 	var atTheHold Outcome
 
-	stopped, err := running.holdNamed(holding, theScenarioWhoseTimelineIsNotFiled,
+	stopped, err := running.holdNamed(holding, theScenarioWhoseTimelineIsNotFiled, noDeschedulerImage,
 		func(steps *Scenario) {
 			steps.Given().Zones(twoZones, theGeneralNodePool())
 			steps.WaitFor().AllNodesReady()
@@ -305,7 +328,7 @@ func TestAnInteractiveRunWhoseStepCannotBeCarriedOut_ShouldHoldTheClusterAsThatS
 	var provisioned *cluster.SimulatedCluster
 	var readyWhileHeld []scenario.Node
 
-	held, err := running.holdNamed(holding, theScenarioEndedAtARefusal, func(steps *Scenario) {
+	held, err := running.holdNamed(holding, theScenarioEndedAtARefusal, noDeschedulerImage, func(steps *Scenario) {
 		provisioned = steps.provisioned
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
@@ -353,6 +376,9 @@ type heldForClicks struct {
 	followedLock sync.Mutex
 	followed     []string
 	terminal     func(string)
+	// reportedAtTheHold is written before the held run's report returns, which
+	// is before startAHeldRun does.
+	reportedAtTheHold Outcome
 	// stopTheLab may be called by the test and again by its cleanup, so it
 	// stops the held run once and hands back its Outcome each time.
 	stopTheLab func() (Outcome, error)
@@ -435,18 +461,25 @@ func aHeldRunPrintingTo(t *testing.T, name string, steps func(*Scenario), termin
 func startAHeldRun(holding context.Context, stopHolding context.CancelFunc, running *Runner, name string,
 	steps func(*Scenario), terminal func(string),
 ) (*heldForClicks, error) {
-	held := &heldForClicks{injector: NewInjector(), terminal: terminal}
+	held := &heldForClicks{injector: NewInjector(), terminal: terminal, stopTheLab: func() (Outcome, error) { return Outcome{}, nil }}
+	image, err := running.obtainTheDeschedulerOf(holding, []func(*Scenario){steps})
+	if err != nil {
+		return held, fmt.Errorf("obtain the Descheduler image of the held Scenario %s: %w", name, err)
+	}
 	observer, boards := anObserverHandingOverEachPlacementBoard(holding)
 	held.boards = boards
 	reported, ended := make(chan struct{}), make(chan struct{})
 	var stopped Carried
 	go func() {
 		defer close(ended)
-		outcome, err := running.holdNamed(holding, name, func(declaring *Scenario) {
+		outcome, err := running.holdNamed(holding, name, image, func(declaring *Scenario) {
 			held.provisioned = declaring.provisioned
 			steps(declaring)
 			held.topology, held.deployment, held.descheduling = declaring.topology, declaring.deployment, declaring.descheduling
-		}, observer, held.injector, func(Outcome) { close(reported) }, held.follow)
+		}, observer, held.injector, func(atTheHold Outcome) {
+			held.reportedAtTheHold = atTheHold
+			close(reported)
+		}, held.follow)
 		stopped = Carried{Outcome: outcome, Err: err}
 	}()
 	held.stopTheLab = func() (Outcome, error) {
@@ -789,7 +822,7 @@ func TestAClickInTheLiveViewWhileTheStepsStillRun_ShouldChangeNothing(t *testing
 	var declared scenario.Topology
 	var readyAfterTheClick []scenario.Node
 
-	stopped, err := running.holdNamed(holding, theScenarioClickedWhileItsStepsRun, func(steps *Scenario) {
+	stopped, err := running.holdNamed(holding, theScenarioClickedWhileItsStepsRun, noDeschedulerImage, func(steps *Scenario) {
 		provisioned = steps.provisioned
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
@@ -1297,7 +1330,7 @@ type whensAndCause struct {
 func aRunOfAZoneFailureFollowedBy(t *testing.T, name string, responding func(When)) whensAndCause {
 	t.Helper()
 
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), name, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, name, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.When().ZonesFail(oneLost)
@@ -1354,7 +1387,7 @@ const (
 
 func TestAWhenLosingPodsOfADeployment_ShouldLoseThatManyOfItsPlacedPodsInOneStepAndReportEach(t *testing.T) {
 	t.Parallel()
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioLosingPods, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, theScenarioLosingPods, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
@@ -1383,7 +1416,7 @@ const theScenarioLosingPodsBeforeANodeFails = "a-scenario-losing-pods-before-a-n
 func TestAWhenLosingPodsBeforeANodeFailure_ShouldLeaveTheFloorJudgedAgainstTheNodeTheLaterWhenStops(t *testing.T) {
 	t.Parallel()
 	declared := aTopologyOf(t, twoZones, twoNodesPerZone)
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioLosingPodsBeforeANodeFails, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, theScenarioLosingPodsBeforeANodeFails, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
@@ -1499,7 +1532,7 @@ func thePodsDescheduledBeforeTheStepAfter(recorded scenario.Timeline, noted Step
 // Step started once the pass ended.
 func TestAWhenRunningADeschedulerPass_ShouldRunOnePassUnderTheDeclaredPolicyBeforeTheNextStep(t *testing.T) {
 	t.Parallel()
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioRunningADeschedulerPass, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, theScenarioRunningADeschedulerPass, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
@@ -1526,7 +1559,7 @@ func TestAWhenRunningADeschedulerPass_ShouldRunOnePassUnderTheDeclaredPolicyBefo
 
 func TestADeschedulerPassThatCannotRunOrDoesNotEnd_ShouldEndTheScenarioAtThatWhenNamingWhy(t *testing.T) {
 	t.Parallel()
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioWhosePassCannotRun, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, theScenarioWhosePassCannotRun, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Descheduler(aPolicyThePassRefuses())
@@ -1545,7 +1578,7 @@ func TestADeschedulerPassThatCannotRunOrDoesNotEnd_ShouldEndTheScenarioAtThatWhe
 // evict, and the Wait after it narrates no change.
 func TestADeschedulerPassEvictingNothing_ShouldLeaveThePlacementAsItStands(t *testing.T) {
 	t.Parallel()
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioWhosePassEvictsNothing, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, theScenarioWhosePassEvictsNothing, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
@@ -1580,7 +1613,7 @@ const (
 // so the second such Wait reached shows a further pass ran on the interval.
 func TestADeschedulerDeclaredWithAnInterval_ShouldRunAPassOnEachIntervalUntilTheScenarioEnds(t *testing.T) {
 	t.Parallel()
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioRunningPassesOnAnInterval, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, theScenarioRunningPassesOnAnInterval, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
@@ -1612,7 +1645,7 @@ func theWaitsReachedIn(ran Outcome) []string {
 
 func TestAWaitForAPlacementSettledUnderADeschedulerOnAnInterval_ShouldObserveThePlacementAlone(t *testing.T) {
 	t.Parallel()
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioSettlingBeforeItsFirstPass, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, theScenarioSettlingBeforeItsFirstPass, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
@@ -1629,7 +1662,7 @@ func TestAWaitForAPlacementSettledUnderADeschedulerOnAnInterval_ShouldObserveThe
 
 func TestADeschedulerOnAnIntervalThatCannotStartOrStops_ShouldEndTheScenarioNamingWhy(t *testing.T) {
 	t.Parallel()
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theScenarioWhoseIntervalCannotRun, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, theScenarioWhoseIntervalCannotRun, func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Descheduler(aPolicyThePassRefuses()).EverySeconds(aPassEverySecond)
@@ -1703,8 +1736,8 @@ func TestAScenarioWhoseDeschedulerRanOnAnInterval_ShouldLeaveNothingOfItsDesched
 			}
 			t.Cleanup(engine.Close)
 
-			ran, err := NewRunner(engine, cluster.DefaultKubernetesVersion(), timeline.NewFolder(t.TempDir())).
-				runNamed(t.Context(), by.name, func(steps *Scenario) {
+			ran, err := aRunOf(t, NewRunner(engine, cluster.DefaultKubernetesVersion(), timeline.NewFolder(t.TempDir())),
+				by.name, func(steps *Scenario) {
 					steps.Given().Zones(twoZones, theGeneralNodePool())
 					steps.WaitFor().AllNodesReady()
 					steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
@@ -1719,6 +1752,254 @@ func TestAScenarioWhoseDeschedulerRanOnAnInterval_ShouldLeaveNothingOfItsDesched
 			expect.Expect(t, theContainersNamedAfter(t, engine, ran.Cluster)).To(expect.Equal([]string{}))
 		})
 	}
+}
+
+const (
+	theScenarioWhoseIntervalStopsWhileHeld    = "a-scenario-whose-descheduler-interval-stops-while-held"
+	theScenarioClickedOnceItsIntervalStopped  = "a-scenario-clicked-once-its-descheduler-interval-stopped"
+	theScenarioEndedByItsIntervalWhenStopped  = "a-scenario-ended-by-its-descheduler-interval-when-stopped"
+	theScenarioWhoseIntervalRunsWhileHeld     = "a-scenario-whose-descheduler-interval-runs-while-held"
+	theFailedPassAlone                        = 1
+	noStopNamed                               = 0
+	theHeldScenarioHeldAtTheStop              = true
+	theCauseNamesWhyTheIntervalStopped        = true
+	theTimelineFiledOnceTheIntervalStopped    = true
+	theGivenNamedBeforeWhyTheIntervalStopped  = true
+	whyTheIntervalStoppedNamedOnTheTerminal   = true
+	noCauseReportedAtTheHold                  = ""
+	theTimeForTheFirstPassOnceHeldToFail      = anIntervalLongerThanTheNodesWait*time.Second + scenario.WaitingTime
+	anIntervalLongerThanTheNodesWait          = 15
+	aNodesWaitShorterThanTheIntervalInSeconds = 10
+)
+
+// The Nodes' Wait applies the interval and is held to less than it, so the hold
+// begins before the first pass, which the policy has fail. A Wait that overran
+// would end the Scenario at it, and the Outcome reported at the hold would name
+// why.
+func aHeldRunWhoseIntervalStopsOnceHeld(t *testing.T, name string, terminal func(string)) *heldForClicks {
+	t.Helper()
+
+	return aHeldRunPrintingTo(t, name, func(steps *Scenario) {
+		steps.Given().Zones(twoZones, theGeneralNodePool())
+		steps.WaitFor().AllNodesReady()
+		steps.Given().Descheduler(aPolicyThePassRefuses()).EverySeconds(anIntervalLongerThanTheNodesWait)
+		steps.WaitFor().AllNodesReadyWithinSeconds(aNodesWaitShorterThanTheIntervalInSeconds)
+	}, terminal)
+}
+
+func theGivenDeclaringTheFailingInterval(t *testing.T) Step {
+	t.Helper()
+
+	return deschedulerOnAnIntervalStepOf(aPolicyNameThePassRefuses, theDeschedulerPairedByDefault(t), anIntervalLongerThanTheNodesWait)
+}
+
+// theStopNamedFor opens the sentence a Step left undone is named with.
+func theStopNamedFor(name string) string {
+	return "the Scenario " + name + " ended at "
+}
+
+func namingTheStopOf(name string) func(string) bool {
+	return func(line string) bool { return strings.HasPrefix(line, theStopNamedFor(name)) }
+}
+
+// aTerminalAwaitingAStop hands the test the first line naming the held Scenario
+// ended, as the terminal takes it, so the test reads it while the lab still
+// holds the cluster.
+type aTerminalAwaitingAStop struct {
+	namesTheStop func(string) bool
+	first        sync.Once
+	named        chan string
+}
+
+func aTerminalAwaitingAStopOf(name string) *aTerminalAwaitingAStop {
+	// One slot holds the one line handed over, so the terminal never waits on
+	// the test.
+	return &aTerminalAwaitingAStop{namesTheStop: namingTheStopOf(name), named: make(chan string, 1)}
+}
+
+func (a *aTerminalAwaitingAStop) take(line string) {
+	if a.namesTheStop(line) {
+		a.first.Do(func() { a.named <- line })
+	}
+}
+
+func (a *aTerminalAwaitingAStop) awaitTheStopNamed(t *testing.T) string {
+	t.Helper()
+
+	select {
+	case line := <-a.named:
+		return line
+	case <-time.After(theTimeForTheFirstPassOnceHeldToFail):
+		t.Fatalf("the held run named no stop of its Descheduler interval within %s", theTimeForTheFirstPassOnceHeldToFail)
+
+		return ""
+	}
+}
+
+// awaitTheIntervalStopping ends at the failure that stopped the held run's
+// interval, which no pass evicting nothing comes before under a policy every
+// pass refuses.
+func (h *heldForClicks) awaitTheIntervalStopping(t *testing.T) {
+	t.Helper()
+
+	waiting, cancel := context.WithTimeout(t.Context(), theTimeForTheFirstPassOnceHeldToFail)
+	defer cancel()
+	if err := h.descheduling.awaitAPassEvictingNothingAfter(waiting, h.descheduling.passesBegun()); err == nil || waiting.Err() != nil {
+		t.Fatalf("no pass on the held Scenario's Descheduler interval failed within %s: %v", theTimeForTheFirstPassOnceHeldToFail, err)
+	}
+}
+
+// namedOnTheTerminal is what a held run's terminal named of its interval's stop,
+// beside the cause the Outcome reported at the hold.
+type namedOnTheTerminal struct {
+	CauseAtTheHold string
+	GivenNamed     bool
+	WhyNamed       bool
+}
+
+func TestADeschedulerIntervalStoppingWhileTheClusterIsHeld_ShouldBeNamedOnTheTerminalWithWhyBeforeTheLabStops(t *testing.T) {
+	t.Parallel()
+	terminal := aTerminalAwaitingAStopOf(theScenarioWhoseIntervalStopsWhileHeld)
+	held := aHeldRunWhoseIntervalStopsOnceHeld(t, theScenarioWhoseIntervalStopsWhileHeld, terminal.take)
+
+	named := terminal.awaitTheStopNamed(t)
+
+	expect.Expect(t, namedOnTheTerminal{
+		CauseAtTheHold: causeOf(held.reportedAtTheHold),
+		GivenNamed:     strings.HasPrefix(named, theStopNamedFor(theScenarioWhoseIntervalStopsWhileHeld)+theGivenDeclaringTheFailingInterval(t).String()+": "),
+		WhyNamed:       strings.Contains(named, aPassThatExitedNonZero),
+	}).To(expect.Equal(namedOnTheTerminal{
+		CauseAtTheHold: noCauseReportedAtTheHold,
+		GivenNamed:     theGivenNamedBeforeWhyTheIntervalStopped,
+		WhyNamed:       whyTheIntervalStoppedNamedOnTheTerminal,
+	}))
+}
+
+// clickedOnceStopped is what a click on a held cluster whose interval stopped
+// left: the Nodes still Ready, and the passes the interval began.
+type clickedOnceStopped struct {
+	CauseAtTheHold string
+	ReadyNodes     []string
+	PassesBegun    int
+}
+
+func TestAHeldClusterWhoseDeschedulerIntervalStopped_ShouldStayHeldAndTakeClicks(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunWhoseIntervalStopsOnceHeld(t, theScenarioClickedOnceItsIntervalStopped, ignoringEachLineFollowed)
+	held.awaitTheIntervalStopping(t)
+	clicked := held.theFirstNode()
+
+	expectInjected(t, held.injector.ClickNode(clicked))
+
+	expect.Expect(t, clickedOnceStopped{
+		CauseAtTheHold: causeOf(held.reportedAtTheHold),
+		ReadyNodes:     held.theReadyNodeNames(t),
+		PassesBegun:    held.descheduling.passesBegun(),
+	}).To(expect.Equal(clickedOnceStopped{
+		CauseAtTheHold: noCauseReportedAtTheHold,
+		ReadyNodes:     held.everyNodeBut(clicked),
+		PassesBegun:    theFailedPassAlone,
+	}))
+}
+
+// endedByItsInterval is what a held run whose interval stopped hands back once
+// the lab stops.
+type endedByItsInterval struct {
+	CauseAtTheHold string
+	EndedAt        string
+	WhyNamed       bool
+	Filed          bool
+}
+
+func TestAHeldRunWhoseDeschedulerIntervalStopped_ShouldEndAtTheDeclaringGivenNamingWhyWhenTheLabStops(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunWhoseIntervalStopsOnceHeld(t, theScenarioEndedByItsIntervalWhenStopped, ignoringEachLineFollowed)
+	held.awaitTheIntervalStopping(t)
+
+	stopped := held.theOutcomeOnceStopped(t)
+
+	expect.Expect(t, endedByItsInterval{
+		CauseAtTheHold: causeOf(held.reportedAtTheHold),
+		EndedAt:        stopped.EndedAt.String(),
+		WhyNamed:       strings.Contains(causeOf(stopped), aPassThatExitedNonZero),
+		Filed:          stopped.NotFiled == nil && stopped.FiledAt != "",
+	}).To(expect.Equal(endedByItsInterval{
+		CauseAtTheHold: noCauseReportedAtTheHold,
+		EndedAt:        theGivenDeclaringTheFailingInterval(t).String(),
+		WhyNamed:       theCauseNamesWhyTheIntervalStopped,
+		Filed:          theTimelineFiledOnceTheIntervalStopped,
+	}))
+	expectRemoved(t, held.provisioned)
+}
+
+// heldOnAnIntervalWhenStopped is what a held run whose interval kept running
+// hands back once the lab stops, and how many lines named a stop.
+type heldOnAnIntervalWhenStopped struct {
+	Held       bool
+	StopsNamed int
+}
+
+func TestAHeldRunWhoseDeschedulerIntervalKeepsRunning_ShouldEndHeldWithNoStopNamed(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunDeschedulingOnAnInterval(t, theScenarioWhoseIntervalRunsWhileHeld)
+	held.awaitAPassEvictingNothing(t)
+
+	stopped := held.theOutcomeOnceStopped(t)
+
+	expect.Expect(t, heldOnAnIntervalWhenStopped{
+		Held:       stopped.Held(),
+		StopsNamed: len(theLinesSaying(held.theLinesFollowed(t), namingTheStopOf(theScenarioWhoseIntervalRunsWhileHeld))),
+	}).To(expect.Equal(heldOnAnIntervalWhenStopped{Held: theHeldScenarioHeldAtTheStop, StopsNamed: noStopNamed}))
+}
+
+// Each is declared at the top level, because a closure's runtime name names no
+// condition, and a run or held run derives the Scenario's name from it.
+func ADeclaredPolicysPass_ShouldRunOnTheImageTheRunObtained(steps *Scenario) {
+	steps.Given().Zones(twoZones, theGeneralNodePool())
+	steps.WaitFor().AllNodesReady()
+	steps.Given().Descheduler(aPolicyRestoringTheSpread())
+	steps.When().DeschedulerRunsOnce()
+	steps.WaitFor().AllNodesReady()
+}
+
+func AHeldScenarioDeclaringAPolicy_ShouldBeHeldPastItsDeschedulerGiven(steps *Scenario) {
+	steps.Given().Zones(twoZones, theGeneralNodePool())
+	steps.Given().Descheduler(aPolicyRestoringTheSpread())
+	steps.WaitFor().AllNodesReady()
+}
+
+// A run entry that skipped the obtain would end the Scenario at its Descheduler
+// Given, which is what makes this fail on a machine already holding the image.
+func TestARunCarryingAScenarioDeclaringAPolicy_ShouldObtainTheDeschedulerImageBeforeAnyScenarioStarts(t *testing.T) {
+	t.Parallel()
+
+	carried, err := aRunnerOnThisMachine(t).RunAtOnce(t.Context(), []func(*Scenario){ADeclaredPolicysPass_ShouldRunOnTheImageTheRunObtained})
+
+	if err != nil {
+		t.Fatalf("carry out a run declaring a Descheduler policy: %v", err)
+	}
+	expect.Expect(t, theScenariosThatWentWrongIn(carried)).To(expect.Equal[[]string](nil))
+	expect.Expect(t, causeOf(carried[0].Outcome)).To(expect.Equal(""))
+}
+
+// The lab is stopped once the Outcome is reported, so the held cluster goes at
+// once.
+func TestAHeldScenarioDeclaringAPolicy_ShouldObtainItsDeschedulerImageBeforeProvisioning(t *testing.T) {
+	t.Parallel()
+	holding, stopHolding := context.WithCancel(t.Context())
+	defer stopHolding()
+	var atTheHold Outcome
+
+	_, err := aRunnerOnThisMachine(t).Hold(holding, AHeldScenarioDeclaringAPolicy_ShouldBeHeldPastItsDeschedulerGiven,
+		anObserverDiscardingEachBoard(), anInjector(), func(reported Outcome) {
+			atTheHold = reported
+			stopHolding()
+		}, ignoringEachLineFollowed)
+
+	if err != nil {
+		t.Fatalf("hold a Scenario declaring a Descheduler policy: %v", err)
+	}
+	expect.Expect(t, causeOf(atTheHold)).To(expect.Equal(noCauseReportedAtTheHold))
 }
 
 const (
@@ -1759,7 +2040,7 @@ func TestAZoneThatRespondsAgainUnderADescheduler_ShouldMovePodsBackUntilEveryZon
 		aRecoveryWait     = 30
 	)
 	t.Parallel()
-	ran, err := aRunnerOnThisMachine(t).runNamed(t.Context(), theTwinOfAZoneThatRespondsAgain, func(steps *Scenario) {
+	ran, err := aRunOnThisMachineOf(t, theTwinOfAZoneThatRespondsAgain, func(steps *Scenario) {
 		steps.Given().Zones(threeZones, node.Pool(generalNodePool, node.PerZone(threeNodesPerZone), roomyNodes()))
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Deployment(someDeploymentName, ninePods, askingForNothing(), resilientPlacement()).SurvivesLosing(Zones(oneLost))

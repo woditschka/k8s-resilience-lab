@@ -622,6 +622,7 @@ An Interactive run's Timeline keeps recording while its cluster is held, each cl
 6. No Descheduler on an interval. The terminal names the clicks and the moments after them alone.
 7. Pods the lab places while provisioning the Topology. No terminal line names them.
 8. The terminal stops taking lines while the cluster is held. When the lab stops, it still files the Timeline and removes the cluster, dropping lines not yet printed.
+9. A Descheduler on an interval stops while the cluster is held. The terminal names why as a run names a Step left undone, the cluster stays held, and the lab fails once stopped.
 
 **Design:** [system-design.md](system-design.md)
 

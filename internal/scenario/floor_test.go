@@ -263,6 +263,32 @@ func TestAPodRemovedFromTheCluster_ShouldStayLostFromItsFloor(t *testing.T) {
 				aPodNamed(theFirstPodOfTheSecondZone)+" on "+nodes[theFirstPodOfTheSecondZone])))
 }
 
+func aPodTheDeschedulerEvicted(at time.Duration, pod, node string) scenario.Entry {
+	return scenario.Entry{
+		Elapsed: at, Change: scenario.ChangeReported, Kind: scenario.PodObject, Name: pod,
+		Reason: scenario.EvictedByTheDescheduler, Detail: node,
+	}
+}
+
+// Removed before any graceful deletion, the Pod goes from the Descheduler's
+// eviction straight to a removal still reading Running.
+func TestAPodTheDeschedulerEvictedAndTheClusterRemovedAtOnce_ShouldCountAsLostFromItsFloor(t *testing.T) {
+	topology := aTopologyOfThreeZonesOfThreeNodes(t)
+	nodes := theNodeNamesOf(topology)
+	evicted := aPodNamed(theFirstPodOfTheSecondZone)
+	recorded := append(onePodRunningPerNodeOf(topology),
+		aWhenNoteAt(theFirstFailure),
+		aPodTheDeschedulerEvicted(theFirstEviction, evicted, nodes[theFirstPodOfTheSecondZone]),
+		aPodRemovedWhileRunning(theFirstEviction, evicted, nodes[theFirstPodOfTheSecondZone]),
+	)
+
+	reading := theReadingOver(t, aDeploymentOfNineSurviving(t, survivingNoNode()), recorded, scenario.WhenNodes{})
+
+	expect.Expect(t, reading.Line()).To(expect.Equal(
+		"web fell below its Floor of 9 Ready Pods through the loss of 0 Nodes: lowest 8 of 9 at " +
+			theFirstEvictionAsRead + " for the rest of the Scenario"))
+}
+
 func TestAReadingOfASinglePod_ShouldNameItInTheSingular(t *testing.T) {
 	topology := aTopologyOfThreeZonesOfThreeNodes(t)
 	nodes := theNodeNamesOf(topology)

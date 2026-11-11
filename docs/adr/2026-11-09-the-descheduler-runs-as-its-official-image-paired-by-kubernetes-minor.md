@@ -94,9 +94,21 @@ How a pass on an interval keeps a declared Floor, after the first pass past a Zo
 38. **A PodDisruptionBudget at the Floor**, honoured by the Eviction API — guards every voluntary eviction whatever its timing, but is a Given of its own the PRD leaves an open question.
 39. **A looser Failure tolerance or Then on the Scenario** — hides the fall the Then exists to report.
 
+How a pass's container is removed, when the engine may create it after the lab stopped waiting for the answer:
+
+40. **By the identifier the create answers** — a create abandoned by a stop, or answered past the engine timeout, leaves a container no handle names. Its name then refuses every later pass on that cluster.
+41. **The create under a context no stop cancels** — closes the stop's case, but an answer past the engine timeout still leaves an unnamed container.
+42. **By the name the pass derives from its cluster's**, before the pass, on every path after it and at the cluster's close, a container already gone counting as removed. The name is unique per run, so the removal reaches no container the lab did not create.
+
+When the Descheduler image is obtained:
+
+43. **By the first pass, pulled when absent** — a cold pull runs inside a Scenario's timed Steps, so a first run on a fresh machine fails where a second passes.
+44. **Before any Scenario, a failure stopping the run** — as the cluster image is obtained, but it also stops the Scenarios declaring no policy, which the requirement keeps running.
+45. **Before any Scenario starts, once per run declaring a policy, a failure ending each declaring Scenario at its Descheduler Given**, naming why. No pass fetches an image, so no fetch is retried inside a Scenario.
+
 ## Decision
 
-Options 3, 5, 8, 10, 12, 15, 17, 19, 21, 23, 27, 31, 33, 35 and 37.
+Options 3, 5, 8, 10, 12, 15, 17, 19, 21, 23, 27, 31, 33, 35, 37, 42 and 45.
 
 - `descheduler.Policy` mirrors `descheduler/v1alpha2`: its per-Node and per-pass eviction limits, profiles, each profile's configuration entries with typed `Args`, and a `PluginSet` per extension point. Plugin and argument types carry Kubernetes' names.
 - A field at its zero value stays out. The lab adds no entry, argument or default and derives no extension point, so the encoding transcribes the definition.
@@ -106,9 +118,10 @@ Options 3, 5, 8, 10, 12, 15, 17, 19, 21, 23, 27, 31, 33, 35 and 37.
 - `internal/cluster` encodes the policy as `descheduler/v1alpha2` JSON with `encoding/json`, over its own types; no descheduler module is imported.
 - `internal/cluster` holds the table pairing a Kubernetes minor with a descheduler tag. An unpaired minor is an error naming the version.
 - The runner resolves the pairing once and runs the declaring pass before any cluster. A declared policy and an unpaired version stop the run.
+- A run or held run declaring a policy obtains the paired image before any Scenario starts. An image it cannot obtain ends each declaring Scenario at its Descheduler Given, and the others run on. A pass fetches no image.
 - The descheduler container is started by `internal/cluster`, sharing the Simulated Cluster's network namespace, pinned by tag.
 - A When runs one pass as such a container, at a zero interval, its command constants alone. Its kubeconfig names the loopback API port over plain HTTP with no credential.
-- The When waits for the exit within the lab's waiting time, and removes the container whatever the outcome. Closing the cluster removes a pass container still held first.
+- The When waits for the exit within the lab's waiting time. A pass removes any container under its name before it creates one and again whatever the outcome, its creation answered or not. Closing the cluster removes such a container first.
 - A Pod the descheduler evicts is read from the disruption-target condition the Eviction API sets on it, so no log is parsed for an eviction. The lab evicts no Pod itself.
 - A further call on the Given states an interval in seconds. From the Wait applying the Given until its cluster is removed, the lab starts a pass on each interval, never two at once.
 - A pass on an interval evicts nothing when the two listings agree. A Wait of its own ends at the first such pass begun after it, and Settled keeps its meaning.
@@ -123,9 +136,11 @@ A Scenario's function runs twice per run. That holds because a Given applies not
 
 The engine surface admits a second image and a container joining another's namespace. Its repository is a constant and its tag a table row, so no input reaches either.
 
-A pass that errors without exiting costs its Scenario the lab's waiting time. On an interval, every pass creates, starts and removes a container, and its command stays constants alone. A Pod a Failure or the control plane removes during a pass reads as an eviction, so the Wait waits one interval more. A later Step evicting through the Eviction API would read as the descheduler's, so a Failure keeps deleting.
+A pass that errors without exiting costs its Scenario the lab's waiting time. On an interval, every pass creates, starts and removes a container, and its command stays constants alone. Each pass and each close spends one removal call more, often on a container already gone. A creation the engine completes only after the cluster closed still leaves its container for the engineer. A Pod a Failure or the control plane removes during a pass reads as an eviction, so the Wait waits one interval more. A later Step evicting through the Eviction API would read as the descheduler's, so a Failure keeps deleting.
 
 A per-pass limit of one keeps a Floor only while each replacement turns Ready within an interval, and the Floor's Then remains the check. A PodDisruptionBudget would make the guard independent of timing; it waits on the PRD's open question.
+
+A run declaring a policy spends one image inspection before its Scenarios start. An image it cannot obtain still provisions each declaring Scenario's cluster before that Scenario ends at its Given, and a transient registry failure is retried by no one before the next run. Whether such a failure should instead stop the whole run is the owner's open question.
 
 A new Kubernetes minor needs a table row before a Scenario declaring a policy runs on it. Pinning by tag carries the same standing gap as the cluster image, per [ADR: Kubernetes version pin](2026-10-03-kubernetes-version-pin.md).
 

@@ -95,13 +95,15 @@ cd k8s-resilience-lab
 
 make run                                 # every Scenario, each on a Simulated Cluster of its own
 make run ARGS="--whole-timeline"         # print every Timeline entry under each filing line
-make run ARGS="--k8s-version <version>"  # mirror another Kubernetes version
+make run ARGS="--k8s-version <version>"  # mirror another patch of the pinned Kubernetes minor
 make interactive SCENARIO=a-node-that-stops-responding  # hold one Scenario's cluster and watch it live
 make demo                                # the same, for the Descheduler Scenario, with the Live view opened in your browser
 make ci                                  # the full quality gate, the Scenarios included
 ```
 
 All Scenarios run at once, so a run lasts about as long as its slowest Scenario, and each reports as the section What It Looks Like in Practice shows.
+
+`--k8s-version` names the Kubernetes version every Simulated Cluster mirrors, the lab's pinned default when absent. A run of every Scenario carries those declaring a Descheduler policy, so on a minor the lab pairs no Descheduler with it stops before provisioning, naming that version. The pinned default's minor has one. An Interactive run of a Scenario declaring no policy runs on any version, as in `go run ./cmd/lab --k8s-version <version> --interactive a-node-that-stops-responding`.
 
 An Interactive run, `make interactive` with one Scenario name, or `--interactive` with the name on the lab itself, carries out that Scenario's Steps up to its first When and reports them as a run does. The terminal names the Live view's address on `127.0.0.1`. Open it in a browser to watch each Zone as a box of Nodes and each Node as a box of Pods, with its NodePool, labels, capacity, requests and room left, as the Placement changes. Click a Node, a Zone or a placed Pod box there to inject a Failure, and the terminal prints its When, such as "When Node worker-2 stops responding" or "When Pod checkout-abc12 is lost". While the cluster is held, the terminal also names each Node turning Ready or NotReady and each Pod evicted or scheduled, as a Wait narrative does. Each such line opens with its elapsed time to the millisecond, and the Descheduler's evictions stand apart from a Failure's. Click a stopped Node, or a Zone whose every Node stopped, to make it respond again, such as "When Node worker-2 responds again". A lost Pod has no recovery. Stop the lab with Ctrl-C, which files the Timeline, prints its line and removes the Simulated Cluster. A name matching no Scenario stops the lab and lists the Scenario names. `make demo` is an Interactive run that opens the Live view for you: it holds a-zone-that-responds-again-under-a-descheduler, or the Scenario named in `SCENARIO`, and hands the address to `open` (macOS) or `xdg-open` (Linux) once the terminal names it. With neither on the machine the address stays on the terminal and the run goes on.
 

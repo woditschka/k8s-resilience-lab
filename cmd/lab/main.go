@@ -366,7 +366,7 @@ func didNotHold(outcome lab.Outcome) error {
 		return nil
 	}
 	if outcome.Ended() {
-		return fmt.Errorf("the Scenario %s ended at %s: %w", outcome.Name, outcome.EndedAt, outcome.Cause)
+		return outcome.StepLeftUndone()
 	}
 
 	found := make([]string, 0, len(outcome.Findings))
