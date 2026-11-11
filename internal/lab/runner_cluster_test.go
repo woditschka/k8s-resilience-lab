@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -326,7 +328,7 @@ func TestAHeldRunUnderTestEndingBeforeItReports_ShouldFailTheTestNamingTheRunsEr
 	holding, stopHolding := context.WithCancel(t.Context())
 	stopHolding()
 
-	held, err := startAHeldRun(holding, stopHolding, running, theScenarioEndedBeforeItReports, func(*Scenario) {})
+	held, err := startAHeldRun(holding, stopHolding, running, theScenarioEndedBeforeItReports, func(*Scenario) {}, ignoringEachLineFollowed)
 	_, firstStop := held.stopTheLab()
 	_, secondStop := held.stopTheLab()
 
@@ -346,9 +348,11 @@ type heldForClicks struct {
 	// descheduling runs the passes of a Descheduler declared on an interval.
 	descheduling *deschedulerInterval
 	boards       <-chan scenario.PlacementBoard
-	// followed is written by the held run's reader of its Timeline, so the test
-	// reads it once the held run has ended.
-	followed []string
+	// followed is written by the held run's reader of its Timeline, which may
+	// still be handing a line to its terminal once the held run has ended.
+	followedLock sync.Mutex
+	followed     []string
+	terminal     func(string)
 	// stopTheLab may be called by the test and again by its cleanup, so it
 	// stops the held run once and hands back its Outcome each time.
 	stopTheLab func() (Outcome, error)
@@ -378,13 +382,25 @@ func aHeldRunDeschedulingOnAnInterval(t *testing.T, name string) *heldForClicks 
 func aHeldRunDeclaring(t *testing.T, name string, furtherGivens func(*Scenario)) *heldForClicks {
 	t.Helper()
 
-	return aHeldRunCarryingOut(t, name, func(steps *Scenario) {
+	return aHeldRunCarryingOut(t, name, aDeploymentOverTwoZonesDeclaring(furtherGivens))
+}
+
+// aHeldRunFollowedOn is a held run taking clicks whose lines are handed to the
+// terminal given.
+func aHeldRunFollowedOn(t *testing.T, name string, terminal func(string)) *heldForClicks {
+	t.Helper()
+
+	return aHeldRunPrintingTo(t, name, aDeploymentOverTwoZonesDeclaring(func(*Scenario) {}), terminal)
+}
+
+func aDeploymentOverTwoZonesDeclaring(furtherGivens func(*Scenario)) func(*Scenario) {
+	return func(steps *Scenario) {
 		steps.Given().Zones(twoZones, theGeneralNodePool())
 		steps.WaitFor().AllNodesReady()
 		steps.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(), resilientPlacement())
 		furtherGivens(steps)
 		steps.WaitFor().AllPodsReady()
-	})
+	}
 }
 
 // aHeldRunCarryingOut holds the cluster once the Steps given are carried out,
@@ -392,8 +408,14 @@ func aHeldRunDeclaring(t *testing.T, name string, furtherGivens func(*Scenario))
 func aHeldRunCarryingOut(t *testing.T, name string, steps func(*Scenario)) *heldForClicks {
 	t.Helper()
 
+	return aHeldRunPrintingTo(t, name, steps, ignoringEachLineFollowed)
+}
+
+func aHeldRunPrintingTo(t *testing.T, name string, steps func(*Scenario), terminal func(string)) *heldForClicks {
+	t.Helper()
+
 	holding, stopHolding := context.WithCancel(t.Context())
-	held, err := startAHeldRun(holding, stopHolding, aRunnerOnThisMachine(t), name, steps)
+	held, err := startAHeldRun(holding, stopHolding, aRunnerOnThisMachine(t), name, steps, terminal)
 	t.Cleanup(func() {
 		// The early end is reported once, by the Fatal below.
 		if _, stopErr := held.stopTheLab(); stopErr != nil && err == nil {
@@ -410,8 +432,10 @@ func aHeldRunCarryingOut(t *testing.T, name string, steps func(*Scenario)) *held
 // startAHeldRun returns once the held run reports its Outcome, or with the
 // error the run ended with when it ends first. The heldForClicks it returns
 // is never nil, so the caller can stop the lab either way.
-func startAHeldRun(holding context.Context, stopHolding context.CancelFunc, running *Runner, name string, steps func(*Scenario)) (*heldForClicks, error) {
-	held := &heldForClicks{injector: NewInjector()}
+func startAHeldRun(holding context.Context, stopHolding context.CancelFunc, running *Runner, name string,
+	steps func(*Scenario), terminal func(string),
+) (*heldForClicks, error) {
+	held := &heldForClicks{injector: NewInjector(), terminal: terminal}
 	observer, boards := anObserverHandingOverEachPlacementBoard(holding)
 	held.boards = boards
 	reported, ended := make(chan struct{}), make(chan struct{})
@@ -422,7 +446,7 @@ func startAHeldRun(holding context.Context, stopHolding context.CancelFunc, runn
 			held.provisioned = declaring.provisioned
 			steps(declaring)
 			held.topology, held.deployment, held.descheduling = declaring.topology, declaring.deployment, declaring.descheduling
-		}, observer, held.injector, func(Outcome) { close(reported) }, func(line string) { held.followed = append(held.followed, line) })
+		}, observer, held.injector, func(Outcome) { close(reported) }, held.follow)
 		stopped = Carried{Outcome: outcome, Err: err}
 	}()
 	held.stopTheLab = func() (Outcome, error) {
@@ -453,13 +477,60 @@ func (h *heldForClicks) theOutcomeOnceStopped(t *testing.T) Outcome {
 	return stopped
 }
 
-// theLinesFollowed stops the held run, so its reader has handed over every line.
+// follow keeps the line before the terminal takes it, so a line a stalled
+// terminal holds is kept all the same.
+func (h *heldForClicks) follow(line string) {
+	h.followedLock.Lock()
+	h.followed = append(h.followed, line)
+	h.followedLock.Unlock()
+
+	h.terminal(line)
+}
+
+// theLinesFollowed stops the held run, so its reader has handed over every line
+// it was handed before the stop.
 func (h *heldForClicks) theLinesFollowed(t *testing.T) []string {
 	t.Helper()
 
 	h.theOutcomeOnceStopped(t)
+	h.followedLock.Lock()
+	defer h.followedLock.Unlock()
 
-	return h.followed
+	return slices.Clone(h.followed)
+}
+
+// aStalledTerminal takes its first line and returns from it only once the test
+// has ended, as a terminal stopped with Ctrl-S or an unread pager does.
+type aStalledTerminal struct {
+	reached  chan struct{}
+	first    sync.Once
+	released chan struct{}
+	returned atomic.Bool
+}
+
+func aTerminalThatStopsTakingLines(t *testing.T) *aStalledTerminal {
+	t.Helper()
+
+	stalled := &aStalledTerminal{reached: make(chan struct{}), released: make(chan struct{})}
+	t.Cleanup(func() { close(stalled.released) })
+
+	return stalled
+}
+
+func (s *aStalledTerminal) take(string) {
+	s.first.Do(func() { close(s.reached) })
+	<-s.released
+	s.returned.Store(true)
+}
+
+func (s *aStalledTerminal) awaitItsFirstLine(t *testing.T) {
+	t.Helper()
+
+	select {
+	case <-s.reached:
+	case <-time.After(scenario.WaitingTime):
+		t.Fatalf("the held run handed its terminal no line within %s", scenario.WaitingTime)
+	}
 }
 
 // theWhensFollowed are the lines a click's When gives, the only ones naming a
@@ -973,6 +1044,79 @@ func TestAnInteractiveRunStopped_ShouldFileItsTimelineWithEveryEntryUpToTheStop(
 	expect.Expect(t, stopped.NotFiled).To(expect.Equal[error](nil))
 	expect.Expect(t, theTimelineFiledAt(t, stopped, held.theWhensFollowed(t)[0])).
 		To(expect.Equal(filedAtTheStop{Entries: len(stopped.Timeline.Entries()), HoldsTheStep: theStepFiled}))
+}
+
+const (
+	theScenarioOnAStalledTerminal      = "a-scenario-on-a-stalled-terminal"
+	theScenarioClickedOnAStalledOne    = "a-scenario-clicked-on-a-stalled-terminal"
+	theTerminalStillTakingItsFirstLine = false
+	theTimelineFiled                   = true
+	thePendingClickReturned            = true
+)
+
+// stoppedOnAStalledTerminal is what a held run stopped on a stalled terminal
+// leaves: whether the terminal had returned from its line by then, and the
+// Timeline it filed.
+type stoppedOnAStalledTerminal struct {
+	TerminalReturned bool
+	Filed            bool
+	FiledAtTheStop   filedAtTheStop
+}
+
+// The click's When is the terminal's first line, since a cluster settled before
+// the hold has nothing named before a click. The Outcome once stopped carries
+// no error, so the cluster's removal succeeded.
+func TestAHeldClusterWhoseTerminalStopsTakingLines_ShouldFileItsTimelineAndBeRemovedWhenTheLabStops(t *testing.T) {
+	t.Parallel()
+	terminal := aTerminalThatStopsTakingLines(t)
+	held := aHeldRunFollowedOn(t, theScenarioOnAStalledTerminal, terminal.take)
+	clicked := held.theFirstNode()
+	expectInjected(t, held.injector.ClickNode(clicked))
+	terminal.awaitItsFirstLine(t)
+
+	stopped := held.theOutcomeOnceStopped(t)
+
+	expect.Expect(t, stoppedOnAStalledTerminal{
+		TerminalReturned: terminal.returned.Load(),
+		Filed:            stopped.NotFiled == nil,
+		FiledAtTheStop:   theTimelineFiledAt(t, stopped, "When Node "+clicked+" stops responding"),
+	}).To(expect.Equal(stoppedOnAStalledTerminal{
+		TerminalReturned: theTerminalStillTakingItsFirstLine,
+		Filed:            theTimelineFiled,
+		FiledAtTheStop:   filedAtTheStop{Entries: len(stopped.Timeline.Entries()), HoldsTheStep: theStepFiled},
+	}))
+	expectRemoved(t, held.provisioned)
+}
+
+// The second click's When cannot be handed on while the terminal holds the
+// first, so the click waits in the Timeline as the lab stops. The stop waits
+// for a click under way, so a click that returned did so before Hold did. Its
+// error is the stopped run's own and is not asserted.
+func TestAClickPendingOnAStalledTerminalWhenTheLabStops_ShouldReturnAndLetTheLabStop(t *testing.T) {
+	t.Parallel()
+	terminal := aTerminalThatStopsTakingLines(t)
+	held := aHeldRunFollowedOn(t, theScenarioClickedOnAStalledOne, terminal.take)
+	clicked := held.theFirstNode()
+	expectInjected(t, held.injector.ClickNode(clicked))
+	terminal.awaitItsFirstLine(t)
+	pending := make(chan struct{})
+	go func() {
+		defer close(pending)
+		_ = held.injector.ClickNode(clicked)
+	}()
+
+	held.theOutcomeOnceStopped(t)
+
+	expect.Expect(t, isClosed(pending)).To(expect.Equal(thePendingClickReturned))
+}
+
+func isClosed(signal <-chan struct{}) bool {
+	select {
+	case <-signal:
+		return true
+	default:
+		return false
+	}
 }
 
 // thePodsDescheduledAfter names each Pod the Timeline reports evicted by the

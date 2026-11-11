@@ -81,7 +81,8 @@ func ObtainVersion(ctx context.Context, endpoint Endpoint, version KubernetesVer
 }
 
 // Provision makes the served Stages the lab's own set before any Node exists. A
-// cluster it could not finish provisioning is removed rather than left behind.
+// cluster it could not finish provisioning is removed rather than left behind,
+// under a context detached from ctx, since a stop is one way not to finish.
 func Provision(ctx context.Context, endpoint Endpoint, version KubernetesVersion, scenarioName string) (*SimulatedCluster, error) {
 	engine, err := newEngine(endpoint, scenarioName)
 	if err != nil {
@@ -93,12 +94,16 @@ func Provision(ctx context.Context, endpoint Endpoint, version KubernetesVersion
 		return nil, err
 	}
 
+	return provisionStarted(ctx, container)
+}
+
+func provisionStarted(ctx context.Context, container *ClusterContainer) (*SimulatedCluster, error) {
 	provisioned, err := awaitControlPlane(ctx, container)
 	if err != nil {
-		return nil, errors.Join(err, container.Remove(ctx))
+		return nil, errors.Join(err, container.Remove(context.WithoutCancel(ctx)))
 	}
 	if err := provisioned.ownStages(ctx); err != nil {
-		return nil, errors.Join(err, container.Remove(ctx))
+		return nil, errors.Join(err, container.Remove(context.WithoutCancel(ctx)))
 	}
 
 	return provisioned, nil

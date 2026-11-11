@@ -457,7 +457,7 @@ func aPodChangeRecorded() scenario.Entry {
 // order sent is the order received.
 func TestATimeline_ShouldRecordEachStepAtItsMoment(t *testing.T) {
 	changes := make(chan watched)
-	recorded := newRecording(func() {})
+	recorded := newRecording(t.Context(), func() {})
 	go recorded.own(changes, &entriesDelivered{})
 
 	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
@@ -486,7 +486,7 @@ type followedToTheStop struct {
 // closes the streams.
 func TestATimelineFollowed_ShouldHoldEveryStepNotedBeforeTheAskAndHandOnEachLaterEntryUntilTheRecordStops(t *testing.T) {
 	changes := make(chan watched)
-	recorded := newRecording(func() {})
+	recorded := newRecording(t.Context(), func() {})
 	go recorded.own(changes, &entriesDelivered{})
 	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
 	recorded.note(theStepNoted, theLineNoted)
@@ -506,9 +506,31 @@ func TestATimelineFollowed_ShouldHoldEveryStepNotedBeforeTheAskAndHandOnEachLate
 	}))
 }
 
+// The follower's channel is never read, so the owner is held on its first
+// change until the lab stops; the note and the change after the stop are taken
+// all the same.
+func TestATimelineFollowedByAReaderThatStopsTakingEntries_ShouldStillStopRecordingAndHoldEveryEntry(t *testing.T) {
+	changes := make(chan watched)
+	following, theLabStops := context.WithCancel(t.Context())
+	recorded := newRecording(following, func() {})
+	go recorded.own(changes, &entriesDelivered{})
+	recorded.follow()
+
+	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
+	theLabStops()
+	recorded.note(theStepNoted, theLineNoted)
+	changes <- watched{event: aPodChangedAt(aLaterVersion)}
+	close(changes)
+	<-recorded.done
+
+	expect.Expect(t, withoutTheirTimes(recorded.timeline.Entries())).To(expect.Equal([]scenario.Entry{
+		aPodChangeRecorded(), theStepNoteRecorded(), aPodChangeRecorded(),
+	}))
+}
+
 func TestATimelineFollowedASecondTime_ShouldCloseTheFirstFollowersChannel(t *testing.T) {
 	changes := make(chan watched)
-	recorded := newRecording(func() {})
+	recorded := newRecording(t.Context(), func() {})
 	go recorded.own(changes, &entriesDelivered{})
 	t.Cleanup(func() { close(changes) })
 	_, first := recorded.follow()
@@ -521,7 +543,7 @@ func TestATimelineFollowedASecondTime_ShouldCloseTheFirstFollowersChannel(t *tes
 
 func TestATimelineFollowedOnceStopped_ShouldHoldTheWholeTimelineAndHandOnNothing(t *testing.T) {
 	changes := make(chan watched)
-	recorded := newRecording(func() {})
+	recorded := newRecording(t.Context(), func() {})
 	go recorded.own(changes, &entriesDelivered{})
 	changes <- watched{event: aPodChangedAt(theVersionLastSeen)}
 	close(changes)
@@ -546,7 +568,7 @@ func TestAClusterNotRecording_ShouldBeFollowedAsAnEmptyTimelineHandingOnNothing(
 
 func TestAStepNotedAfterTheRecordStopped_ShouldBeNotedNowhere(t *testing.T) {
 	changes := make(chan watched)
-	recorded := newRecording(func() {})
+	recorded := newRecording(t.Context(), func() {})
 	go recorded.own(changes, &entriesDelivered{})
 	close(changes)
 	<-recorded.done

@@ -37,7 +37,7 @@ func (c *SimulatedCluster) Record(ctx context.Context, into EntrySink) error {
 		return err
 	}
 
-	recorded := newRecording(stop)
+	recorded := newRecording(ctx, stop)
 	go recorded.own(readStreams(watching, opened), into)
 	c.recording = recorded
 
@@ -62,8 +62,10 @@ func (c *SimulatedCluster) StopRecording() scenario.Timeline {
 // The Timeline holds every Step noted before the ask, since the goroutine owning
 // the record answers it in turn with the notes, so no entry is missed or handed
 // twice. The owner waits on the channel's reader before it takes the next
-// change, so the channel is read to its close. A cluster that is not recording
-// holds an empty Timeline and hands on nothing.
+// change, until the context Record was given ends: the channel then closes,
+// and every later entry is recorded and handed to no one, so a reader that
+// stopped reading holds up no stop. A cluster that is not recording holds an
+// empty Timeline and hands on nothing.
 func (c *SimulatedCluster) FollowTimeline() (scenario.Timeline, <-chan scenario.Entry) {
 	if c.recording == nil {
 		nothing := make(chan scenario.Entry)
@@ -90,12 +92,15 @@ func (c *SimulatedCluster) NoteStep(step, line string) {
 // one recorded so far is handed over on its own channel, so the record holds no
 // shared state and needs no lock.
 type recording struct {
-	stop     context.CancelFunc
-	started  time.Time
-	done     chan struct{}
-	notes    chan stepNoted
-	asks     chan followAsked
-	timeline scenario.Timeline
+	// following ends the hand-over to the follower, and nothing else: the record
+	// runs on until its streams close.
+	following context.Context
+	stop      context.CancelFunc
+	started   time.Time
+	done      chan struct{}
+	notes     chan stepNoted
+	asks      chan followAsked
+	timeline  scenario.Timeline
 }
 
 // followAsked carries room for the Timeline so far, and the channel the owner
@@ -108,20 +113,27 @@ type followAsked struct {
 type stepNoted struct {
 	step string
 	line string
+	// handedOn is closed once the note's entry is with the follower, or with no
+	// one where none follows.
+	handedOn chan struct{}
 }
 
-func newRecording(stop context.CancelFunc) *recording {
+func newRecording(following context.Context, stop context.CancelFunc) *recording {
 	return &recording{
-		stop: stop, started: time.Now(), done: make(chan struct{}),
+		following: following, stop: stop, started: time.Now(), done: make(chan struct{}),
 		notes: make(chan stepNoted), asks: make(chan followAsked),
 	}
 }
 
 // note returns once the owning goroutine has taken the note, so a change
-// received after it stands after it. A record already stopped takes none.
+// received after it stands after it, and has handed its entry on, so a lab
+// stopping after the note still hands its line to the terminal. A record
+// already stopped takes none.
 func (r *recording) note(step, line string) {
+	handedOn := make(chan struct{})
 	select {
-	case r.notes <- stepNoted{step: step, line: line}:
+	case r.notes <- stepNoted{step: step, line: line, handedOn: handedOn}:
+		<-handedOn
 	case <-r.done:
 	}
 }
@@ -152,30 +164,62 @@ func (r *recording) own(changes <-chan watched, into EntrySink) {
 	for received := range r.received(changes) {
 		if received.asked != nil {
 			received.asked.soFar <- scenario.NewTimeline(recorded)
-			if follower != nil {
-				close(follower)
-			}
-			follower = received.asked.later
+			closeFollower(follower)
+			follower = r.followedFrom(received.asked.later)
 
 			continue
 		}
 		entry, carried := received.entry(time.Since(r.started))
-		if !carried {
-			continue
+		if carried {
+			recorded = append(recorded, entry)
+			into.Write(entry)
+			follower = r.handOn(follower, entry)
 		}
-
-		recorded = append(recorded, entry)
-		into.Write(entry)
-		if follower != nil {
-			follower <- entry
+		if received.step.handedOn != nil {
+			close(received.step.handedOn)
 		}
 	}
 
+	closeFollower(follower)
+	r.timeline = scenario.NewTimeline(recorded)
+	close(r.done)
+}
+
+// followedFrom hands on nothing to a follower asking once the lab stopped
+// following.
+func (r *recording) followedFrom(later chan<- scenario.Entry) chan<- scenario.Entry {
+	if r.following.Err() != nil {
+		close(later)
+
+		return nil
+	}
+
+	return later
+}
+
+// handOn waits on the follower until the lab stops following, then closes its
+// channel and hands on nothing more, so a reader that stopped taking entries
+// holds up the record only while the lab runs. The entry stays recorded.
+func (r *recording) handOn(follower chan<- scenario.Entry, entry scenario.Entry) chan<- scenario.Entry {
+	if follower == nil {
+		return nil
+	}
+	if r.following.Err() == nil {
+		select {
+		case follower <- entry:
+			return follower
+		case <-r.following.Done():
+		}
+	}
+	close(follower)
+
+	return nil
+}
+
+func closeFollower(follower chan<- scenario.Entry) {
 	if follower != nil {
 		close(follower)
 	}
-	r.timeline = scenario.NewTimeline(recorded)
-	close(r.done)
 }
 
 // received ends with the changes, since the streams closing is what stops a

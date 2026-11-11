@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -272,6 +273,42 @@ func stillOnTheEngine(t *testing.T, endpoint Endpoint, name string) bool {
 	err := engineRequest(t.Context(), endpoint, http.MethodGet, "/containers/"+name+"/json", nil, &inspected)
 
 	return err == nil
+}
+
+// stoppedProvisioning is what a stop during provisioning leaves: whether the
+// provisioning was refused, and whether its container is still on the engine.
+type stoppedProvisioning struct {
+	Refused          bool
+	StillOnTheEngine bool
+}
+
+// The container starts under a live context and the rest of the provisioning
+// runs under a cancelled one, as when the lab stops while the control plane is
+// still coming up.
+func TestAClusterWhoseProvisioningIsStopped_ShouldBeRemovedAndLeaveNoContainer(t *testing.T) {
+	t.Parallel()
+	endpoint := requireEngine(t)
+	engine, err := newEngine(endpoint, resilientPlacementScenario)
+	if err != nil {
+		t.Fatalf("name the Simulated Cluster's container: %v", err)
+	}
+	started, err := engine.StartCluster(t.Context(), DefaultKubernetesVersion())
+	if err != nil {
+		t.Fatalf("start a Simulated Cluster on the engine at %s: %v", endpoint.Socket(), err)
+	}
+	t.Cleanup(func() {
+		if stillOnTheEngine(t, endpoint, started.Name()) {
+			_ = started.Remove(context.WithoutCancel(t.Context()))
+		}
+	})
+	stopped, theLabStops := context.WithCancel(t.Context())
+	theLabStops()
+
+	_, err = provisionStarted(stopped, started)
+
+	expect.Expect(t, stoppedProvisioning{
+		Refused: errors.Is(err, context.Canceled), StillOnTheEngine: stillOnTheEngine(t, endpoint, started.Name()),
+	}).To(expect.Equal(stoppedProvisioning{Refused: true}))
 }
 
 func TestAProvisionedTopology_ShouldHoldThreeZonesOfThreeReadyNodes(t *testing.T) {

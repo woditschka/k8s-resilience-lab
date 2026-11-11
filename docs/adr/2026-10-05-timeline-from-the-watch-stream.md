@@ -66,9 +66,14 @@ What a held run's terminal names. The owner asked for "all changes", then accept
 26. **The Descheduler's evictions and their replacements alone** — quiet, and silent on what a click causes.
 27. **Every moment a Wait narrative names, each line printed once its moment is complete** — a click's effects and a pass's alike, worded as a run's narrative.
 
+What the stop does with a terminal that stopped taking lines, the owner having left it open. Any wait on the terminal at the stop leaves the cluster running and unfiled:
+
+28. **Holding the lines not yet printed** — printed once the terminal resumes, the lab ending only then.
+29. **Dropping them** — the stop waits on no line, and the filed Timeline holds their entries.
+
 ## Decision
 
-Options 3, 8, 10, 12, 14, 17, 22, 24 and 27.
+Options 3, 8, 10, 12, 14, 17, 22, 24, 27 and 29.
 
 - Five streams: Nodes, Pods, Deployments, ReplicaSets, and Events in the Deployment's namespace. One goroutine owns the record and selects over them, so receipt order is the Timeline's order and no lock is needed.
 - A closed stream is re-opened once from the last version seen; a failed re-open is a noted entry. Each entry is mapped into an immutable `internal/scenario` value.
@@ -79,11 +84,11 @@ Options 3, 8, 10, 12, 14, 17, 22, 24 and 27.
 - `cmd/lab` prints each narrative above its Wait's board. `--whole-timeline` adds every entry.
 - Every control-plane request, a watch's opening included, keeps the 30-second deadline. A stream runs on a second client with the same address, no credential and no deadline, ending with its recording.
 - An Interactive run records until the lab stops. Each click changing the cluster is noted as a When through the owning goroutine. Its Wait narratives come from the Timeline recorded so far at the hold, and the Timeline is filed at the stop.
-- At the hold the owning goroutine hands over the Timeline so far and then each later entry, until the record stops. A pure reader in `internal/scenario` turns them into the terminal's lines through the Wait narratives' own reading. A click's When is worded as its Step, and every moment as a Wait narrative's line.
+- At the hold the owning goroutine hands over the Timeline so far and then each later entry, until the lab stops. From the stop it hands on none, and the run's reader prints no further line and is waited for only when no line is printing (option 29). A pure reader in `internal/scenario` turns them into the terminal's lines through the Wait narratives' own reading. A click's When is worded as its Step, and every moment as a Wait narrative's line.
 
 ## Consequences
 
-Every change the API server pushed before the Scenario ended, or before an Interactive run's lab stopped, is in the Timeline, and stopping the record drains each stream. A held Timeline grows for as long as the cluster is held; a bound is an open question in the PRD. A held run's terminal stalling holds up its record, as a stalled file write does. Cross-stream order is receipt order, not causal order. A filed Timeline narrates as the run that recorded it did. A Wait settles on two observations a poll interval apart, far above a stream's delivery on loopback, so its narrative holds the changes it reflects.
+Every change the API server pushed before the Scenario ended, or before an Interactive run's lab stopped, is in the Timeline, and stopping the record drains each stream. A held Timeline grows for as long as the cluster is held; a bound is an open question in the PRD. A held run's terminal stalling holds up its record until the lab stops, as a stalled file write does. Stopping files the Timeline and removes the cluster whatever the terminal does, and a moment recorded after the stop prints no line on any terminal. Cross-stream order is receipt order, not causal order. A filed Timeline narrates as the run that recorded it did. A Wait settles on two observations a poll interval apart, far above a stream's delivery on loopback, so its narrative holds the changes it reflects.
 
 Timeline files accumulate until an engineer deletes them; retention is an open question in the PRD. A hand-written `watch.Interface` in `internal/cluster`'s test drives the closed-stream and failed-open paths, a real control plane producing none on demand.
 

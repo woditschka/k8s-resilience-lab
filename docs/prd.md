@@ -621,6 +621,7 @@ An Interactive run's Timeline keeps recording while its cluster is held, each cl
 5. A replacement no Node has room for. No terminal line names it.
 6. No Descheduler on an interval. The terminal names the clicks and the moments after them alone.
 7. Pods the lab places while provisioning the Topology. No terminal line names them.
+8. The terminal stops taking lines while the cluster is held. When the lab stops, it still files the Timeline and removes the cluster, dropping lines not yet printed.
 
 **Design:** [system-design.md](system-design.md)
 

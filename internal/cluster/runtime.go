@@ -429,7 +429,7 @@ func (e Engine) StartCluster(ctx context.Context, version KubernetesVersion) (*C
 
 	started := &ClusterContainer{endpoint: e.endpoint, identifier: identifier, name: e.containerName}
 	if err := e.startContainer(ctx, identifier); err != nil {
-		return nil, errors.Join(err, started.Remove(ctx))
+		return nil, errors.Join(err, started.Remove(context.WithoutCancel(ctx)))
 	}
 
 	return started, nil

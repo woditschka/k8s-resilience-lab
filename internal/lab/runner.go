@@ -291,8 +291,10 @@ type Observer struct {
 // returned carries it and the Outcome reported does not.
 //
 // Each line scenario.Following reads from the entries recorded while held is
-// handed to followed, after the Outcome and in order, from one goroutine that
-// has ended once Hold returns.
+// handed to followed, after the Outcome and in order, from one goroutine. No
+// line is handed once Hold returns, but a line followed is still taking when
+// the lab stops may finish after it, so a terminal that stopped taking lines
+// keeps no cluster from being removed.
 func (r *Runner) Hold(ctx context.Context, steps func(*Scenario), observer Observer, injector *Injector,
 	reported func(Outcome), followed func(string),
 ) (Outcome, error) {
@@ -357,31 +359,75 @@ func (h *holding) hold(ctx context.Context, running *Scenario, name string) Outc
 	h.injector.takeFailures(
 		&heldCluster{ctx: ctx, provisioned: running.provisioned, topology: running.topology, stopped: slices.Clone(running.failed)},
 		func() { h.reported(held) })
-	joinTheFollowing := h.follow(soFar, later)
+	stopTheFollowing := h.follow(soFar, later)
 	<-ctx.Done()
 	h.injector.stopTakingFailures()
 
 	held.Timeline = running.provisioned.StopRecording()
-	joinTheFollowing()
+	stopTheFollowing()
 
 	return held
 }
 
 // follow starts once the Outcome is reported, so no line comes before it, and
-// returns the function that waits for the channel's close to end it. The record
-// waits on this reader before it takes the next change, so it runs until then.
-func (h *holding) follow(soFar scenario.Timeline, later <-chan scenario.Entry) (join func()) {
-	var reading sync.WaitGroup
-	reading.Go(func() {
+// returns the function that ends it once the record has stopped. The record
+// waits on this reader until the lab stops, then hands it nothing more.
+func (h *holding) follow(soFar scenario.Timeline, later <-chan scenario.Entry) (stop func()) {
+	lines := &linesFollowed{}
+	lines.reading.Go(func() {
 		following := scenario.NewFollowing(soFar)
 		for entry := range later {
 			for _, line := range following.Read(entry) {
+				if !lines.startPrinting() {
+					return
+				}
 				h.followed(line)
+				lines.donePrinting()
 			}
 		}
 	})
 
-	return reading.Wait
+	return lines.stop
+}
+
+// linesFollowed lets the stop wait for a reader between lines and never for a
+// line the terminal has stopped taking: no line starts after the stop, and one
+// already printing is left to finish on its own.
+type linesFollowed struct {
+	mu       sync.Mutex
+	stopped  bool
+	printing bool
+	reading  sync.WaitGroup
+}
+
+func (l *linesFollowed) startPrinting() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.stopped {
+		return false
+	}
+	l.printing = true
+
+	return true
+}
+
+func (l *linesFollowed) donePrinting() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.printing = false
+}
+
+func (l *linesFollowed) stop() {
+	l.mu.Lock()
+	l.stopped = true
+	abandoned := l.printing
+	l.mu.Unlock()
+
+	if !abandoned {
+		l.reading.Wait()
+	}
 }
 
 // Injector takes the clicks an engineer makes in the Live view into a held

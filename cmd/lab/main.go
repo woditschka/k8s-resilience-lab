@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"unicode/utf8"
 
@@ -80,10 +81,10 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	// needs no locking.
 	carried, err := runner.RunAtOnce(ctx, scenarios.All())
 	if err != nil {
-		return errors.Join(err, reported.err)
+		return errors.Join(err, reported.failed())
 	}
 
-	return errors.Join(writeRun(reported, carried, asked), reported.err)
+	return errors.Join(writeRun(reported, carried, asked), reported.failed())
 }
 
 func openingOf(engine cluster.Endpoint, asked runSetting) reportPart {
@@ -127,8 +128,9 @@ func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, r
 	opening.addf("Live view:          %s", server.Address())
 	reported.printPart(opening)
 
-	// The lines followed print after the Outcome and before Hold returns, from
-	// one goroutine, so they never interleave with another print.
+	// The lines followed print after the Outcome, from one goroutine. One still
+	// printing when the lab stops may finish after Hold returns, which the
+	// report's lock keeps from interleaving with the Timeline's line.
 	held, err := runner.Hold(ctx, asked.held, lab.Observer{Every: live.RefreshInterval, Observed: view.Observed}, injector,
 		func(outcome lab.Outcome) {
 			var part reportPart
@@ -137,14 +139,14 @@ func runHeld(ctx context.Context, engine cluster.Endpoint, runner *lab.Runner, r
 		}, reported.printFollowed)
 	closed := server.Close()
 	if !(lab.Carried{Outcome: held}).Reported() {
-		return errors.Join(err, closed, reported.err)
+		return errors.Join(err, closed, reported.failed())
 	}
 
 	var stopped reportPart
 	writeTimeline(&stopped, held, asked)
 	reported.printPart(stopped)
 
-	return errors.Join(err, notFiled(held), didNotHold(held), closed, reported.err)
+	return errors.Join(err, notFiled(held), didNotHold(held), closed, reported.failed())
 }
 
 // injected hands a click the Live view took to the held run by its kind, which
@@ -397,7 +399,10 @@ func (p reportPart) width() int {
 // stdout is reported once rather than checked at every line or silently
 // dropped.
 type runReport struct {
-	to  io.Writer
+	to io.Writer
+	// mu serializes the writes, since a held cluster's line still printing when
+	// the lab stops may finish while the Timeline's line prints.
+	mu  sync.Mutex
 	err error
 	// lastWidth is the widest line of the part printed last, which the next
 	// heavier separator must reach as well as its own part's.
@@ -423,7 +428,17 @@ func (r *runReport) printFollowed(line string) {
 	r.printf("  %s\n", line)
 }
 
+func (r *runReport) failed() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.err
+}
+
 func (r *runReport) printf(format string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if r.err != nil {
 		return
 	}
