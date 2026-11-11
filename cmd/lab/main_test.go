@@ -8,13 +8,18 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -1761,4 +1766,196 @@ func makeAskingForAVersion(t *testing.T, target string) (string, error) {
 	output, err := command.CombinedOutput()
 
 	return string(output), err
+}
+
+// A stopped run is watched on the engine itself, because what the run reports
+// cannot show a container it lost track of. These tests do not run in
+// parallel, so every container of a shipped Scenario on the engine while they
+// run is their own run's.
+const (
+	aContainerCreated      = "create"
+	aContainerStarted      = "start"
+	aDeschedulerPassSuffix = "-descheduler"
+	// The engineer finds a run's containers by this name on the engine, as the
+	// troubleshooting guidance does.
+	aContainerOfTheLab = "k8s-resilience-lab-"
+)
+
+func TestARunStoppedWhileItsScenariosProvision_ShouldRemoveEverySimulatedClusterStartedSoFar(t *testing.T) {
+	requireEngine(t)
+	engine := theEngineTheLabDials(t)
+	leftBefore := engine.containersOfTheShippedScenarios(t)
+	running, stopTheRun := context.WithCancel(t.Context())
+	defer stopTheRun()
+	engine.onFirst(t, aContainerStarted, aSimulatedCluster, stopTheRun)
+
+	var reported, warned bytes.Buffer
+	err := run(running, nil, t.TempDir(), &reported, &warned)
+
+	expectNamed(t, err, context.Canceled.Error())
+	expect.Expect(t, engine.containersOfTheShippedScenarios(t)).To(expect.Equal(leftBefore))
+}
+
+func TestARunOfEveryScenarioTheEngineerStops_ShouldEndEachScenarioPartWayAndLeaveNoSimulatedClusterOrDescheduler(t *testing.T) {
+	requireEngine(t)
+	engine := theEngineTheLabDials(t)
+	leftBefore := engine.containersOfTheShippedScenarios(t)
+	engine.onFirst(t, aContainerCreated, aDeschedulerPass, theEngineerStopsTheLab(t))
+
+	var reported, warned bytes.Buffer
+	err := run(t.Context(), nil, t.TempDir(), &reported, &warned)
+
+	expectNamed(t, err, context.Canceled.Error())
+	expect.Expect(t, theSectionsFilingNoTimeline(theScenarioSectionsOf(t, reported.String()))).To(expect.HaveLen[string](0))
+	expect.Expect(t, engine.containersOfTheShippedScenarios(t)).To(expect.Equal(leftBefore))
+}
+
+func aSimulatedCluster(container string) bool {
+	return !strings.HasSuffix(container, aDeschedulerPassSuffix)
+}
+
+func aDeschedulerPass(container string) bool {
+	return strings.HasSuffix(container, aDeschedulerPassSuffix)
+}
+
+// theEngineerStopsTheLab interrupts the test binary itself, as the engineer's
+// Ctrl-C does the lab. The test listens as well, so a lab that does not listen
+// leaves the binary running to fail the test rather than killing it.
+func theEngineerStopsTheLab(t *testing.T) func() {
+	t.Helper()
+
+	heard := make(chan os.Signal, 1)
+	signal.Notify(heard, os.Interrupt)
+	t.Cleanup(func() { signal.Stop(heard) })
+
+	return func() {
+		// A refused signal leaves the run unstopped, which fails the test.
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	}
+}
+
+func theSectionsFilingNoTimeline(sections []string) []string {
+	return slices.DeleteFunc(sections, func(section string) bool {
+		return strings.Contains(section, filedAt)
+	})
+}
+
+// engineWatch is the test's own client to the engine the lab dials, since the
+// lab holds no call listing containers or following the engine's events.
+type engineWatch struct {
+	client  *http.Client
+	shipped []string
+}
+
+func theEngineTheLabDials(t *testing.T) engineWatch {
+	t.Helper()
+
+	endpoint, err := cluster.DetectEngine(t.Context(), slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("detect the engine the lab dials: %v", err)
+	}
+	socket := endpoint.Socket()
+	endpoint.Close()
+	shipped, err := lab.ScenarioNames(scenarios.All())
+	if err != nil {
+		t.Fatalf("name the shipped Scenarios: %v", err)
+	}
+
+	client := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, "unix", socket)
+		},
+	}}
+	t.Cleanup(client.CloseIdleConnections)
+
+	return engineWatch{client: client, shipped: shipped}
+}
+
+// theEngineHost is ignored by the dialer, which reaches the socket alone.
+const theEngineHost = "http://engine"
+
+func (e engineWatch) containersOfTheShippedScenarios(t *testing.T) []string {
+	t.Helper()
+
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+		theEngineHost+"/containers/json?all=true", nil)
+	if err != nil {
+		t.Fatalf("compose the request listing the engine's containers: %v", err)
+	}
+	answer, err := e.client.Do(request)
+	if err != nil {
+		t.Fatalf("list the engine's containers: %v", err)
+	}
+	defer func() {
+		if err := answer.Body.Close(); err != nil {
+			t.Errorf("close the engine's list of containers: %v", err)
+		}
+	}()
+
+	var listed []struct {
+		Names []string `json:"Names"`
+	}
+	if err := json.NewDecoder(answer.Body).Decode(&listed); err != nil {
+		t.Fatalf("read the engine's containers: %v", err)
+	}
+
+	var ours []string
+	for _, container := range listed {
+		for _, name := range container.Names {
+			if named := strings.TrimPrefix(name, "/"); e.ofAShippedScenario(named) {
+				ours = append(ours, named)
+			}
+		}
+	}
+	slices.Sort(ours)
+
+	return ours
+}
+
+func (e engineWatch) ofAShippedScenario(container string) bool {
+	return slices.ContainsFunc(e.shipped, func(scenarioName string) bool {
+		return strings.HasPrefix(container, aContainerOfTheLab+scenarioName+"-")
+	})
+}
+
+// onFirst follows the engine's events from before the run starts, so the stop
+// lands at a moment the engine itself reports rather than after a guessed
+// sleep. It calls then once, for the first container of a shipped Scenario the
+// action happens to whose name matches.
+func (e engineWatch) onFirst(t *testing.T, action string, matches func(string) bool, then func()) {
+	t.Helper()
+
+	watching, stopWatching := context.WithCancel(context.WithoutCancel(t.Context()))
+	t.Cleanup(stopWatching)
+	filters := url.Values{"filters": {`{"type":["container"],"event":["` + action + `"]}`}}
+	request, err := http.NewRequestWithContext(watching, http.MethodGet, theEngineHost+"/events?"+filters.Encode(), nil)
+	if err != nil {
+		t.Fatalf("compose the request following the engine's events: %v", err)
+	}
+	answer, err := e.client.Do(request)
+	if err != nil {
+		t.Fatalf("follow the engine's events: %v", err)
+	}
+
+	go func() {
+		// The stream ends by its context being cancelled, so its close reports
+		// nothing a test could act on.
+		defer func() { _ = answer.Body.Close() }()
+		events := json.NewDecoder(answer.Body)
+		for {
+			var event struct {
+				Actor struct {
+					Attributes map[string]string `json:"Attributes"`
+				} `json:"Actor"`
+			}
+			if err := events.Decode(&event); err != nil {
+				return
+			}
+			if named := event.Actor.Attributes["name"]; e.ofAShippedScenario(named) && matches(named) {
+				then()
+				return
+			}
+		}
+	}()
 }

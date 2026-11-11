@@ -318,16 +318,11 @@ func (p *deschedulerPass) lastLogLines(ctx context.Context) string {
 
 // The pass is removed by the name its cluster gives it rather than by the
 // identifier its creation answers, since a creation can take effect on the
-// engine without its answer reaching the lab. A pass that is not there counts
-// as removed, which only the pass's removal tolerates: there may be none.
+// engine without its answer reaching the lab. There may be no pass to remove.
 func (c *ClusterContainer) removeDeschedulerPass(ctx context.Context) error {
 	name := deschedulerPassNameFor(c.name)
-	err := removeContainer(ctx, c.endpoint, name, "the Descheduler pass "+name)
-	if isNoLongerHeld(err) {
-		return nil
-	}
 
-	return err
+	return removeByName(ctx, c.endpoint, name, "the Descheduler pass "+name)
 }
 
 // lastLinesOf reads the engine's log frames and keeps the last lines of both

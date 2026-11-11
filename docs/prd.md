@@ -47,6 +47,9 @@ One invocation with no arguments checks the lab's own rules, then runs every Sce
 <a id="req-sim-014"></a>
 A run carries out its Scenarios at once yet reports them in declared order, and a failing Scenario ends alone `[REQ-SIM-014]`.
 
+<a id="req-sim-034"></a>
+A run the engineer stops, or one its container runtime cuts short, still removes every Simulated Cluster it started and names why it ended `[REQ-SIM-034]`.
+
 <a id="req-sim-003"></a>
 An engineer names one Scenario to re-run it alone `[REQ-SIM-003]`.
 
@@ -69,6 +72,9 @@ The same command holds the lab to its declared dependencies, free of known vulne
 - `[REQ-SIM-014]` given Scenarios carried out at once, when each reports, then its Placement and Timeline name only its own Nodes and Pods.
 - `[REQ-SIM-014]` given one Scenario failing part-way, when the run ends, then it is reported, the others reached their outcomes, and no Simulated Cluster remains.
 - `[REQ-SIM-014]` given the lab's own tests, when the one command runs them, then those needing a Simulated Cluster run at once, and those judging a full run share one.
+- `[REQ-SIM-034]` given a run of every Scenario, when the engineer stops it, then each Scenario still running ends as one failing part-way does. No Simulated Cluster or Descheduler of the run remains.
+- `[REQ-SIM-034]` given a Simulated Cluster the container runtime created without its answer reaching the lab, when its Scenario ends, then that cluster is removed all the same.
+- `[REQ-SIM-034]` given a Kubernetes version or Descheduler the lab obtains only in part, when the run starts, then the lab reports it as one it cannot obtain, naming it.
 - `[REQ-SIM-003]` given several Scenarios, when the engineer names one, then only it runs, reporting as a full run does.
 - `[REQ-SIM-003]` given a name matching no Scenario, when the run starts, then it stops before provisioning, naming the Scenarios that exist.
 - `[REQ-SIM-004]` given the declared toolchain, when the one command runs, then the lab's rules, tests and build run. A failure, or a part able to reach a cluster the lab did not provision, fails it, named.
@@ -83,6 +89,8 @@ The same command holds the lab to its declared dependencies, free of known vulne
 3. A stale runtime address is present alongside a live runtime. The run reaches the live one.
 4. A run names a Kubernetes version the lab cannot obtain. The run stops, naming it, before any Scenario starts.
 5. The runtime cannot start one Scenario's Simulated Cluster while others start. That Scenario ends at its first Step, naming why, and the others run on.
+6. The engineer stops a run while its Scenarios still provision. Every Simulated Cluster started so far is removed `[REQ-SIM-034]`.
+7. A run is killed outright, with no chance to stop. Its Simulated Clusters stay for the engineer to remove `[REQ-SIM-034]`.
 
 **ADR:** [ADR: Kubernetes version pin](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: Lab-provisioned Simulated Cluster](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: Predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
 

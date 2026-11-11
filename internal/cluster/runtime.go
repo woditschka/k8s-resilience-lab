@@ -195,7 +195,7 @@ func resolveCandidate(candidate string) (string, error) {
 // The version request doubles as the liveness check. A socket that does not
 // resolve leaves nothing open behind it.
 func probe(ctx context.Context, socket string) (Endpoint, error) {
-	candidate := Endpoint{socket: socket, client: engineClient(socket)}
+	candidate := newEndpoint(socket, engineClient(socket))
 
 	version, err := candidate.reportedVersion(ctx)
 	if err != nil {
@@ -206,6 +206,12 @@ func probe(ctx context.Context, socket string) (Endpoint, error) {
 	candidate.version = version
 
 	return candidate, nil
+}
+
+// newEndpoint names the socket a client was built for, so an error names where
+// the engine was reached.
+func newEndpoint(socket string, client *http.Client) Endpoint {
+	return Endpoint{socket: socket, client: client}
 }
 
 func (e Endpoint) reportedVersion(ctx context.Context) (string, error) {
@@ -424,7 +430,7 @@ func (e Engine) StartCluster(ctx context.Context, version KubernetesVersion) (*C
 
 	identifier, err := e.createContainer(ctx, image)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(err, e.removeUnansweredCreation(context.WithoutCancel(ctx), err))
 	}
 
 	started := &ClusterContainer{endpoint: e.endpoint, identifier: identifier, name: e.containerName}
@@ -454,21 +460,25 @@ func (e Engine) pullWhenAbsent(ctx context.Context, image string) error {
 
 	// The engine reports a pull failure inside the progress stream rather than
 	// in the status. Each message is decoded and discarded in turn, so a pull
-	// costs constant memory.
+	// costs constant memory. Only the stream's own end means the pull finished:
+	// a read error or the pull timeout cuts the stream short of it, and
+	// json.Decoder.More reads either as no further message.
 	messages := json.NewDecoder(progress)
-	for messages.More() {
+	for {
 		var message struct {
 			Error string
 		}
-		if err := messages.Decode(&message); err != nil {
+		err := messages.Decode(&message)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
 			return fmt.Errorf("read the progress of pulling %s: %w", image, err)
 		}
 		if message.Error != "" {
 			return fmt.Errorf("pull the image %s: %s", image, message.Error)
 		}
 	}
-
-	return nil
 }
 
 func (e Engine) createContainer(ctx context.Context, image string) (string, error) {
@@ -498,6 +508,20 @@ func (e Engine) createContainer(ctx context.Context, image string) (string, erro
 	}
 
 	return created.ID, nil
+}
+
+// A creation can take effect on the engine without its answer reaching the
+// lab, so the container is removed by the name this Engine gave it, as a
+// Descheduler pass is. Only the engine's refusal says nothing was created, and
+// a refused name may be another container's, so a refusal removes nothing. A
+// container that is not there counts as removed: the creation may never have
+// reached the engine.
+func (e Engine) removeUnansweredCreation(ctx context.Context, failed error) error {
+	if _, refused := errors.AsType[engineRefusal](failed); refused {
+		return nil
+	}
+
+	return removeByName(ctx, e.endpoint, e.containerName, "the Simulated Cluster "+e.containerName)
 }
 
 func (e Engine) startContainer(ctx context.Context, identifier string) error {
@@ -555,6 +579,18 @@ func removeContainer(ctx context.Context, endpoint Endpoint, identifier, describ
 	}
 
 	return awaitRemoved(ctx, endpoint, identifier, described)
+}
+
+// removeByName acts on a name one of the package's own handles composed, for a
+// container whose creation may not have taken effect, so one that is not there
+// counts as removed.
+func removeByName(ctx context.Context, endpoint Endpoint, name, described string) error {
+	err := removeContainer(ctx, endpoint, name, described)
+	if isNoLongerHeld(err) {
+		return nil
+	}
+
+	return err
 }
 
 // errStillHeld is not a failure of its own: it is the reason a removal that

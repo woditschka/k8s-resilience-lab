@@ -2,12 +2,18 @@ package cluster
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 )
@@ -233,6 +239,171 @@ func TestWhenNoSocketAnswers_ShouldFailNamingEveryPathTriedAndWhy(t *testing.T) 
 			t.Errorf("the error names every path tried, but %s is missing from: %v", tried, err)
 		}
 	}
+}
+
+// answeredBy stands in for the engine at the transport, for an engine
+// behaviour the real one cannot be made to show on demand.
+type answeredBy func(*http.Request) (*http.Response, error)
+
+func (a answeredBy) RoundTrip(request *http.Request) (*http.Response, error) {
+	return a(request)
+}
+
+// The socket is a name the errors carry; no request reaches it.
+const aStandInsSocket = "stand-in.sock"
+
+func anEngineStandIn(answers answeredBy) Endpoint {
+	return newEndpoint(aStandInsSocket, &http.Client{Transport: answers})
+}
+
+// aPullCutShortBy lacks every image, and its pull's progress stream fails with
+// the error cut returns once one message is read, as a download cut part-way
+// leaves it.
+func aPullCutShortBy(cut func(*http.Request) error) answeredBy {
+	return func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost {
+			return anEngineAnswer(http.StatusNotFound, strings.NewReader(`{"message":"no such image"}`)), nil
+		}
+
+		return anEngineAnswer(http.StatusOK, io.MultiReader(strings.NewReader(`{"status":"Pulling fs layer"}`), cutBy{request, cut})), nil
+	}
+}
+
+func anEngineAnswer(code int, body io.Reader) *http.Response {
+	return &http.Response{StatusCode: code, Status: http.StatusText(code), Body: io.NopCloser(body)}
+}
+
+// cutBy fails the read it is reached at rather than when the answer is made,
+// so the message before it is read first.
+type cutBy struct {
+	request *http.Request
+	cut     func(*http.Request) error
+}
+
+func (c cutBy) Read([]byte) (int, error) { return 0, c.cut(c.request) }
+
+func aReadError(*http.Request) error { return io.ErrUnexpectedEOF }
+
+// The stream stalls until the obtain's own deadline ends it.
+func theObtainTimeout(request *http.Request) error {
+	<-request.Context().Done()
+
+	return request.Context().Err()
+}
+
+// A stalled pull must end this test long before the pull's own timeout.
+const anObtainTimeout = 100 * time.Millisecond
+
+func TestAKubernetesVersionWhoseDownloadIsCutShort_ShouldNotBeObtainedAndShouldBeNamed(t *testing.T) {
+	t.Parallel()
+	version := DefaultKubernetesVersion()
+
+	for cause, cut := range map[string]func(*http.Request) error{"a read error": aReadError, "the obtain timeout": theObtainTimeout} {
+		t.Run(cause, func(t *testing.T) {
+			obtaining, cancel := context.WithTimeout(t.Context(), anObtainTimeout)
+			defer cancel()
+
+			err := ObtainVersion(obtaining, anEngineStandIn(aPullCutShortBy(cut)), version)
+
+			expect.Expect(t, strings.Contains(fmt.Sprint(err), version.String())).To(expect.Equal(true))
+		})
+	}
+}
+
+func TestADeschedulerWhoseDownloadIsCutShort_ShouldNotBeObtainedAndShouldBeNamed(t *testing.T) {
+	t.Parallel()
+	paired := theDeschedulerPairedByDefault(t)
+
+	err := ObtainDescheduler(t.Context(), anEngineStandIn(aPullCutShortBy(aReadError)), paired)
+
+	expect.Expect(t, strings.Contains(fmt.Sprint(err), paired.String())).To(expect.Equal(true))
+}
+
+// anEngineAnsweringTheCreationLate forwards every request to the real engine,
+// and a container's creation as well, but the lab stops waiting before the
+// answer reaches it: the creation takes effect while the lab learns nothing of
+// the container.
+func anEngineAnsweringTheCreationLate(live Endpoint, theLabStops context.CancelFunc) Endpoint {
+	forwarded := live.client.Transport
+
+	return anEngineStandIn(func(request *http.Request) (*http.Response, error) {
+		if request.Method != http.MethodPost || request.URL.Path != "/containers/create" {
+			return forwarded.RoundTrip(request)
+		}
+
+		answer, err := forwarded.RoundTrip(request.WithContext(context.WithoutCancel(request.Context())))
+		if err == nil {
+			_ = answer.Body.Close()
+		}
+		theLabStops()
+
+		return nil, request.Context().Err()
+	})
+}
+
+// startedLate is what a creation answered late leaves: whether the start was
+// refused for the stop, and whether its container is still on the engine.
+type startedLate struct {
+	Refused          bool
+	StillOnTheEngine bool
+}
+
+func TestASimulatedClusterWhoseCreationTheRuntimeAnswersLate_ShouldBeRemovedWhenItsScenarioEnds(t *testing.T) {
+	t.Parallel()
+	live := requireEngine(t)
+	if err := ObtainVersion(t.Context(), live, DefaultKubernetesVersion()); err != nil {
+		t.Fatalf("obtain the pinned version %s: %v", DefaultKubernetesVersion(), err)
+	}
+	starting, theLabStops := context.WithCancel(t.Context())
+	defer theLabStops()
+	engine, err := newEngine(anEngineAnsweringTheCreationLate(live, theLabStops), resilientPlacementScenario)
+	if err != nil {
+		t.Fatalf("name the Simulated Cluster's container: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = removeContainer(context.WithoutCancel(t.Context()), live, engine.containerName, engine.containerName)
+	})
+
+	_, err = engine.StartCluster(starting, DefaultKubernetesVersion())
+
+	expect.Expect(t, startedLate{
+		Refused: errors.Is(err, context.Canceled), StillOnTheEngine: stillOnTheEngine(t, live, engine.containerName),
+	}).To(expect.Equal(startedLate{Refused: true}))
+}
+
+// refusedCreation is what a refused creation leaves: whether the start failed on
+// the engine's refusal, and whether the container already holding the name is
+// still on the engine.
+type refusedCreation struct {
+	Refused          bool
+	StillOnTheEngine bool
+}
+
+// The engine refuses a creation whose name a container already holds, so that
+// container stands for another's that happens to carry the name.
+func TestASimulatedClusterWhoseCreationTheRuntimeRefuses_ShouldLeaveTheContainerHoldingItsNameOnTheEngine(t *testing.T) {
+	t.Parallel()
+	live := requireEngine(t)
+	if err := ObtainVersion(t.Context(), live, DefaultKubernetesVersion()); err != nil {
+		t.Fatalf("obtain the pinned version %s: %v", DefaultKubernetesVersion(), err)
+	}
+	engine, err := newEngine(live, resilientPlacementScenario)
+	if err != nil {
+		t.Fatalf("name the Simulated Cluster's container: %v", err)
+	}
+	if _, err := engine.createContainer(t.Context(), clusterImage(DefaultKubernetesVersion())); err != nil {
+		t.Fatalf("create the container holding the name %s: %v", engine.containerName, err)
+	}
+	t.Cleanup(func() {
+		_ = removeContainer(context.WithoutCancel(t.Context()), live, engine.containerName, engine.containerName)
+	})
+
+	_, err = engine.StartCluster(t.Context(), DefaultKubernetesVersion())
+
+	_, refused := errors.AsType[engineRefusal](err)
+	expect.Expect(t, refusedCreation{
+		Refused: refused, StillOnTheEngine: stillOnTheEngine(t, live, engine.containerName),
+	}).To(expect.Equal(refusedCreation{Refused: true, StillOnTheEngine: true}))
 }
 
 // A machine that refuses the listener leaves the dial count unobservable, so

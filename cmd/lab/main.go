@@ -48,13 +48,12 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	if err != nil {
 		return err
 	}
-	if asked.held != nil {
-		// Stopping the lab is how an Interactive run ends, so the signal cancels
-		// the run and the held cluster is removed rather than left behind.
-		var stopListening context.CancelFunc
-		ctx, stopListening = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-		defer stopListening()
-	}
+	// The signal cancels the run rather than ending the process, so every
+	// Scenario still running ends part-way and its Simulated Cluster and
+	// Descheduler are removed rather than left behind. Stopping the lab is also
+	// how an Interactive run ends.
+	ctx, stopListening := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stopListening()
 
 	engine, err := cluster.DetectEngine(ctx, slog.New(slog.NewTextHandler(warnings, nil)))
 	if err != nil {

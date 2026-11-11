@@ -573,7 +573,8 @@ type awaited struct {
 }
 
 // An expired wait reports the last observation it took rather than waiting
-// longer.
+// longer. A run stopped during the wait is not an expired wait, so the stop is
+// what it names.
 func (c *SimulatedCluster) await(
 	ctx context.Context,
 	deployment scenario.Deployment,
@@ -590,6 +591,10 @@ func (c *SimulatedCluster) await(
 	for {
 		select {
 		case <-waiting.Done():
+			if stopped := ctx.Err(); stopped != nil {
+				return scenario.Placement{}, fmt.Errorf("stopped waiting on the Placement of the Deployment %s: %w", deployment.Name(), stopped)
+			}
+
 			return scenario.Placement{}, holds.expired(previous)
 		case <-time.After(pollInterval):
 		}
