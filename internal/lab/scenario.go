@@ -1220,19 +1220,21 @@ const (
 )
 
 // stop discards the observation held until now, since it is the world before
-// the Failure.
+// the Failure. Every Node it stopped counts as failed and stopped, even where
+// another could not be stopped and the Scenario ends.
 func (s *Scenario) stop(at Step, nodes []string) bool {
-	for _, node := range nodes {
-		s.changedTheCluster = true
-		if err := s.provisioned.FailNode(s.ctx, node); err != nil {
-			s.end(at, fmt.Errorf("stop Node %s responding: %w", node, err))
-
-			return false
-		}
-		s.failed = append(s.failed, node)
+	s.changedTheCluster = true
+	stopped, err := s.provisioned.FailNodes(s.ctx, nodes)
+	s.failed = append(s.failed, stopped...)
+	for _, node := range stopped {
 		if !slices.Contains(s.stopped, node) {
 			s.stopped = append(s.stopped, node)
 		}
+	}
+	if err != nil {
+		s.end(at, err)
+
+		return false
 	}
 	s.nodesPerWhen = append(s.nodesPerWhen, scenario.WhenNodes{Stopped: slices.Clone(nodes)})
 
@@ -1279,14 +1281,13 @@ func (s *Scenario) declaredDeploymentNamed(name DeploymentName) (scenario.Deploy
 // Nodes and Zones still judge them, and discards the observation held until
 // now, since it is the world before they responded again.
 func (s *Scenario) restore(at Step, nodes []string) {
-	for _, node := range nodes {
-		s.changedTheCluster = true
-		if err := s.provisioned.RestoreNode(s.ctx, node); err != nil {
-			s.end(at, fmt.Errorf("make Node %s respond again: %w", node, err))
+	s.changedTheCluster = true
+	restored, err := s.provisioned.RestoreNodes(s.ctx, nodes)
+	s.stopped = slices.DeleteFunc(s.stopped, func(stopped string) bool { return slices.Contains(restored, stopped) })
+	if err != nil {
+		s.end(at, err)
 
-			return
-		}
-		s.stopped = slices.DeleteFunc(s.stopped, func(stopped string) bool { return stopped == node })
+		return
 	}
 	s.nodesPerWhen = append(s.nodesPerWhen, scenario.WhenNodes{RespondingAgain: slices.Clone(nodes)})
 

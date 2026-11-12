@@ -14,6 +14,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -539,6 +540,88 @@ func TestAPodOfAnUnresponsiveNodeThatCannotBePlaced_ShouldStayPendingWithTheCont
 	expect.Expect(t, settled.PodsInPhase(scenario.PodRunning)).To(expect.HaveLen[scenario.Pod](roomForOnePod))
 	expect.Expect(t, pending).To(expect.HaveLen[scenario.Pod](twoPods - roomForOnePod))
 	expectReported(t, recorded, pending[0].Name, podSchedulingFailed)
+}
+
+const (
+	manyNodesInTheZone       = 10
+	laterNodesTakenOffToo    = true
+	onlyTheFirstNodeTakenOff = 1
+)
+
+// Stopping a Node takes a write taking it off the KWOK controller and then a
+// status write. Nodes stopped one after the other take each Node off only once
+// the Node before reports NotReady, so a later Node taken off before the first
+// reports NotReady shows the Nodes stopping together.
+func TestAZoneOfManyNodesFailingByAClickOrAWhen_ShouldStopItsLastNodeAsSoonAfterItsFirstAsAZoneOfTwo(t *testing.T) {
+	t.Parallel()
+	provisioned, _ := aProvisionedCluster(t)
+	topology, err := topologyOfTheGeneralNodePool(theOneZone, manyNodesInTheZone, aCapacity(t))
+	if err != nil {
+		t.Fatalf("build a Topology of %d Nodes in one Zone: %v", manyNodesInTheZone, err)
+	}
+	if err := provisioned.ApplyTopology(t.Context(), topology); err != nil {
+		t.Fatalf("apply the Topology of %d Nodes: %v", manyNodesInTheZone, err)
+	}
+	failing := nodeNamesOf(topology.Nodes())
+	watching := watchingTheNodesOf(t, provisioned)
+
+	if _, err := provisioned.FailNodes(t.Context(), failing); err != nil {
+		t.Fatalf("stop the Nodes %v responding: %v", failing, err)
+	}
+
+	takenOff := watching.theNodesTakenOffBeforeNotReady(t, failing[0])
+	expect.Expect(t, len(takenOff) > onlyTheFirstNodeTakenOff).To(expect.Equal(laterNodesTakenOffToo))
+}
+
+type nodesWatched struct {
+	events <-chan watch.Event
+}
+
+// The watch starts from the Nodes listed now, so every write after it reaches
+// the test in the order the API server committed it.
+func watchingTheNodesOf(t *testing.T, provisioned *SimulatedCluster) nodesWatched {
+	t.Helper()
+
+	listed, err := provisioned.client.CoreV1().Nodes().List(t.Context(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list the Nodes of %s: %v", provisioned.Name(), err)
+	}
+	watched, err := provisioned.client.CoreV1().Nodes().Watch(t.Context(), metav1.ListOptions{ResourceVersion: listed.ResourceVersion})
+	if err != nil {
+		t.Fatalf("watch the Nodes of %s: %v", provisioned.Name(), err)
+	}
+	t.Cleanup(watched.Stop)
+
+	return nodesWatched{events: watched.ResultChan()}
+}
+
+// theNodesTakenOffBeforeNotReady reads the writes up to the first one reporting
+// the Node NotReady, naming every Node taken off the KWOK controller by then.
+func (w nodesWatched) theNodesTakenOffBeforeNotReady(t *testing.T, first string) []string {
+	t.Helper()
+
+	takenOff := []string{}
+	giveUp := time.After(scenario.WaitingTime)
+	for {
+		select {
+		case event, open := <-w.events:
+			if !open {
+				t.Fatalf("the watch of the Nodes ended before Node %s reported NotReady", first)
+			}
+			changed, isNode := event.Object.(*corev1.Node)
+			if !isNode {
+				continue
+			}
+			if _, marked := changed.Labels[fakeNodeLabel]; !marked && !slices.Contains(takenOff, changed.Name) {
+				takenOff = append(takenOff, changed.Name)
+			}
+			if changed.Name == first && readinessOf(*changed) == scenario.NodeNotReady {
+				return takenOff
+			}
+		case <-giveUp:
+			t.Fatalf("Node %s reported no NotReady within %s", first, scenario.WaitingTime)
+		}
+	}
 }
 
 // Each Node has room for one Pod, so the Pod the Failure left Pending can run

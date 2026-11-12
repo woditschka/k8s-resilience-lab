@@ -603,9 +603,9 @@ func (i *Injector) ClickNode(name string) error {
 	return i.stopping(failure.Names(), "Node "+name)
 }
 
-// ClickZone stops the Nodes of the Zone named that still respond, in the
-// Topology's order, or makes every Node of it respond again where all of them
-// stopped. A name the Topology does not derive changes nothing.
+// ClickZone stops the Nodes of the Zone named that still respond, or makes
+// every Node of it respond again where all of them stopped. A name the
+// Topology does not derive changes nothing.
 func (i *Injector) ClickZone(name string) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
@@ -655,8 +655,7 @@ func (i *Injector) LosePod(name string) error {
 }
 
 // stopping and restoring are called under mu, and clicked names the Node or
-// Zone as its When does. A restoration's When is noted before the first Node
-// changes, as a Scenario's When is.
+// Zone as its When does.
 func (i *Injector) stopping(nodes []string, clicked string) error {
 	return i.held.inject(Step{Kind: WhenStep, Name: clicked + " stops responding"}, func() error {
 		return i.held.stop(nodes)
@@ -664,14 +663,9 @@ func (i *Injector) stopping(nodes []string, clicked string) error {
 }
 
 func (i *Injector) restoring(nodes []string, clicked string) error {
-	i.held.note(Step{Kind: WhenStep, Name: clicked + " responds again"})
-
-	return i.held.restore(nodes)
-}
-
-// note words the When as the terminal prints it, as a Scenario notes its Steps.
-func (h *heldCluster) note(when Step) {
-	h.provisioned.NoteStep(string(when.Kind), when.String())
+	return i.held.inject(Step{Kind: WhenStep, Name: clicked + " responds again"}, func() error {
+		return i.held.restore(nodes)
+	})
 }
 
 // errInjectionUnfinished is why a Failure whose injection never returned, one
@@ -703,30 +697,22 @@ func noteOf(when Step, injected error) (step, line string) {
 	return scenario.NotInjectedNamed, scenario.NotInjectedNamed + ": " + when.Name + ", because " + injected.Error()
 }
 
-// stop keeps every Node it stopped among the stopped, even where a later one
+// stop keeps every Node it stopped among the stopped, even where another
 // fails, so a further click makes it respond again rather than stopping it.
 func (h *heldCluster) stop(nodes []string) error {
-	for _, node := range nodes {
-		if err := h.provisioned.FailNode(h.ctx, node); err != nil {
-			return fmt.Errorf("stop Node %s responding: %w", node, err)
-		}
-		h.stopped = append(h.stopped, node)
-	}
+	stopped, err := h.provisioned.FailNodes(h.ctx, nodes)
+	h.stopped = append(h.stopped, stopped...)
 
-	return nil
+	return err
 }
 
 // restore takes every Node it made respond again out of the stopped, even
-// where a later one fails, so a further click stops it rather than restoring it.
+// where another fails, so a further click stops it rather than restoring it.
 func (h *heldCluster) restore(nodes []string) error {
-	for _, node := range nodes {
-		if err := h.provisioned.RestoreNode(h.ctx, node); err != nil {
-			return fmt.Errorf("make Node %s respond again: %w", node, err)
-		}
-		h.stopped = slices.DeleteFunc(h.stopped, func(stopped string) bool { return stopped == node })
-	}
+	restored, err := h.provisioned.RestoreNodes(h.ctx, nodes)
+	h.stopped = slices.DeleteFunc(h.stopped, func(stopped string) bool { return slices.Contains(restored, stopped) })
 
-	return nil
+	return err
 }
 
 func (r *Runner) runNamed(ctx context.Context, name string, image deschedulerImage, steps func(*Scenario)) (Outcome, error) {

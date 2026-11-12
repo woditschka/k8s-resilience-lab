@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -471,6 +472,79 @@ func (c *SimulatedCluster) reportResponding(ctx context.Context, name string) er
 	}
 
 	return nil
+}
+
+// FailNodes stops every Node named responding at once, as FailNode stops one,
+// so a Zone of many Nodes stops in the time one Node takes. It returns the
+// Nodes it stopped in the order named, and one error naming each Node it could
+// not stop.
+func (c *SimulatedCluster) FailNodes(ctx context.Context, names []string) ([]string, error) {
+	return changeEach(names, func(name string) error { return c.FailNode(ctx, name) })
+}
+
+// RestoreNodes makes every Node named respond again at once, as RestoreNode
+// makes one. It returns the Nodes it restored in the order named, and one error
+// naming each Node it could not restore.
+func (c *SimulatedCluster) RestoreNodes(ctx context.Context, names []string) ([]string, error) {
+	return changeEach(names, func(name string) error { return c.RestoreNode(ctx, name) })
+}
+
+// Each goroutine writes only its own element, and the join makes those writes
+// visible here. A Node whose change fails leaves every other Node's change
+// standing, so the caller counts each Node by what happened to it.
+func changeEach(names []string, change func(name string) error) ([]string, error) {
+	failed := make([]error, len(names))
+	var each sync.WaitGroup
+	for at, name := range names {
+		each.Go(func() {
+			defer recoverInto(&failed[at], name)
+
+			failed[at] = change(name)
+		})
+	}
+	each.Wait()
+
+	changed := []string{}
+	var unchanged nodesUnchanged
+	for at, name := range names {
+		if failed[at] != nil {
+			unchanged = append(unchanged, failed[at])
+
+			continue
+		}
+		changed = append(changed, name)
+	}
+	if len(unchanged) > 0 {
+		return changed, unchanged
+	}
+
+	return changed, nil
+}
+
+// A panic left to cross the goroutine would end the process, taking every
+// other Scenario's cluster removal with it. The stack is left out, since the
+// error is read on one terminal line.
+func recoverInto(failed *error, name string) {
+	if recovered := recover(); recovered != nil {
+		*failed = fmt.Errorf("the change to Node %s panicked: %v", name, recovered)
+	}
+}
+
+// nodesUnchanged keeps every Node's error on one line, since a Failure named
+// not injected is one terminal line and errors.Join would break it.
+type nodesUnchanged []error
+
+func (u nodesUnchanged) Error() string {
+	each := make([]string, 0, len(u))
+	for _, failed := range u {
+		each = append(each, failed.Error())
+	}
+
+	return strings.Join(each, "; ")
+}
+
+func (u nodesUnchanged) Unwrap() []error {
+	return slices.Clone(u)
 }
 
 // LosePod reports false where no Pod of a Deployment carries the name, since a

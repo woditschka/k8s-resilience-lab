@@ -1129,6 +1129,111 @@ func TestAClickedZoneFailureInjectedOnlyInPart_ShouldLeaveTheNodesItStoppedStopp
 }
 
 const (
+	theScenarioClickedOnAZoneFirstGone      = "a-scenario-clicked-on-a-zone-first-gone"
+	theScenarioNamingARestoreNotInjected    = "a-scenario-naming-a-restore-not-injected"
+	theScenarioRecordingARestoreNotInjected = "a-scenario-recording-a-restore-not-injected"
+	theScenarioNamingAZoneRestoredInPart    = "a-scenario-naming-a-zone-restored-in-part"
+	theScenarioHoldingAZoneRestoredInPart   = "a-scenario-holding-a-zone-restored-in-part"
+)
+
+// The Zone's first Node is gone, so a Failure stopping the Zone's Nodes one
+// after the other would stop none of them.
+func TestAClickedZoneFailureWithANodeThatCannotBeStopped_ShouldCountEachNodeItStoppedAsStoppedForTheNextClick(t *testing.T) {
+	t.Parallel()
+	held := aHeldRunTakingClicks(t, theScenarioClickedOnAZoneFirstGone)
+	zone := held.theFirstZone()
+	gone, stopped := held.theNodesOfZone(zone)[0], held.theNodesOfZone(zone)[1]
+	held.removeBehindTheLabsBack(t, gone)
+	why := expectNotInjected(t, held.injector.ClickZone(zone))
+
+	expectInjected(t, held.injector.ClickNode(stopped))
+
+	expect.Expect(t, held.theStepLinesFollowed(t)).To(expect.Equal([]string{
+		notInjected("Zone "+zone+" stops responding", why),
+		"When Node " + stopped + " responds again",
+	}))
+}
+
+// aHeldRunWithAStoppedNodeGone has its first Node stopped by a click and then
+// deleted behind the lab's back, so a click making it respond again cannot be
+// carried out.
+func aHeldRunWithAStoppedNodeGone(t *testing.T, name string) (*heldForClicks, string) {
+	t.Helper()
+
+	held := aHeldRunTakingClicks(t, name)
+	stopped := held.theFirstNode()
+	expectInjected(t, held.injector.ClickNode(stopped))
+	held.removeBehindTheLabsBack(t, stopped)
+
+	return held, stopped
+}
+
+func TestAClickMakingANodeRespondAgainThatCannotBeCarriedOut_ShouldBeNamedNotInjectedAndWhyToTheTerminalInPlaceOfItsWhen(t *testing.T) {
+	t.Parallel()
+	held, clicked := aHeldRunWithAStoppedNodeGone(t, theScenarioNamingARestoreNotInjected)
+
+	why := expectNotInjected(t, held.injector.ClickNode(clicked))
+
+	expect.Expect(t, held.theStepLinesFollowed(t)).To(expect.Equal([]string{
+		"When Node " + clicked + " stops responding",
+		notInjected("Node "+clicked+" responds again", why),
+	}))
+}
+
+func TestAClickMakingANodeRespondAgainThatCannotBeCarriedOut_ShouldBeRecordedNotInjectedAndWhyInTheTimeline(t *testing.T) {
+	t.Parallel()
+	held, clicked := aHeldRunWithAStoppedNodeGone(t, theScenarioRecordingARestoreNotInjected)
+
+	why := expectNotInjected(t, held.injector.ClickNode(clicked))
+
+	recorded := held.theOutcomeOnceStopped(t).Timeline
+	expect.Expect(t, notedOfAClick{Whens: theWhensNotedIn(recorded), NotInjected: theFailuresNotInjectedIn(recorded)}).
+		To(expect.Equal(notedOfAClick{
+			Whens:       []string{"When Node " + clicked + " stops responding"},
+			NotInjected: []string{notInjected("Node "+clicked+" responds again", why)},
+		}))
+}
+
+// aHeldRunWithAStoppedZoneMissingANode has its first Zone stopped by a click
+// and that Zone's first Node then deleted behind the lab's back, so a click
+// making the Zone respond again is carried out only in part. Making the Nodes
+// respond again one after the other would restore none of them.
+func aHeldRunWithAStoppedZoneMissingANode(t *testing.T, name string) (held *heldForClicks, zone, gone string) {
+	t.Helper()
+
+	held = aHeldRunTakingClicks(t, name)
+	zone = held.theFirstZone()
+	expectInjected(t, held.injector.ClickZone(zone))
+	gone = held.theNodesOfZone(zone)[0]
+	held.removeBehindTheLabsBack(t, gone)
+
+	return held, zone, gone
+}
+
+func TestAClickMakingAZoneRespondAgainOnlyInPart_ShouldNameEachNodeThatDidNotRespondAgain(t *testing.T) {
+	t.Parallel()
+	held, zone, gone := aHeldRunWithAStoppedZoneMissingANode(t, theScenarioNamingAZoneRestoredInPart)
+
+	why := expectNotInjected(t, held.injector.ClickZone(zone))
+
+	expect.Expect(t, theNamesHeldBy([]string{why}, held.theNodesOfZone(zone))).To(expect.Equal([]string{gone}))
+	expect.Expect(t, held.theStepLinesFollowed(t)).To(expect.Equal([]string{
+		"When Zone " + zone + " stops responding",
+		notInjected("Zone "+zone+" responds again", why),
+	}))
+}
+
+func TestAClickMakingAZoneRespondAgainOnlyInPart_ShouldLeaveTheNodesThatRespondedAgainRespondingAndTheClusterHeld(t *testing.T) {
+	t.Parallel()
+	held, zone, gone := aHeldRunWithAStoppedZoneMissingANode(t, theScenarioHoldingAZoneRestoredInPart)
+
+	expectNotInjected(t, held.injector.ClickZone(zone))
+
+	expect.Expect(t, partInjected{Ready: held.theReadyNodeNames(t), Ended: held.theOutcomeOnceStopped(t).Ended()}).
+		To(expect.Equal(partInjected{Ready: held.everyNodeBut(gone), Ended: theRunNotEnded}))
+}
+
+const (
 	theScenarioJoiningAClickToItsTimeline  = "a-scenario-joining-a-click-to-its-timeline"
 	theScenarioJoiningNoClickToItsTimeline = "a-scenario-joining-no-click-to-its-timeline"
 	theScenarioRecordingWhatAClickChanged  = "a-scenario-recording-what-a-click-changed"

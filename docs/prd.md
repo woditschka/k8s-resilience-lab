@@ -588,6 +588,9 @@ An engineer starts an Interactive run naming one Scenario and opens its Live vie
 <a id="req-sim-028"></a>
 An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inject a Failure, and the terminal reports it as a When `[REQ-SIM-028]`. A second click makes a stopped Node or Zone respond again; a lost Pod has no recovery.
 
+<a id="req-sim-037"></a>
+The Nodes of one Failure stop together, by a click or a Scenario's When, so a Zone of many Nodes fails as fast as one of two `[REQ-SIM-037]`. A click making a Node or Zone respond again that cannot be carried out is named as a click's Failure is.
+
 **Done when:**
 
 - `[REQ-SIM-028]` given a held cluster, when a Node's box is clicked, then that Node stops responding as in a Node Failure, with no confirmation asked.
@@ -597,6 +600,10 @@ An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inje
 - `[REQ-SIM-028]` given a held cluster, when a Pending Pod or any other part of the page is clicked, then nothing changes.
 - `[REQ-SIM-028]` given a stopped Node, or a Zone whose every Node stopped, when its box is clicked, then it responds again: "When Node worker-2 responds again", "When Zone zone-a responds again".
 - `[REQ-SIM-028]` given one Node of a stopped Zone, when its box is clicked, then it alone responds again.
+- `[REQ-SIM-037]` given a Zone of many Nodes, when it fails by a click or a Scenario's When, then its last Node stops as soon after its first as in a Zone of two.
+- `[REQ-SIM-037]` given a clicked Zone Failure one of whose Nodes cannot be stopped, when it ends, then each Node it did stop counts as stopped, and a click on one makes it respond again.
+- `[REQ-SIM-037]` given a click making a Node or Zone respond again that cannot be carried out, when the terminal and the Timeline are read, then they name it not injected, and why, in place of its When: "Not injected: Node worker-2 responds again, because …".
+- `[REQ-SIM-037]` given a click making a Zone respond again only in part, when the terminal is read, then its line names each Node that did not respond again.
 
 **Edge cases:**
 
@@ -604,8 +611,9 @@ An engineer clicks a Node's, Zone's or placed Pod's box in the Live view to inje
 2. A Zone with only some Nodes stopped. A click stops the others.
 3. A placed Pod on a stopped Node. A click loses it all the same.
 4. A Node that responds again after a click. A further click stops it once more.
-5. A click whose Failure cannot be injected, wholly or in part. The terminal and the Timeline name that Failure as not injected, and why, in place of its When.
+5. A click whose Failure cannot be injected, wholly or in part. The terminal and the Timeline name that Failure as not injected, and why, in place of its When. A click making a Node or Zone respond again is named so too `[REQ-SIM-037]`.
 6. A click whose Failure was injected only in part. The Nodes it stopped stay stopped, and the run goes on holding the cluster.
+7. A click making a Zone respond again only in part. The Nodes that responded again keep responding, and the run goes on holding the cluster `[REQ-SIM-037]`.
 
 **Design:** [system-design.md](system-design.md)
 

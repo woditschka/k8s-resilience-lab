@@ -282,3 +282,20 @@ func TestAStopDuringAWaitForTheNodesToBeReady_ShouldNameTheStopAndTheNodesWaited
 		"stopped waiting on the Nodes of the Topology to be Ready, %s: %v",
 		strings.Join(nodeNamesOf(topology.Nodes()), ", "), context.Canceled)))
 }
+
+const (
+	someNodeName      = "zone-1-node-1"
+	theNodeNamedAsWhy = true
+	noNodeStopped     = 0
+)
+
+// A cluster holding no client panics on its first request, as a defect in a
+// change would, so the panic is that Node's error rather than the process's end.
+func TestANodeWhoseStoppingPanics_ShouldBeNamedNotStoppedAndPanicNoFurther(t *testing.T) {
+	unreachable := &SimulatedCluster{}
+
+	stopped, err := unreachable.FailNodes(t.Context(), []string{someNodeName})
+
+	expect.Expect(t, stopped).To(expect.HaveLen[string](noNodeStopped))
+	expect.Expect(t, strings.HasPrefix(fmt.Sprint(err), "the change to Node "+someNodeName+" panicked: ")).To(expect.Equal(theNodeNamedAsWhy))
+}
