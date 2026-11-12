@@ -118,9 +118,8 @@ func TestAnEngineThatAnswers_ShouldReportTheVersionItRuns(t *testing.T) {
 }
 
 // anEngineAnsweringTheCreationLate forwards every request to the real engine,
-// and a container's creation as well, but the lab stops waiting before the
-// answer reaches it: the creation takes effect while the lab learns nothing of
-// the container.
+// and the lab is stopped while a container's creation is under way: the
+// creation's answer reaches the lab only after the stop.
 func anEngineAnsweringTheCreationLate(live Endpoint, theLabStops context.CancelFunc) Endpoint {
 	forwarded := live.client.Transport
 
@@ -129,13 +128,10 @@ func anEngineAnsweringTheCreationLate(live Endpoint, theLabStops context.CancelF
 			return forwarded.RoundTrip(request)
 		}
 
-		answer, err := forwarded.RoundTrip(request.WithContext(context.WithoutCancel(request.Context())))
-		if err == nil {
-			_ = answer.Body.Close()
-		}
+		answer, err := forwarded.RoundTrip(request)
 		theLabStops()
 
-		return nil, request.Context().Err()
+		return answer, err
 	})
 }
 

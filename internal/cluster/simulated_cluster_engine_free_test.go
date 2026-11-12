@@ -3,8 +3,13 @@
 package cluster
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
+
+	"k8s.io/client-go/dynamic"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/expect"
 	"github.com/woditschka/k8s-resilience-lab/internal/scenario"
@@ -176,4 +181,104 @@ func onePodOnEachOf(nodes []scenario.Node) []scenario.Pod {
 // least time a Wait may state has to leave room beyond one poll.
 func TestThePollIntervalBetweenObservations_ShouldFitInTheLeastTimeAWaitMayStateWithRoomToSpare(t *testing.T) {
 	expect.Expect(t, pollInterval < scenario.LeastStatedTime).To(expect.Equal(true))
+}
+
+// No request reaches it: a stopped run's requests fail before they are sent.
+const aControlPlaneNothingServes = "http://127.0.0.1:1"
+
+// The run is stopped before the wait begins, so the wait ends on the stop
+// alone and at once.
+func aStoppedRun(t *testing.T) context.Context {
+	t.Helper()
+
+	stopped, stop := context.WithCancel(t.Context())
+	stop()
+
+	return stopped
+}
+
+// aStartedContainer is started on an engine stand-in, so it publishes no API
+// port and a wait on its control plane can only end.
+func aStartedContainer(t *testing.T) *ClusterContainer {
+	t.Helper()
+
+	started, err := anEngineOf(t, anEngineCreatingAs(createdAtOnce).endpoint()).StartCluster(t.Context(), DefaultKubernetesVersion())
+	if err != nil {
+		t.Fatalf("start a Simulated Cluster's container on the engine stand-in: %v", err)
+	}
+
+	return started
+}
+
+func aClusterNothingServes(t *testing.T) *SimulatedCluster {
+	t.Helper()
+
+	requests, watches, err := controlPlaneClients(aControlPlaneNothingServes)
+	if err != nil {
+		t.Fatalf("build the clients of a control plane at %s: %v", aControlPlaneNothingServes, err)
+	}
+
+	return &SimulatedCluster{container: aStartedContainer(t), client: requests, watches: watches}
+}
+
+func theStagesNothingServes(t *testing.T) dynamic.ResourceInterface {
+	t.Helper()
+
+	client, err := dynamic.NewForConfig(controlPlaneConfig(aControlPlaneNothingServes))
+	if err != nil {
+		t.Fatalf("build a client for the Stages at %s: %v", aControlPlaneNothingServes, err)
+	}
+
+	return client.Resource(stageResource)
+}
+
+// endedWait is how a wait reports its end: as the stop of the run, and as a
+// wait that ran out of time.
+type endedWait struct {
+	NamesTheStop  bool
+	NamesAnExpiry bool
+}
+
+func endedAs(err error) endedWait {
+	return endedWait{
+		NamesTheStop:  errors.Is(err, context.Canceled),
+		NamesAnExpiry: strings.Contains(fmt.Sprint(err), "within "+startTimeout.String()),
+	}
+}
+
+func TestAStopWhileTheClustersStart_ShouldEndEachScenarioStillStartingNamingTheStopNotAWaitThatRanOutOfTime(t *testing.T) {
+	waits := map[string]func(stopped context.Context) error{
+		"the API server answering": func(stopped context.Context) error {
+			_, err := awaitControlPlane(stopped, aStartedContainer(t))
+
+			return err
+		},
+		"the Stage resource served": func(stopped context.Context) error {
+			_, err := aClusterNothingServes(t).awaitStagesServed(stopped, theStagesNothingServes(t))
+
+			return err
+		},
+		"a Pod admitted before the probe Pods": func(stopped context.Context) error {
+			return aClusterNothingServes(t).awaitProbePodOnEveryNode(stopped, anEvenSpreadTopology(t))
+		},
+	}
+
+	for wait, ended := range waits {
+		t.Run(wait, func(t *testing.T) {
+			err := ended(aStoppedRun(t))
+
+			expect.Expect(t, endedAs(err)).To(expect.Equal(endedWait{NamesTheStop: true}))
+		})
+	}
+}
+
+func TestAStopDuringAWaitForTheNodesToBeReady_ShouldNameTheStopAndTheNodesWaitedOnAndNoDeployment(t *testing.T) {
+	topology := anEvenSpreadTopology(t)
+	noDeploymentDeclaredYet := scenario.Deployment{}
+
+	_, err := aClusterNothingServes(t).AwaitNodesReady(aStoppedRun(t), topology, noDeploymentDeclaredYet)
+
+	expect.Expect(t, fmt.Sprint(err)).To(expect.Equal(fmt.Sprintf(
+		"stopped waiting on the Nodes of the Topology to be Ready, %s: %v",
+		strings.Join(nodeNamesOf(topology.Nodes()), ", "), context.Canceled)))
 }

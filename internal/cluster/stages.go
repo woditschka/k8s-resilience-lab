@@ -62,7 +62,7 @@ func (c *SimulatedCluster) ownStages(ctx context.Context) error {
 }
 
 func (c *SimulatedCluster) awaitStagesServed(ctx context.Context, stages dynamic.ResourceInterface) (map[string]unstructured.Unstructured, error) {
-	starting, cancel := context.WithTimeout(ctx, startTimeout)
+	starting, cancel := boundedWait(ctx, startTimeout)
 	defer cancel()
 
 	for {
@@ -78,7 +78,8 @@ func (c *SimulatedCluster) awaitStagesServed(ctx context.Context, stages dynamic
 
 		select {
 		case <-starting.Done():
-			return nil, fmt.Errorf("the API server of %s served no Stage resource within %s: %w", c.Name(), startTimeout, err)
+			return nil, unlessStopped(starting, "the API server of "+c.Name()+" to serve the Stage resource",
+				fmt.Errorf("the API server of %s served no Stage resource within %s: %w", c.Name(), startTimeout, err))
 		case <-time.After(pollInterval):
 		}
 	}

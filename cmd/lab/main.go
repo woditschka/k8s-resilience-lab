@@ -52,7 +52,7 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	// Scenario still running ends part-way and its Simulated Cluster and
 	// Descheduler are removed rather than left behind. Stopping the lab is also
 	// how an Interactive run ends.
-	ctx, stopListening := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	ctx, stopListening := stoppedBySignal(ctx)
 	defer stopListening()
 
 	engine, err := cluster.DetectEngine(ctx, slog.New(slog.NewTextHandler(warnings, nil)))
@@ -84,6 +84,24 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	}
 
 	return errors.Join(writeRun(reported, carried, asked), reported.failed())
+}
+
+// stoppedBySignal returns a context the first interrupt or termination ends.
+// It ends only once the lab has stopped listening, so the default handling is
+// back and a second signal ends the process while the run removes its
+// clusters, as a kill would.
+func stoppedBySignal(parent context.Context) (context.Context, context.CancelFunc) {
+	notified, stopListening := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	stopped, stop := context.WithCancelCause(parent)
+	context.AfterFunc(notified, func() {
+		stopListening()
+		stop(context.Cause(notified))
+	})
+
+	return stopped, func() {
+		stopListening()
+		stop(nil)
+	}
 }
 
 func openingOf(engine cluster.Endpoint, asked runSetting) reportPart {

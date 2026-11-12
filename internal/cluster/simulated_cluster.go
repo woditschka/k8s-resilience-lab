@@ -40,6 +40,29 @@ const (
 // falling inside one of them.
 const pollInterval = time.Second
 
+// errWaitExpired is the cause a bounded wait carries when its own deadline ends
+// it, so a wait ended by a stop of the run is told apart from one that ran out
+// of time.
+var errWaitExpired = errors.New("the wait ran out of time")
+
+func boundedWait(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeoutCause(ctx, budget, errWaitExpired)
+}
+
+// unlessStopped names the stop where one ended the wait, since a stopped wait
+// is neither a wait that ran out of time nor a failing request; otherwise it
+// is what the wait reports.
+func unlessStopped(waiting context.Context, subject string, otherwise error) error {
+	stopped := context.Cause(waiting)
+	if stopped == nil || errors.Is(stopped, errWaitExpired) {
+		return otherwise
+	}
+
+	// The error, not the cause, is wrapped: a signal's cause does not wrap
+	// context.Canceled, which callers test a stop by.
+	return fmt.Errorf("stopped waiting on %s: %w", subject, waiting.Err())
+}
+
 // DefaultKubernetesVersion is a code constant: the lab looks up no newest
 // version anywhere.
 func DefaultKubernetesVersion() KubernetesVersion {
@@ -117,7 +140,7 @@ func provisionStarted(ctx context.Context, container *ClusterContainer) (*Simula
 }
 
 func awaitControlPlane(ctx context.Context, container *ClusterContainer) (*SimulatedCluster, error) {
-	starting, cancel := context.WithTimeout(ctx, startTimeout)
+	starting, cancel := boundedWait(ctx, startTimeout)
 	defer cancel()
 
 	var unreached error
@@ -130,7 +153,8 @@ func awaitControlPlane(ctx context.Context, container *ClusterContainer) (*Simul
 
 		select {
 		case <-starting.Done():
-			return nil, fmt.Errorf("the API server of %s did not answer within %s: %w", container.Name(), startTimeout, unreached)
+			return nil, unlessStopped(starting, "the API server of "+container.Name()+" to answer",
+				fmt.Errorf("the API server of %s did not answer within %s: %w", container.Name(), startTimeout, unreached))
 		case <-time.After(pollInterval):
 		}
 	}
@@ -227,7 +251,7 @@ func (c *SimulatedCluster) awaitTopologyProvisioned(ctx context.Context, topolog
 // re-queues a probe Pod it cannot place yet, so the wait needs no retry of its
 // own.
 func (c *SimulatedCluster) awaitProbePodOnEveryNode(ctx context.Context, topology scenario.Topology) error {
-	probing, cancel := context.WithTimeout(ctx, startTimeout)
+	probing, cancel := boundedWait(ctx, startTimeout)
 	defer cancel()
 
 	if err := c.awaitPodAdmission(probing); err != nil {
@@ -253,8 +277,9 @@ func (c *SimulatedCluster) awaitProbePodOnEveryNode(ctx context.Context, topolog
 
 		select {
 		case <-probing.Done():
-			return fmt.Errorf("the scheduler of %s placed no Pod on %d of the %d Nodes of the Topology within %s: %s",
-				c.Name(), len(unheld), len(declared), startTimeout, strings.Join(unheld, ", "))
+			return unlessStopped(probing, "the scheduler of "+c.Name()+" to place a Pod on every Node of the Topology",
+				fmt.Errorf("the scheduler of %s placed no Pod on %d of the %d Nodes of the Topology within %s: %s",
+					c.Name(), len(unheld), len(declared), startTimeout, strings.Join(unheld, ", ")))
 		case <-time.After(pollInterval):
 		}
 	}
@@ -263,18 +288,20 @@ func (c *SimulatedCluster) awaitProbePodOnEveryNode(ctx context.Context, topolog
 // The control plane creates the default ServiceAccount a moment after it starts
 // serving, and admission refuses a Pod created before it exists rather than
 // leaving it Pending. A Deployment's controller retries such a refusal, but
-// provisioning creates its probe Pods directly, so the wait belongs here.
-func (c *SimulatedCluster) awaitPodAdmission(ctx context.Context) error {
+// provisioning creates its probe Pods directly, so the wait belongs here. The
+// wait runs within the probing's own bound.
+func (c *SimulatedCluster) awaitPodAdmission(probing context.Context) error {
 	for {
-		_, err := c.client.CoreV1().ServiceAccounts(clusterNamespace).Get(ctx, defaultServiceAccount, metav1.GetOptions{})
+		_, err := c.client.CoreV1().ServiceAccounts(clusterNamespace).Get(probing, defaultServiceAccount, metav1.GetOptions{})
 		if err == nil {
 			return nil
 		}
 
 		select {
-		case <-ctx.Done():
-			return fmt.Errorf("the %s namespace of %s held no %s ServiceAccount to admit a Pod against within %s: %w",
-				clusterNamespace, c.Name(), defaultServiceAccount, startTimeout, err)
+		case <-probing.Done():
+			return unlessStopped(probing, "the "+clusterNamespace+" namespace of "+c.Name()+" to admit a Pod",
+				fmt.Errorf("the %s namespace of %s held no %s ServiceAccount to admit a Pod against within %s: %w",
+					clusterNamespace, c.Name(), defaultServiceAccount, startTimeout, err))
 		case <-time.After(pollInterval):
 		}
 	}
@@ -284,7 +311,7 @@ func (c *SimulatedCluster) awaitPodAdmission(ctx context.Context) error {
 // confirms it stopped, so a graceful delete would leave it Terminating and
 // holding its Pod slot on the Node.
 func (c *SimulatedCluster) removeProbePods(ctx context.Context) error {
-	removing, cancel := context.WithTimeout(ctx, startTimeout)
+	removing, cancel := boundedWait(ctx, startTimeout)
 	defer cancel()
 
 	immediately := int64(0)
@@ -305,8 +332,9 @@ func (c *SimulatedCluster) removeProbePods(ctx context.Context) error {
 
 		select {
 		case <-removing.Done():
-			return fmt.Errorf("%d probe Pods of %s were still there %s after their removal",
-				len(remaining), c.Name(), startTimeout)
+			return unlessStopped(removing, "the probe Pods of "+c.Name()+" to be removed",
+				fmt.Errorf("%d probe Pods of %s were still there %s after their removal",
+					len(remaining), c.Name(), startTimeout))
 		case <-time.After(pollInterval):
 		}
 	}
@@ -568,40 +596,38 @@ func (c *SimulatedCluster) AwaitNodesReady(
 }
 
 type awaited struct {
+	// subject is what a stopped wait names it waited on.
+	subject string
 	reached func(previous, current scenario.Placement) bool
 	expired func(observed scenario.Placement) error
 }
 
 // An expired wait reports the last observation it took rather than waiting
-// longer. A run stopped during the wait is not an expired wait, so the stop is
-// what it names.
+// longer. A run stopped during the wait, an observation included, is not an
+// expired wait, so the stop is what it names.
 func (c *SimulatedCluster) await(
 	ctx context.Context,
 	deployment scenario.Deployment,
 	holds awaited,
 ) (scenario.Placement, error) {
-	waiting, cancel := context.WithTimeout(ctx, scenario.WaitingTime)
+	waiting, cancel := boundedWait(ctx, scenario.WaitingTime)
 	defer cancel()
 
 	previous, err := c.Observe(waiting, deployment)
 	if err != nil {
-		return scenario.Placement{}, err
+		return scenario.Placement{}, unlessStopped(waiting, holds.subject, err)
 	}
 
 	for {
 		select {
 		case <-waiting.Done():
-			if stopped := ctx.Err(); stopped != nil {
-				return scenario.Placement{}, fmt.Errorf("stopped waiting on the Placement of the Deployment %s: %w", deployment.Name(), stopped)
-			}
-
-			return scenario.Placement{}, holds.expired(previous)
+			return scenario.Placement{}, unlessStopped(waiting, holds.subject, holds.expired(previous))
 		case <-time.After(pollInterval):
 		}
 
 		current, err := c.Observe(waiting, deployment)
 		if err != nil {
-			return scenario.Placement{}, err
+			return scenario.Placement{}, unlessStopped(waiting, holds.subject, err)
 		}
 		if holds.reached(previous, current) {
 			return current, nil
@@ -612,6 +638,7 @@ func (c *SimulatedCluster) await(
 
 func aSettledPlacement(deployment scenario.Deployment) awaited {
 	return awaited{
+		subject: "the Placement of the Deployment " + deployment.Name(),
 		reached: func(previous, current scenario.Placement) bool {
 			return hasSettled(previous, current, deployment)
 		},
@@ -627,6 +654,7 @@ func everyPodReady(deployment scenario.Deployment) awaited {
 	settled := aSettledPlacement(deployment)
 
 	return awaited{
+		subject: settled.subject,
 		reached: func(previous, current scenario.Placement) bool {
 			return settled.reached(previous, current) && len(current.PodsNotReady()) == 0
 		},
@@ -641,11 +669,13 @@ func everyPodReady(deployment scenario.Deployment) awaited {
 }
 
 // A Node that is not Ready is in no observed Placement, so this clause reads
-// the Nodes the observation is short of.
+// the Nodes the observation is short of. The Wait runs before any Deployment
+// is declared, so a stop names the declared Nodes rather than a Deployment.
 func everyNodeReady(topology scenario.Topology, deployed scenario.Deployment) awaited {
 	settled := aSettledPlacement(deployed)
 
 	return awaited{
+		subject: "the Nodes of the Topology to be Ready, " + strings.Join(nodeNamesOf(topology.Nodes()), ", "),
 		reached: func(previous, current scenario.Placement) bool {
 			return len(nodesNotReadyIn(topology, current)) == 0 && settled.reached(previous, current)
 		},

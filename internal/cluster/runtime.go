@@ -428,7 +428,10 @@ func (e Engine) StartCluster(ctx context.Context, version KubernetesVersion) (*C
 		return nil, err
 	}
 
-	identifier, err := e.createContainer(ctx, image)
+	// A stop does not cut the creation: the request runs to its answer within
+	// the engine timeout, so the container it created is removed by its
+	// identifier rather than looked for by its name.
+	identifier, err := e.createContainer(context.WithoutCancel(ctx), image)
 	if err != nil {
 		return nil, errors.Join(err, e.removeUnansweredCreation(context.WithoutCancel(ctx), err))
 	}
@@ -511,17 +514,23 @@ func (e Engine) createContainer(ctx context.Context, image string) (string, erro
 }
 
 // A creation can take effect on the engine without its answer reaching the
-// lab, so the container is removed by the name this Engine gave it, as a
-// Descheduler pass is. Only the engine's refusal says nothing was created, and
-// a refused name may be another container's, so a refusal removes nothing. A
-// container that is not there counts as removed: the creation may never have
-// reached the engine.
+// lab, so the container is removed by the name this Engine gave it. Only a
+// name conflict says nothing was created, and the name is then another
+// container's, so it removes nothing. Any other refusal is an answer the engine
+// gave once it was done, so one removal settles it. A fault of the engine's
+// own, or a creation that went unanswered, may still be under way, so the name
+// is watched until the container appears.
 func (e Engine) removeUnansweredCreation(ctx context.Context, failed error) error {
-	if _, refused := errors.AsType[engineRefusal](failed); refused {
+	described := "the Simulated Cluster " + e.containerName
+	refusal, refused := errors.AsType[engineRefusal](failed)
+	switch {
+	case refused && refusal.code == http.StatusConflict:
 		return nil
+	case refused && refusal.code < http.StatusInternalServerError:
+		return removeByName(ctx, e.endpoint, e.containerName, described)
 	}
 
-	return removeByName(ctx, e.endpoint, e.containerName, "the Simulated Cluster "+e.containerName)
+	return removeOnceCreated(ctx, e.endpoint, e.containerName, described)
 }
 
 func (e Engine) startContainer(ctx context.Context, identifier string) error {
@@ -591,6 +600,32 @@ func removeByName(ctx context.Context, endpoint Endpoint, name, described string
 	}
 
 	return err
+}
+
+// removeOnceCreated watches a name within the removal timeout and removes the
+// container once the engine holds it. A name the engine answers it does not
+// hold for the whole watch was never created; an engine the lab cannot read
+// for the whole watch leaves that unknown, which the error names.
+func removeOnceCreated(ctx context.Context, endpoint Endpoint, name, described string) error {
+	watching, cancel := context.WithTimeout(ctx, removalTimeout)
+	defer cancel()
+
+	for {
+		looked := engineRequest(watching, endpoint, http.MethodGet, "/containers/"+name+"/json", nil, nil)
+		if looked == nil {
+			return removeContainer(ctx, endpoint, name, described)
+		}
+
+		select {
+		case <-watching.Done():
+			if isNoLongerHeld(looked) {
+				return nil
+			}
+
+			return fmt.Errorf("whether the engine created %s went unanswered for %s: %w", described, removalTimeout, looked)
+		case <-time.After(pollInterval):
+		}
+	}
 }
 
 // errStillHeld is not a failure of its own: it is the reason a removal that

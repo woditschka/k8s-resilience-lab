@@ -50,6 +50,9 @@ A run carries out its Scenarios at once yet reports them in declared order, and 
 <a id="req-sim-034"></a>
 A run the engineer stops, or one its container runtime cuts short, still removes every Simulated Cluster it started and names why it ended `[REQ-SIM-034]`.
 
+<a id="req-sim-036"></a>
+A stop lands wherever the run then is: while its clusters start, during a Wait, or while the container runtime still creates a cluster `[REQ-SIM-036]`. Wherever it lands, the run names the stop and what it waited on, and none of its clusters remains. A second stop ends the run at once.
+
 <a id="req-sim-003"></a>
 An engineer names one Scenario to re-run it alone `[REQ-SIM-003]`.
 
@@ -78,6 +81,11 @@ An engineer runs the lab's own tests needing no container runtime on their own, 
 - `[REQ-SIM-034]` given a run of every Scenario, when the engineer stops it, then each Scenario still running ends as one failing part-way does. No Simulated Cluster or Descheduler of the run remains.
 - `[REQ-SIM-034]` given a Simulated Cluster the container runtime created without its answer reaching the lab, when its Scenario ends, then that cluster is removed all the same.
 - `[REQ-SIM-034]` given a Kubernetes version or Descheduler the lab obtains only in part, when the run starts, then the lab reports it as one it cannot obtain, naming it.
+- `[REQ-SIM-036]` given a run whose Simulated Clusters still start, when the engineer stops it, then each Scenario still starting ends naming the stop, never a wait that ran out of time.
+- `[REQ-SIM-036]` given a Scenario Waiting for its Nodes to be Ready, when the engineer stops the run, then the Scenario ends naming the stop and the Nodes it waited on, no Deployment.
+- `[REQ-SIM-036]` given a container runtime failing a cluster's creation with a fault of its own, when the Scenario ends, then a cluster created under that name is removed. A name another container holds stays untouched.
+- `[REQ-SIM-036]` given a cluster the container runtime still creates when the lab stops waiting on it, when its Scenario ends, then that cluster is removed once created.
+- `[REQ-SIM-036]` given a stopped run still removing its clusters, when the engineer stops it again, then the run ends at once.
 - `[REQ-SIM-003]` given several Scenarios, when the engineer names one, then only it runs, reporting as a full run does.
 - `[REQ-SIM-003]` given a name matching no Scenario, when the run starts, then it stops before provisioning, naming the Scenarios that exist.
 - `[REQ-SIM-004]` given the declared toolchain, when the one command runs, then the lab's rules, tests and build run. A failure, or a part able to reach a cluster the lab did not provision, fails it, named.
@@ -98,6 +106,7 @@ An engineer runs the lab's own tests needing no container runtime on their own, 
 5. The runtime cannot start one Scenario's Simulated Cluster while others start. That Scenario ends at its first Step, naming why, and the others run on.
 6. The engineer stops a run while its Scenarios still provision. Every Simulated Cluster started so far is removed `[REQ-SIM-034]`.
 7. A run is killed outright, with no chance to stop. Its Simulated Clusters stay for the engineer to remove `[REQ-SIM-034]`.
+8. The engineer stops a run a second time while it removes its clusters. The run ends at once, and the clusters not yet removed stay, as after a kill `[REQ-SIM-036]`.
 
 **ADR:** [ADR: Kubernetes version pin](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: Lab-provisioned Simulated Cluster](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: Predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
 
