@@ -165,7 +165,7 @@ func GeneralPodsBesideTaintedGPUNodes_ShouldStayOffThemWhileTheTolerantPodsReach
 func ANodeThatRespondsAgain_ShouldHoldNoPodWhileEveryZoneKeepsThreeAndOneNodeHoldsTwo(s *lab.Scenario) {
 	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement())
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosing(lab.Nodes(1))
 	s.WaitFor().AllPodsReady()
 
 	s.When().NodesFail(1)
@@ -177,6 +177,7 @@ func ANodeThatRespondsAgain_ShouldHoldNoPodWhileEveryZoneKeepsThreeAndOneNodeHol
 
 	s.Then().NoPodsOnTheFailedNodes()
 	s.Then().PodsPerZone(3)
+	s.Then().EnoughPodsStayedReady()
 }
 
 // A whole Zone stops responding and then responds again. The control plane
@@ -185,7 +186,7 @@ func ANodeThatRespondsAgain_ShouldHoldNoPodWhileEveryZoneKeepsThreeAndOneNodeHol
 func AZoneThatRespondsAgain_ShouldHoldNoPodWhileTheNinePodsStayRunningOnTheOtherZones(s *lab.Scenario) {
 	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement())
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosing(lab.Zones(1))
 	s.WaitFor().AllPodsReady()
 
 	s.When().ZonesFail(1)
@@ -197,6 +198,7 @@ func AZoneThatRespondsAgain_ShouldHoldNoPodWhileTheNinePodsStayRunningOnTheOther
 
 	s.Then().NoPodsInTheFailedZones()
 	s.Then().AllPodsRunning()
+	s.Then().EnoughPodsStayedReady()
 }
 
 // a-zone-that-responds-again's twin, its Descheduler running from the start:
@@ -226,7 +228,9 @@ func AZoneThatRespondsAgainUnderADescheduler_ShouldMovePodsBackUntilEveryZoneHol
 
 // A Node stops responding and responds again, and then every Pod is lost. The
 // Deployment replaces them, and the Node that responded again, empty until
-// now, takes one like every other Node.
+// now, takes one like every other Node. It declares no Failure tolerance: all
+// nine Pods are lost on purpose, so no Floor could hold, which is the contrast
+// with the Descheduler pass below.
 func PodsLostAfterANodeRespondsAgain_ShouldPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone(s *lab.Scenario) {
 	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
@@ -256,7 +260,7 @@ func PodsLostAfterANodeRespondsAgain_ShouldPlaceOnePodOnEveryNodeWithNinePodsRun
 func ADeschedulerPassAfterANodeRespondsAgain_ShouldEvictOnePodAndPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone(s *lab.Scenario) {
 	s.Given().Zones(3, node.Pool("general", node.PerZone(3), StandardNode()))
 	s.WaitFor().AllNodesReady()
-	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement())
+	s.Given().Deployment(Checkout, 9, StandardPod(), ResilientPlacement()).SurvivesLosing(lab.Nodes(1))
 	s.Given().Descheduler(EvenSpreadRestored())
 	s.WaitFor().AllPodsReady()
 
@@ -274,4 +278,5 @@ func ADeschedulerPassAfterANodeRespondsAgain_ShouldEvictOnePodAndPlaceOnePodOnEv
 	s.Then().AllPodsRunning()
 	s.Then().PodsPerZone(3)
 	s.Then().PodsPerNode(1)
+	s.Then().EnoughPodsStayedReady()
 }

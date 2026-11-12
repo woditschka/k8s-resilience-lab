@@ -46,7 +46,8 @@ const (
 // A declaration renames the line it is written on, so the renamed Given is the
 // one a Failure Scenario reports.
 const (
-	theLossOfOneNodeDeclared    = resilientPlacementDeclared + ", surviving the loss of 1 Node"
+	aFailureToleranceDeclared   = ", surviving the loss of"
+	theLossOfOneNodeDeclared    = resilientPlacementDeclared + aFailureToleranceDeclared + " 1 Node"
 	theLossOfOneZoneDeclared    = resilientPlacementDeclared + ", surviving the loss of 1 Zone"
 	theLossOfThreeNodesDeclared = resilientPlacementDeclared + ", surviving the loss of 3 Nodes"
 
@@ -429,10 +430,13 @@ func TestEveryFailureScenario_ShouldDeclareWhatItsWhenFailsAndKeepEveryFloor(t *
 	cases := map[string]struct {
 		kept string
 	}{
-		nodeStopsRespondingReported:             {kept: theFloorKeptWhenTheNodeStopped},
-		zoneStopsRespondingReported:             {kept: theFloorKeptWhenTheZoneStopped},
-		noRoomAfterAZoneStopsRespondingReported: {kept: theFloorKeptWithNoRoomLeft},
-		spotNodesStopRespondingReported:         {kept: theFloorKeptWhenTheSpotNodesStopped},
+		nodeStopsRespondingReported:                    {kept: theFloorKeptWhenTheNodeStopped},
+		zoneStopsRespondingReported:                    {kept: theFloorKeptWhenTheZoneStopped},
+		noRoomAfterAZoneStopsRespondingReported:        {kept: theFloorKeptWithNoRoomLeft},
+		spotNodesStopRespondingReported:                {kept: theFloorKeptWhenTheSpotNodesStopped},
+		nodeRespondsAgainReported:                      {kept: theFloorKeptWhenTheNodeStopped},
+		zoneRespondsAgainReported:                      {kept: theFloorKeptWhenTheZoneStopped},
+		deschedulerPassAfterANodeRespondsAgainReported: {kept: theFloorKeptWhenTheNodeStopped},
 	}
 
 	for heading, one := range cases {
@@ -469,11 +473,13 @@ func TestAZoneThatRespondsAgain_ShouldHoldNoPodWhileTheNinePodsStayRunningOnTheO
 	reportLacks(t, reported, aFindingReported)
 }
 
-func TestPodsLostAfterANodeRespondsAgain_ShouldPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone(t *testing.T) {
+func TestPodsLostAfterANodeRespondsAgain_ShouldDeclareNoFailureToleranceJudgeNoFloorAndPlaceOnePodOnEveryNodeWithNinePodsRunningAndThreePerZone(t *testing.T) {
 	t.Parallel()
 	reported := theScenarioSectionHeaded(t, theRunOfEveryScenario(t), podsLostAfterANodeRespondsAgainReported)
 
 	reportShows(t, reported, everyPodOfCheckoutLostReported)
+	reportLacks(t, reported, enoughPodsStayedReadyJudged)
+	reportLacks(t, reported, aFailureToleranceDeclared)
 	reportShows(t, reported, everyPodRunningJudged)
 	reportShows(t, reported, threePodsPerZoneJudged)
 	reportLacks(t, reported, aFindingReported)

@@ -405,6 +405,9 @@ A NodePool may state NoSchedule taints, keeping off its Nodes every Pod not tole
 <a id="req-sim-027"></a>
 A Deployment declares the Zones or Nodes it survives losing `[REQ-SIM-027]`. Its Floor is its replicas less the most Pods those hold evenly spread. One Then judges that every declaring Deployment kept its Floor of Ready Pods since the first Failure.
 
+<a id="req-sim-038"></a>
+A Scenario whose stopped Node or Zone responds again judges its Floor too, through the Failure and whatever moves Pods after it `[REQ-SIM-038]`. One losing Pods to a When declares none, since that When refuses a declaring Deployment.
+
 **Done when:**
 
 - `[REQ-SIM-027]` every Deployment line declares Zones or Nodes it survives losing, never Pods.
@@ -413,7 +416,12 @@ A Deployment declares the Zones or Nodes it survives losing `[REQ-SIM-027]`. Its
 - `[REQ-SIM-027]` a Finding names each declaring Deployment below its Floor at any moment from the first Failure to the Then.
 - `[REQ-SIM-027]` each Deployment's judgement line states kept or fell, Floor, declared loss, and lowest Ready count, when and how long.
 - `[REQ-SIM-027]` a fall's Finding states how low, when, how long, the Pods lost against the most declared, and their Nodes; an unended fall lasts 'for the rest of the Scenario'.
-- `[REQ-SIM-027]` every Failure Scenario declares what its When fails, and every Floor holds.
+- `[REQ-SIM-027]` every Failure Scenario but one losing Pods to a When declares what its When fails, and every Floor holds.
+- `[REQ-SIM-038]` a-node-that-responds-again declares surviving one Node and keeps its Floor of eight Ready Pods to its Then.
+- `[REQ-SIM-038]` a-zone-that-responds-again declares surviving one Zone and keeps its Floor of six Ready Pods to its Then.
+- `[REQ-SIM-038]` a-descheduler-pass-after-a-node-responds-again declares surviving one Node and keeps its Floor of eight through the Failure and the pass's eviction.
+- `[REQ-SIM-038]` pods-lost-after-a-node-responds-again declares no Failure tolerance, and its report judges no Floor.
+- `[REQ-SIM-038]` each of those four Scenarios still Settles at the Placement its other Thens assert.
 
 **Not yet in force:**
 
