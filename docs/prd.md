@@ -114,7 +114,7 @@ An engineer runs the lab's own tests needing no container runtime on their own, 
 
 <a id="req-sim-009"></a>
 <a id="req-sim-025"></a>
-A run names each Deployment by its Kubernetes kind `[REQ-SIM-025]`. A Scenario's Deployment declares one of the predefined Pod specifications the Scenarios define, one per intent `[REQ-SIM-009]`. Customizations change a copy before deployment, through the lab's vocabulary or full access to any other Pod setting, which no Scenario uses yet.
+A run names each Deployment by its Kubernetes kind `[REQ-SIM-025]`. A Scenario's Deployment declares one of the predefined Pod specifications the Scenarios define, one per intent `[REQ-SIM-009]`. Customizations change a copy before deployment, through the lab's vocabulary or full access to any other Pod setting, which no Scenario uses yet. A specification holds one full access at most, and one holding more is refused `[REQ-SIM-009]`.
 
 **Done when:**
 
@@ -124,7 +124,8 @@ A run names each Deployment by its Kubernetes kind `[REQ-SIM-025]`. A Scenario's
 - `[REQ-SIM-009]` given a declared specification, customized or not, when its Pods' settings are read back, then they are the definition's, each Customization's standing over them.
 - `[REQ-SIM-009]` given a-deployment-placed-for-resilience's Topology and nine Pods declaring Default placement, when settled, then every Pod is Running, no count per Zone promised.
 - `[REQ-SIM-009]` given two Deployments of one Scenario, when placed, then each is placed by its own specification, the other's Customizations never reaching it.
-- `[REQ-SIM-009]` given two Customizations naming one setting, through the lab's vocabulary or full access, when both apply, then the later stands.
+- `[REQ-SIM-009]` given two Customizations naming one setting, through the lab's vocabulary or the one full access, when both apply, then the later stands.
+- `[REQ-SIM-009]` given a specification holding more than one full access, when its Deployment is declared, then it is refused, naming why, and the Scenario ends at that Given.
 - `[REQ-SIM-009]` given a Deployment customized with full access, when its Pods are read, then all it named stands but the waiting time before Pods leave an unresponsive Node. Its Pods count as that Deployment's.
 
 **Edge cases:**
@@ -135,6 +136,7 @@ A run names each Deployment by its Kubernetes kind `[REQ-SIM-025]`. A Scenario's
 4. Full access leaves out a setting the lab depends on. That setting holds and the Deployment is deployed.
 5. Full access names a setting the control plane refuses. The Scenario ends at the Step deploying it, as for any refused Customization.
 6. A specification's full access sets a setting that a later Customization names, such as the Request on the Deployment line. The later Customization stands.
+7. A predefined specification holds a full access, and the Deployment line adds a second. The specification is refused all the same.
 
 **ADR:** [ADR: Predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
 
@@ -700,6 +702,7 @@ An Interactive run's Timeline keeps recording while its cluster is held, each cl
 - What limits a Topology's Zone count.
 - Which Failure follows a-zone-that-stops-responding: a Pod, or a removed Node.
 - Whether a Scenario demonstrates a Customization or full access, and whether the lab warns when full access drops a setting it depends on.
+- Whether a specification holds several full accesses, each applying in the order written among its other Customizations.
 - Whether a Scenario rolls out a change to a deployed specification.
 - Whether a Then asserts which Pods stay Pending, or their count alone.
 - Whether the lab's vocabulary names a Pod's limits.

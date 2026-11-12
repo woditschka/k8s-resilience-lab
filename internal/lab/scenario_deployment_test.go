@@ -47,6 +47,7 @@ const (
 	theNotedStepsScenario      = "a-scenario-noting-its-steps"
 	theLeastTimeScenario       = "a-wait-stating-the-least-time"
 	theLaterRequestScenario    = "a-request-after-a-full-access"
+	theTwoFullAccessesScenario = "a-specification-with-two-full-accesses"
 )
 
 // The control plane is polled rather than watched, so a Wait with nothing to
@@ -304,6 +305,26 @@ func TestFullAccessNamingASettingTheControlPlaneRefuses_ShouldEndTheScenarioAtTh
 	expect.Expect(t, asJudged(ended.Findings)).To(expect.Equal([]judgedFinding{}))
 	causeNames(t, ended, theDeployingCauseNames)
 	causeNames(t, ended, string(theRefusedRestartPolicy))
+}
+
+// The refusal fires before any Wait, so no Step after the Given applies anything.
+func TestADeploymentDeclaringASpecificationWithTwoFullAccesses_ShouldEndTheScenarioAtItsGiven(t *testing.T) {
+	t.Parallel()
+	ending := aScenarioOnAClusterFor(t, theTwoFullAccessesScenario)
+	ending.Given().Zones(twoZones, theGeneralNodePool())
+
+	ending.Given().Deployment(someDeploymentName, podsOverEveryNode, askingForNothing(),
+		resilientPlacement().Customize(aFullAccessRequesting(theFullAccessesCores, theFullAccessesGibibytes), aFullAccessTheControlPlaneRefuses()))
+	ending.WaitFor().AllPodsReady()
+
+	ended := ending.outcome()
+	refused := deploymentStepNamedOf(someDeploymentName, podsOverEveryNode, string(resilientPlacementNamed))
+	expect.Expect(t, ended.EndedAt).To(expect.Equal(refused))
+	expect.Expect(t, asReported(ended.Steps)).To(expect.Equal([]reportedStep{
+		reportedAtOnce(topologyStepOf(twoZones, twoNodesPerZone)),
+		reportedAtOnce(refused),
+	}))
+	causeNames(t, ended, "one full access at most")
 }
 
 func TestATopologyOfNodePools_ShouldProvisionEveryZoneWithEachNodePoolsNodesAndCapacity(t *testing.T) {

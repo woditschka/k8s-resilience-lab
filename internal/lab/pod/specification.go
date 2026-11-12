@@ -18,7 +18,7 @@ import (
 )
 
 // Specification carries the immutable domain value and, beside it, the full
-// accesses its Deployment line wrote, because the domain keeps no Kubernetes type
+// access (at most one) its definition or Deployment line wrote, because the domain keeps no Kubernetes type
 // and no function value.
 //
 // A Customization carries no error of its own, so a refusal travels here, and
@@ -150,7 +150,13 @@ type fullAccess struct {
 	change cluster.PodSpecAccess
 }
 
+var errOneFullAccessAtMost = errors.New("a Pod specification holds one full access at most, " +
+	"so a second is refused: several replayed in the order written are not offered")
+
 func (f fullAccess) customize(specification Specification) Specification {
+	if len(specification.accesses) > 0 {
+		return specification.refusing(errOneFullAccessAtMost)
+	}
 	customized := specification
 	customized.accesses = append(slices.Clone(specification.accesses), cluster.PodSpecAccessInPlace{
 		Access:        f.change,
@@ -164,7 +170,7 @@ func (f fullAccess) customize(specification Specification) Specification {
 // applies in its turn among the other Customizations, so the later of two
 // naming one field stands. Whatever it changes, the lab keeps the label its
 // Pods are counted by and their waiting time before leaving an unresponsive
-// Node.
+// Node. A specification holds one at most, and a second refuses it.
 func FullAccess(change cluster.PodSpecAccess) Customization {
 	return fullAccess{change: change}
 }

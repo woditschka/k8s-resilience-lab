@@ -57,9 +57,15 @@ Where a Deployment's Request stands, and what the Given declares:
 29. **A Workload, Pods, or a typed count** — below the floor of Kubernetes naming, or a lab type for a parameter's job.
 30. **A Deployment of a plain `int` replica count**.
 
+How many full accesses a specification holds:
+
+31. **Several, each run in its place** — the second of two sees a setting written after it, since the domain holds that setting where its field was first written.
+32. **Several, replayed as one ordered list of Customizations** — reshapes the domain value; left to a PRD Open Question.
+33. **One at most**, a second refused at the Given declaring the Deployment.
+
 ## Decision
 
-Options 3, 7, 9, 13, 16, 18, 22, 24, 25 and 30.
+Options 3, 7, 9, 13, 16, 18, 22, 24, 25, 30 and 33.
 
 - `Deployment(name, replicas, request, specification)`: an `int` count, one `pod.Customization` for the Request, then one `pod.Specification`. A line naming no Request writes `pod.Settings()`, and its Pods ask for nothing.
 - `Customize` returns a changed copy, the last setting per field winning, and the line's Request applies last.
@@ -69,7 +75,8 @@ Options 3, 7, 9, 13, 16, 18, 22, 24, 25 and 30.
 - No definition holds a Request. Standard Pod and GPU Pod are Named settings of one Request each.
 - `pod.Settings` takes sealed `pod.Setting` values alone. Resilient placement names the Even spread, `EvenSpreadOver`, over the Zone and hostname labels.
 - `pod.FullAccess` reaches every other Pod field. Its function type lives with the mapper in `internal/cluster`, and the Scenarios' depguard rule admits the one package naming the Pod specification.
-- The mapper transcribes the settings in order, each full access in place, then re-applies the lab's tolerations. The container, label and selector stay its own. The control plane validates values: a refusal ends the Scenario at the Wait applying it.
+- A specification holds one full access at most, counted over its definition and the Deployment line alike. One holding more is refused at the Given, naming why.
+- The mapper transcribes the settings in order, the full access in its place, then re-applies the lab's tolerations. The container, label and selector stay its own. The control plane validates values: a refusal ends the Scenario at the Wait applying it.
 - The run prints every setting the domain holds on a line of its own under the Given, as a manifest writes it.
 
 ## Consequences

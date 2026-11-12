@@ -7,6 +7,7 @@
 package pod
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -263,11 +264,6 @@ func TestASpecificationCustomizedWithFullAccess_ShouldHoldItInThePlaceItWasWritt
 			},
 			places: []int{afterTheLabsOwnSettings},
 		},
-		"two full accesses": {
-			customizations: []Customization{aFullAccess(), aFullAccess()},
-			held:           []scenario.Setting{theNotReadyToleration(), theUnreachableToleration()},
-			places:         []int{afterTheLabsOwnSettings, afterTheLabsOwnSettings},
-		},
 	}
 
 	for order, taken := range written {
@@ -278,6 +274,22 @@ func TestASpecificationCustomizedWithFullAccess_ShouldHoldItInThePlaceItWasWritt
 			expect.Expect(t, placesOfTheFullAccesses(customized.accesses)).To(expect.Equal(taken.places))
 		})
 	}
+}
+
+func TestASpecificationCustomizedWithASecondFullAccess_ShouldBeRefusedNamingWhy(t *testing.T) {
+	customized := defaultPlacement().Customize(aFullAccess(), aFullAccess())
+
+	_, refused := customized.Declared()
+	expect.Expect(t, errors.Is(refused, errOneFullAccessAtMost)).To(expect.Equal(true))
+}
+
+func TestAPredefinedSpecificationHoldingAFullAccessGivenASecondOnTheDeploymentLine_ShouldBeRefused(t *testing.T) {
+	predefined := Predefined(defaultPlacementNamed, someStartupTime(), aFullAccess())
+
+	customized := predefined.Customize(aFullAccess())
+
+	_, refused := customized.Declared()
+	expect.Expect(t, errors.Is(refused, errOneFullAccessAtMost)).To(expect.Equal(true))
 }
 
 // The settings written after a full access are all a specification holds of
