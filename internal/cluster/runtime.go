@@ -583,7 +583,7 @@ func (c *ClusterContainer) Remove(ctx context.Context) error {
 // and the container is described by the handle's role and name.
 func removeContainer(ctx context.Context, endpoint Endpoint, identifier, described string) error {
 	query := url.Values{"force": {"true"}, "v": {"true"}}
-	if err := engineRequest(ctx, endpoint, http.MethodDelete, "/containers/"+identifier+"?"+query.Encode(), nil, nil); err != nil {
+	if err := engineRequest(ctx, endpoint, http.MethodDelete, "/containers/"+identifier+"?"+query.Encode(), nil, nil); err != nil && !isRemovalUnderWay(err) {
 		return fmt.Errorf("remove %s: %w", described, err)
 	}
 
@@ -657,6 +657,14 @@ func awaitRemoved(ctx context.Context, endpoint Endpoint, identifier, described 
 		case <-time.After(pollInterval):
 		}
 	}
+}
+
+// A forced removal the engine answers with a conflict is one it already has
+// under way, so only awaitRemoved's confirmation of absence settles it.
+func isRemovalUnderWay(err error) bool {
+	var refused engineRefusal
+
+	return errors.As(err, &refused) && refused.code == http.StatusConflict
 }
 
 func isNoLongerHeld(err error) bool {

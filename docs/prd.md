@@ -53,6 +53,9 @@ A run the engineer stops, or one its container engine cuts short, still removes 
 <a id="req-sim-036"></a>
 Wherever a first stop lands, the run names the stop and what it waited on, and none of its clusters remains `[REQ-SIM-036]`.
 
+<a id="req-sim-039"></a>
+A container the container engine is already removing counts as removed once gone, so removing it again never fails a Scenario `[REQ-SIM-039]`.
+
 <a id="req-sim-003"></a>
 An engineer names one Scenario to re-run it alone `[REQ-SIM-003]`.
 
@@ -86,6 +89,7 @@ The lab's own tests run on their own by kind, needing a container engine or not,
 - `[REQ-SIM-036]` when the container engine fails a cluster's creation with a fault of its own, a cluster created under that name is removed when its Scenario ends; a name another container holds stays untouched.
 - `[REQ-SIM-036]` a cluster the container engine still creates when the lab stops waiting on it is removed once created.
 - `[REQ-SIM-036]` a second stop while a stopped run removes its clusters ends the run at once.
+- `[REQ-SIM-039]` a Simulated Cluster or Descheduler the container engine is already removing is waited on until gone when the lab removes it, and its Scenario's outcome stands.
 - `[REQ-SIM-003]` naming one Scenario runs only it, reporting as a full run does.
 - `[REQ-SIM-003]` a name matching no Scenario stops the run before provisioning, naming the Scenarios that exist.
 - `[REQ-SIM-004]` the one command runs the lab's rules, tests and build on the declared toolchain. Any failure, or a part able to reach a cluster the lab did not provision, fails it, named.

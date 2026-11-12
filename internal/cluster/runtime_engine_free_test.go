@@ -195,13 +195,19 @@ type anEngineHoldingContainers struct {
 	// after the lab first looks for them, as a creation still under way does.
 	createdOnceLookedFor map[string]bool
 	removed              []string
+	// underRemoval are names the engine is already removing: a removal request
+	// is answered as in progress, and the container is gone after the lab has
+	// inspected it the number of times given, never when that is unlimited.
+	underRemoval map[string]int
+	// unremovable are names whose removal the engine faults on.
+	unremovable map[string]bool
 }
 
 // creation answers the request creating the container of the name given.
 type creation func(engine *anEngineHoldingContainers, name string) (*http.Response, error)
 
 func anEngineCreatingAs(creates creation) *anEngineHoldingContainers {
-	return &anEngineHoldingContainers{creates: creates, held: map[string]bool{}, createdOnceLookedFor: map[string]bool{}}
+	return &anEngineHoldingContainers{creates: creates, held: map[string]bool{}, createdOnceLookedFor: map[string]bool{}, underRemoval: map[string]int{}, unremovable: map[string]bool{}}
 }
 
 func (a *anEngineHoldingContainers) endpoint() Endpoint {
@@ -215,11 +221,34 @@ func (a *anEngineHoldingContainers) removals() []string {
 	return a.removed
 }
 
+func (a *anEngineHoldingContainers) holds(name string) bool {
+	a.guarded.Lock()
+	defer a.guarded.Unlock()
+
+	return a.held[name]
+}
+
+func (a *anEngineHoldingContainers) holdUnremovable(name string) {
+	a.guarded.Lock()
+	defer a.guarded.Unlock()
+
+	a.held[name] = true
+	a.unremovable[name] = true
+}
+
 func (a *anEngineHoldingContainers) hold(name string) {
 	a.guarded.Lock()
 	defer a.guarded.Unlock()
 
 	a.held[name] = true
+}
+
+func (a *anEngineHoldingContainers) holdUnderRemoval(name string, inspectionsBeforeGone int) {
+	a.guarded.Lock()
+	defer a.guarded.Unlock()
+
+	a.held[name] = true
+	a.underRemoval[name] = inspectionsBeforeGone
 }
 
 func (a *anEngineHoldingContainers) holdOnceLookedFor(name string) {
@@ -259,6 +288,15 @@ func (a *anEngineHoldingContainers) inspect(name string) *http.Response {
 	if !a.held[name] {
 		return anEngineAnswer(http.StatusNotFound, strings.NewReader(noSuchContainer))
 	}
+	if left, removing := a.underRemoval[name]; removing && left != neverGone {
+		if left == 0 {
+			delete(a.held, name)
+			delete(a.underRemoval, name)
+
+			return anEngineAnswer(http.StatusNotFound, strings.NewReader(noSuchContainer))
+		}
+		a.underRemoval[name] = left - 1
+	}
 
 	return anEngineAnswer(http.StatusOK, strings.NewReader(aContainerPublishingNoPort))
 }
@@ -269,6 +307,12 @@ func (a *anEngineHoldingContainers) remove(name string) *http.Response {
 
 	if !a.held[name] {
 		return anEngineAnswer(http.StatusNotFound, strings.NewReader(noSuchContainer))
+	}
+	if a.unremovable[name] {
+		return anEngineAnswer(http.StatusInternalServerError, strings.NewReader(`{"message":"the engine faulted"}`))
+	}
+	if _, removing := a.underRemoval[name]; removing {
+		return anEngineAnswer(http.StatusConflict, strings.NewReader(`{"message":"removal of container `+name+` is already in progress"}`))
 	}
 	delete(a.held, name)
 	a.removed = append(a.removed, name)
@@ -283,6 +327,7 @@ const (
 	inspectSuffix  = "/json"
 
 	noRemoval = 0
+	neverGone = -1
 
 	noSuchContainer = `{"message":"no such container"}`
 	// The control plane is not this stand-in's to serve, so no port is
@@ -354,4 +399,47 @@ func TestACreationStillUnderWayWhenTheLabStopsWaiting_ShouldRemoveTheClusterOnce
 	_, _ = engine.StartCluster(t.Context(), DefaultKubernetesVersion())
 
 	expect.Expect(t, stillCreating.removals()).To(expect.Equal([]string{engine.containerName}))
+}
+
+func TestARemovalTheContainerEngineAlreadyHasUnderWay_ShouldWaitUntilTheContainerIsGone(t *testing.T) {
+	t.Parallel()
+	removing := anEngineCreatingAs(createdAtOnce)
+	removing.holdUnderRemoval(aContainerName, 1)
+
+	err := removeContainer(t.Context(), removing.endpoint(), aContainerName, "the Descheduler pass "+aContainerName)
+
+	expect.Expect(t, errorText(err)).To(expect.Equal(""))
+	expect.Expect(t, removing.holds(aContainerName)).To(expect.Equal(false))
+}
+
+func TestARemovalTheContainerEngineFaultsOn_ShouldFailNamingTheContainerWithoutWaiting(t *testing.T) {
+	t.Parallel()
+	faulting := anEngineCreatingAs(createdAtOnce)
+	faulting.holdUnremovable(aContainerName)
+
+	err := removeContainer(t.Context(), faulting.endpoint(), aContainerName, "the Descheduler pass "+aContainerName)
+
+	expect.Expect(t, strings.Contains(errorText(err), "remove the Descheduler pass "+aContainerName)).To(expect.Equal(true))
+}
+
+func TestARemovalAlreadyUnderWayWhoseContainerNeverGoes_ShouldFailNamingTheContainer(t *testing.T) {
+	t.Parallel()
+	removing := anEngineCreatingAs(createdAtOnce)
+	removing.holdUnderRemoval(aContainerName, neverGone)
+	waiting, cancel := context.WithTimeout(t.Context(), 2*pollInterval)
+	defer cancel()
+
+	err := removeContainer(waiting, removing.endpoint(), aContainerName, "the Descheduler pass "+aContainerName)
+
+	expect.Expect(t, strings.Contains(errorText(err), "the removal of the Descheduler pass "+aContainerName+" was not confirmed")).To(expect.Equal(true))
+}
+
+const aContainerName = "a-container-the-engine-is-removing"
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	return err.Error()
 }
