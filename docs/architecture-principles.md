@@ -17,9 +17,9 @@ The high-level laws designs are evaluated against. The `design-validation` skill
 6. **Understandable systems** — if it cannot be reasoned about, it cannot be secured.
 7. **Fail secure** — errors leave the system in a safe state.
 8. **One Timeline, read for what happened** — everything that changes a Simulated Cluster, the lab's own actions included, is recorded in its Timeline. Any account of what happened over time is read from it: a narrative, a terminal line, a judgment across moments. What the cluster looks like now is read from the cluster. One judgment stands outside it: whether a Descheduler pass evicted anything is read from the Pods listed before and after that pass.
-9. **A defect is a class** — the reasoning that makes one site wrong makes its siblings wrong. A fix reaches every site of the kind and says where it looked.
-10. **Claim only what was observed** — a value, an error or a status stands for the evidence behind it, never for what usually follows from it. A wait that was stopped did not expire, and an engine that failed did not refuse.
-11. **Every way out ends as cleanly as success** — a stop, a failure and work still under way leave what a finished run leaves. The person who stopped it can always stop harder.
+9. **A defect is a class** — the reasoning that makes one place wrong makes every place built the same way wrong. A fix names the search it ran and each place it changed.
+10. **Claim only what was observed** — a value, an error or a status stands for the evidence behind it, never for what usually follows from it, unless the design names that reading and why it holds. A wait that was stopped did not expire, and an engine that failed did not refuse.
+11. **Every way out ends as cleanly as success** — a stop, a failure and work still under way leave what a finished run leaves. That is no Simulated Cluster, no pass container and the Timeline filed, because whatever an exit leaves running the engineer cannot see. A second stop, or a kill, is the engineer overriding that cleanup, and what it has not removed stays for the engineer.
 
 ## Module Boundaries
 
@@ -164,6 +164,6 @@ Before approving a design, verify:
 - [ ] New dependencies justified against the dependency policy
 - [ ] Terms match the canonical vocabulary
 - [ ] Every change to a Simulated Cluster reaches its Timeline; an account of what happened over time reads from the Timeline, with no second record beside it, a Descheduler pass's own count of its evictions excepted
-- [ ] A fix covers every site its reasoning applies to, and the design names the sites
+- [ ] A fix names the search it ran for places built the same way, and each place it changed
 - [ ] Each error and status claims only what its evidence shows; a broader reading is named and justified
-- [ ] A stop, a failure and work still under way each end as a finished run does, and a stop can be escalated
+- [ ] A stop, a failure and work still under way each leave what a finished run leaves; a second stop may leave removal to the engineer

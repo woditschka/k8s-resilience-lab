@@ -17,7 +17,7 @@ The lab serves two uses. Unattended, it runs each Scenario and asserts its Place
 
 | ID | Goal | Success Metric |
 |----|------|----------------|
-| G-1 | Placement under a declared Topology is verified automatically, with no real cluster involved. | Every Scenario runs unattended on a developer machine and in a build, needing only a container runtime. |
+| G-1 | Placement under a declared Topology is verified automatically, with no real cluster involved. | Every Scenario runs unattended on a developer machine and in a build, needing only a container engine. |
 | G-2 | The behavior each Scenario asserts is also demonstrable live. | An engineer starts the lab, watches the Placement of a running Deployment, and injects a Failure without editing code. |
 | G-3 | A Deployment's survival is judged through a Failure, not only once the cluster has recovered. | Each Failure Scenario declares the Zones or Nodes its Deployment survives losing, and judges every moment from the Failure to its Then. |
 | G-4 | A Scenario is written and read in one vocabulary. | Every name in a Scenario is one the lab offers Scenarios, each line is a Step, and every Scenario sits in one place. |
@@ -48,10 +48,10 @@ One invocation with no arguments checks the lab's own rules, then runs every Sce
 A run carries out its Scenarios at once yet reports them in declared order, and a failing Scenario ends alone `[REQ-SIM-014]`.
 
 <a id="req-sim-034"></a>
-A run the engineer stops, or one its container runtime cuts short, still removes every Simulated Cluster it started and names why it ended `[REQ-SIM-034]`.
+A run the engineer stops, or one its container engine cuts short, still removes every Simulated Cluster it started and names why it ended `[REQ-SIM-034]`.
 
 <a id="req-sim-036"></a>
-Wherever a stop lands, the run names the stop and what it waited on, and none of its clusters remains `[REQ-SIM-036]`.
+Wherever a first stop lands, the run names the stop and what it waited on, and none of its clusters remains `[REQ-SIM-036]`.
 
 <a id="req-sim-003"></a>
 An engineer names one Scenario to re-run it alone `[REQ-SIM-003]`.
@@ -63,7 +63,7 @@ One command decides whether the lab itself is sound, and the repository holds ex
 The same command holds the lab to its declared dependencies, free of known vulnerabilities, and to closing every connection it opens `[REQ-SIM-007]`.
 
 <a id="req-sim-035"></a>
-The lab's own tests run on their own by kind, needing a container runtime or not, so those needing none wait for no Simulated Cluster `[REQ-SIM-035]`. The one command runs both.
+The lab's own tests run on their own by kind, needing a container engine or not, so those needing none wait for no Simulated Cluster `[REQ-SIM-035]`. The one command runs both.
 
 **Done when:**
 
@@ -71,20 +71,20 @@ The lab's own tests run on their own by kind, needing a container runtime or not
 - `[REQ-SIM-001]` beside an earlier run's Nodes and Pods, a run reports only its own, each Zone and Node by position counted from one.
 - `[REQ-SIM-001]` a run's cluster mirrors the Kubernetes version it names, or the pinned default, reporting which.
 - `[REQ-SIM-001]` beside other containers and a second run, an ending Scenario removes its own Simulated Cluster alone.
-- `[REQ-SIM-002]` with a reachable container runtime, a no-argument invocation runs every Scenario needing a Simulated Cluster afresh, reporting name and outcome.
+- `[REQ-SIM-002]` with a reachable container engine, a no-argument invocation runs every Scenario needing a Simulated Cluster afresh, reporting name and outcome.
 - `[REQ-SIM-002]` every Scenario of the lab reaches the outcome it asserts.
-- `[REQ-SIM-002]` on failing lab rules or no reachable container runtime, the lab names why and stops before provisioning.
+- `[REQ-SIM-002]` on failing lab rules or no reachable container engine, the lab names why and stops before provisioning.
 - `[REQ-SIM-014]` in a full run, no Scenario waits for another, and each one's lines stand together in declared order.
 - `[REQ-SIM-014]` Scenarios carried out at once each report a Placement and Timeline naming only their own Nodes and Pods.
 - `[REQ-SIM-014]` a Scenario failing part-way is reported, the others reach their outcomes, and no Simulated Cluster remains.
 - `[REQ-SIM-014]` under the one command, the lab's own tests needing a Simulated Cluster run at once, and those judging a full run share one.
 - `[REQ-SIM-034]` a stopped run of every Scenario ends each Scenario still running as one failing part-way, leaving no Simulated Cluster or Descheduler of the run.
-- `[REQ-SIM-034]` a Simulated Cluster the container runtime created without its answer reaching the lab is removed when its Scenario ends.
+- `[REQ-SIM-034]` a Simulated Cluster the container engine created without its answer reaching the lab is removed when its Scenario ends.
 - `[REQ-SIM-034]` a Kubernetes version or Descheduler obtained only in part is reported at run start as one the lab cannot obtain, named.
 - `[REQ-SIM-036]` a stop while Simulated Clusters start ends each Scenario still starting naming the stop, never a wait that timed out.
 - `[REQ-SIM-036]` a stop while a Scenario Waits for its Nodes to be Ready ends it naming the stop and the Nodes it waited on, no Deployment.
-- `[REQ-SIM-036]` when the container runtime fails a cluster's creation with a fault of its own, a cluster created under that name is removed when its Scenario ends; a name another container holds stays untouched.
-- `[REQ-SIM-036]` a cluster the container runtime still creates when the lab stops waiting on it is removed once created.
+- `[REQ-SIM-036]` when the container engine fails a cluster's creation with a fault of its own, a cluster created under that name is removed when its Scenario ends; a name another container holds stays untouched.
+- `[REQ-SIM-036]` a cluster the container engine still creates when the lab stops waiting on it is removed once created.
 - `[REQ-SIM-036]` a second stop while a stopped run removes its clusters ends the run at once.
 - `[REQ-SIM-003]` naming one Scenario runs only it, reporting as a full run does.
 - `[REQ-SIM-003]` a name matching no Scenario stops the run before provisioning, naming the Scenarios that exist.
@@ -92,23 +92,23 @@ The lab's own tests run on their own by kind, needing a container runtime or not
 - `[REQ-SIM-004]` the repository holds exactly one implementation of the lab.
 - `[REQ-SIM-007]` a dependency differing from its declaration, vulnerable, or named like a permitted one fails the one command, named.
 - `[REQ-SIM-007]` when the lab's own tests end, no connection the lab opened to a Simulated Cluster stays open.
-- `[REQ-SIM-035]` given no reachable container runtime, the tests needing none each run and pass, and no Simulated Cluster starts.
-- `[REQ-SIM-035]` with a reachable container runtime, the tests needing one run alone.
-- `[REQ-SIM-035]` with no reachable container runtime, each test needing one fails, naming the runtime, under the one command or alone.
+- `[REQ-SIM-035]` given no reachable container engine, the tests needing none each run and pass, and no Simulated Cluster starts.
+- `[REQ-SIM-035]` with a reachable container engine, the tests needing one run alone.
+- `[REQ-SIM-035]` with no reachable container engine, each test needing one fails, naming the container engine, under the one command or alone.
 - `[REQ-SIM-035]` the one command runs every test of both kinds, on a developer machine as in a build.
 
 **Edge cases:**
 
 1. A Deployment declares more replicas than its Topology holds. Unplaceable Pods are reported Pending, failing a Scenario asserting every Pod Running.
-2. The container runtime answers at an unconventional location. The run finds it.
-3. A stale runtime address sits beside a live runtime. The run reaches the live one.
+2. The container engine answers at an unconventional location. The run finds it.
+3. A stale container engine address sits beside a live one. The run reaches the live one.
 4. A run names a Kubernetes version the lab cannot obtain. It stops, naming it, before any Scenario starts.
-5. The runtime cannot start one Scenario's Simulated Cluster while others start. That Scenario ends at its first Step, naming why; the others run on.
+5. The container engine cannot start one Scenario's Simulated Cluster while others start. That Scenario ends at its first Step, naming why; the others run on.
 6. The engineer stops a run while its Scenarios still provision. Every Simulated Cluster started so far is removed `[REQ-SIM-034]`.
 7. A run is killed outright. Its Simulated Clusters stay for the engineer to remove `[REQ-SIM-034]`.
 8. A second stop while the run removes its clusters. The run ends at once, and clusters not yet removed stay, as after a kill `[REQ-SIM-036]`.
 
-**ADR:** [ADR: Kubernetes version pin](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: Lab-provisioned Simulated Cluster](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: Predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
+**ADR:** [ADR: Kubernetes version pin for the Simulated Cluster](adr/2026-10-03-kubernetes-version-pin.md) · [ADR: The lab provisions the Simulated Cluster it drives](adr/2026-10-03-lab-provisioned-simulated-cluster.md) · [ADR: A Deployment declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ### Declaring a Deployment's Pods
 
@@ -138,7 +138,7 @@ A run names each Deployment by its Kubernetes kind `[REQ-SIM-025]`. A Scenario's
 6. Full access sets a setting a later Customization names, such as the Deployment line's Request. The later one stands.
 7. A predefined specification holds a full access and the Deployment line adds a second. The specification is refused.
 
-**ADR:** [ADR: Predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
+**ADR:** [ADR: A Deployment declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ### Stating what decides a Placement
 
@@ -275,7 +275,7 @@ A Scenario injects a Failure and judges the Placement on both sides of it `[REQ-
 2. A When failing more Nodes or Zones than the Topology holds ends the Scenario at that Step, naming it.
 3. A Zone of many Nodes fails, by a When or a click. All its Nodes stop responding at once, the last before the control plane moves the first's Pods.
 
-**ADR:** [ADR: Node Failure](adr/2026-10-05-node-failure-withholds-the-nodes-status.md)  ·  **Design:** [system-design.md](system-design.md)
+**ADR:** [ADR: A Node Failure withholds the Node's status and shortens the eviction wait](adr/2026-10-05-node-failure-withholds-the-nodes-status.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ### Failing every Node of one label value
 
@@ -466,7 +466,7 @@ Under every Wait, a run shows how the Placement changed and where every Pod stan
 
 **Done when:**
 
-- `[REQ-SIM-021]` every Wait, reached or not, prints after its line a separator, a Placement board and a second separator, before any Then or next Step, each separator as long as the board's widest line.
+- `[REQ-SIM-021]` every Wait, reached or not, prints after its line a separator, a Placement board and a second separator, before any Then or next Step, each separator spanning the board.
 - `[REQ-SIM-021]` no separator line stands between a Then and the When after it.
 - `[REQ-SIM-021]` a board gives every Node one line under its Zone, naming its NodePool and every Pod on it by Deployment name and own suffix, two Deployments included.
 - `[REQ-SIM-021]` a board marks exactly the Pods new on each Node since the previous one, and lists Pods left Pending beneath the Nodes.
@@ -476,8 +476,8 @@ Under every Wait, a run shows how the Placement changed and where every Pod stan
 - `[REQ-SIM-021]` when nothing changed the Placement since the previous Wait, the separator and board follow its line with no narrative.
 - `[REQ-SIM-021]` in a Timeline's file, as in the whole Timeline, each Step stands at its moment among the Entries.
 - `[REQ-SIM-021]` a report ends with the last board, one Skew line for the judged Deployment, a separator and the Timeline's line, no other summary.
-- `[REQ-SIM-021]` a filed Timeline's line ends at the file's name with no colon, under a separator at least as long.
-- `[REQ-SIM-021]` a heavier separator of another character, as long as the widest line beside it, follows the run's opening lines and parts two Scenarios.
+- `[REQ-SIM-021]` a filed Timeline's line ends at the file's name, under a separator.
+- `[REQ-SIM-021]` a heavier separator follows the run's opening lines and parts two Scenarios.
 
 **Edge cases:**
 
@@ -527,7 +527,7 @@ Every Scenario of the lab sits in one source, each run and reported under its Sc
 6. A Scenario whose function names no condition is refused by the lab's rules before provisioning, naming the function `[REQ-SIM-020]`.
 7. A Wait stating no time reaches its state only after the lab's waiting time. A Wait for a pass evicting nothing can take that long, waiting for the pass, then for Settled. It is reported reached, naming the time taken.
 
-**ADR:** [ADR: Scenarios as Go functions](adr/2026-10-03-scenarios-as-go-functions.md)  ·  **Design:** [system-design.md](system-design.md)
+**ADR:** [ADR: Scenarios are Go functions over immutable descriptions](adr/2026-10-03-scenarios-as-go-functions.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ### Reading a Scenario by subject
 
@@ -552,7 +552,7 @@ Each name a Scenario writes shows its subject, a Pod, a Node, or the Scenario wi
 2. A Customization writes another time for either toleration. The lab's waiting time holds and is reported.
 3. A setting of several values leaves out a value Kubernetes would default. It is refused all the same, since no value deciding a Placement falls to a default. A Scenario needing a zero sets it through full access.
 
-**ADR:** [ADR: Predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md) · [ADR: Idiomatic Scenario code](adr/2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)  ·  **Design:** [system-design.md](system-design.md)
+**ADR:** [ADR: A Deployment declares one of the lab's predefined Pod specifications](adr/2026-10-05-workload-declares-a-predefined-pod-specification.md) · [ADR: Scenario code stays idiomatic Go, read by subject](adr/2026-10-18-scenario-code-stays-idiomatic-go-read-by-subject.md)  ·  **Design:** [system-design.md](system-design.md)
 
 ### Watching a Scenario live
 
@@ -589,7 +589,7 @@ An engineer starts an Interactive run naming one Scenario and opens its Live vie
 5. The Live view opens after the Steps ran, or in two browsers at once. Each shows the Placement as it stands.
 6. Pods the lab places itself while provisioning the Topology appear nowhere in the Live view.
 7. A stop while Steps still run stops them and removes the Simulated Cluster.
-8. No container runtime is reachable. The Interactive run names why and stops before offering the Live view.
+8. No container engine is reachable. The Interactive run names why and stops before offering the Live view.
 
 **Design:** [system-design.md](system-design.md)
 
@@ -606,13 +606,13 @@ The Nodes of one Failure stop together, by a click or a Scenario's When, so a Zo
 - `[REQ-SIM-028]` clicking a held cluster's Node box stops that Node as a Node Failure does, asking no confirmation.
 - `[REQ-SIM-028]` clicking a held cluster's Zone box stops all its Nodes at once, as a Zone Failure does.
 - `[REQ-SIM-028]` clicking a held cluster's placed Pod loses it, and its Deployment replaces it.
-- `[REQ-SIM-028]` each click prints one When on the terminal, indented as a run's, naming what changed, a Pod as the Live view does: "When Node worker-2 stops responding", "When Zone zone-a stops responding", "When Pod checkout-abc12 is lost".
+- `[REQ-SIM-028]` each click prints one When on the terminal, indented as a run's, naming the Node or Zone that stops responding or the Pod lost, a Pod as the Live view names it.
 - `[REQ-SIM-028]` clicking a Pending Pod or any other part of the page changes nothing.
-- `[REQ-SIM-028]` clicking a stopped Node, or a Zone whose every Node stopped, makes it respond again: "When Node worker-2 responds again", "When Zone zone-a responds again".
+- `[REQ-SIM-028]` clicking a stopped Node, or a Zone whose every Node stopped, makes it respond again, its When naming the Node or Zone that responds again.
 - `[REQ-SIM-028]` clicking one Node of a stopped Zone makes it alone respond again.
 - `[REQ-SIM-037]` a Zone of many Nodes failing by a click or a When stops its last Node as soon after its first as a Zone of two does.
 - `[REQ-SIM-037]` when a clicked Zone Failure, one of whose Nodes cannot be stopped, ends, each Node it did stop counts as stopped, and a click on one makes it respond again.
-- `[REQ-SIM-037]` a click making a Node or Zone respond again that cannot be carried out is named not injected, and why, on the terminal and in the Timeline in place of its When: "Not injected: Node worker-2 responds again, because …".
+- `[REQ-SIM-037]` a click making a Node or Zone respond again that cannot be carried out is named not injected, and why, on the terminal and in the Timeline in place of its When.
 - `[REQ-SIM-037]` a click making a Zone respond again only in part has its terminal line name each Node that did not.
 
 **Edge cases:**
@@ -644,7 +644,7 @@ One command starts an Interactive run and opens its Live view in the machine's b
 
 1. With no way to open a browser, the address stays on the terminal and the run goes on.
 2. The command names a Scenario matching none. It stops before provisioning, naming the Scenarios that exist, and opens no browser.
-3. No container runtime is reachable. The command names why and stops, opening no browser.
+3. No container engine is reachable. The command names why and stops, opening no browser.
 
 **Design:** [system-design.md](system-design.md)
 
