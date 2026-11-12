@@ -72,13 +72,13 @@ func run(ctx context.Context, arguments []string, timelinesRoot string, report, 
 	// settings while the run is under way.
 	reported.printPart(openingOf(engine, asked))
 
-	// The command names no Scenario, so adding one touches the Scenarios' place
-	// alone.
+	// A run names no Scenario or one, so adding a Scenario touches the
+	// Scenarios' place alone.
 	//
 	// The Scenarios run at once and one Scenario's result stops no other. The
 	// report is written after all have ended, from this goroutine alone, so it
 	// needs no locking.
-	carried, err := runner.RunAtOnce(ctx, scenarios.All())
+	carried, err := runner.RunAtOnce(ctx, asked.selected)
 	if err != nil {
 		return errors.Join(err, reported.failed())
 	}
@@ -189,6 +189,9 @@ type runSetting struct {
 	held func(*lab.Scenario)
 	// heldName is the name the engineer gave for it.
 	heldName string
+	// selected are the Scenarios a run carries out: the one named, or every
+	// Scenario when none is.
+	selected []func(*lab.Scenario)
 }
 
 func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) {
@@ -202,7 +205,7 @@ func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) 
 		return runSetting{}, fmt.Errorf("read the lab's arguments: %w", err)
 	}
 
-	held, err := resolveHeldScenario(*interactive, flags.Args())
+	held, selected, err := resolveScenarios(*interactive, flags.Args())
 	if err != nil {
 		return runSetting{}, err
 	}
@@ -217,22 +220,30 @@ func resolveSetting(arguments []string, warnings io.Writer) (runSetting, error) 
 		heldName = flags.Arg(0)
 	}
 
-	return runSetting{version: version, wholeTimeline: *whole, held: held, heldName: heldName}, nil
+	return runSetting{version: version, wholeTimeline: *whole, held: held, heldName: heldName, selected: selected}, nil
 }
 
 // A refusal names every Scenario, so the engineer reads what can be asked for.
-func resolveHeldScenario(interactive bool, named []string) (func(*lab.Scenario), error) {
+// An Interactive run holds its one Scenario; any other run carries out the one
+// named, or every Scenario when none is.
+func resolveScenarios(interactive bool, named []string) (held func(*lab.Scenario), selected []func(*lab.Scenario), err error) {
 	every := scenarios.All()
 	switch {
 	case !interactive && len(named) == 0:
-		return nil, nil
-	case !interactive:
-		return nil, refusedNamingEvery(every, "a Scenario name is taken with --interactive alone")
+		return nil, every, nil
 	case len(named) != 1:
-		return nil, refusedNamingEvery(every, fmt.Sprintf("--interactive takes one Scenario name, not %d", len(named)))
+		return nil, nil, refusedNamingEvery(every, fmt.Sprintf("a run takes one Scenario name, not %d", len(named)))
 	}
 
-	return lab.ScenarioNamed(every, named[0])
+	one, err := lab.ScenarioNamed(every, named[0])
+	if err != nil {
+		return nil, nil, err
+	}
+	if interactive {
+		return one, nil, nil
+	}
+
+	return nil, []func(*lab.Scenario){one}, nil
 }
 
 func refusedNamingEvery(every []func(*lab.Scenario), why string) error {

@@ -788,6 +788,25 @@ func TestScenariosCarriedOutAtOnce_ShouldEachNameOnlyTheirOwnNodesAndPods(t *tes
 	expect.Expect(t, thePodsFiledByMoreThanOneScenario(t, reported)).To(expect.HaveLen[string](noPodShared))
 }
 
+var aRunNamingOneScenario = sync.OnceValues(func() (string, error) {
+	var reported, warned bytes.Buffer
+	err := run(context.Background(), []string{aSecondScenarioOfTheLab}, sharedRunTimelines, &reported, &warned)
+
+	return reported.String(), err
+})
+
+func TestARunNamingOneScenario_ShouldCarryOutOnlyThatScenarioToItsEnd(t *testing.T) {
+	t.Parallel()
+	requireEngine(t)
+
+	reported, err := aRunNamingOneScenario()
+	if err != nil {
+		t.Fatalf("the run naming %s: %v", aSecondScenarioOfTheLab, err)
+	}
+
+	expect.Expect(t, theHeadingsOf(t, reported)).To(expect.Equal([]string{nodeStopsRespondingReported}))
+}
+
 func theHeadingsOf(t *testing.T, reported string) []string {
 	t.Helper()
 

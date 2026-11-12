@@ -493,17 +493,27 @@ func everyScenarioNameInOrder(t *testing.T) string {
 	return strings.Join(names, ", ")
 }
 
-func TestAnInteractiveRunNamingAnUnknownScenario_ShouldStopBeforeProvisioningAndNameTheScenariosThatExist(t *testing.T) {
-	_, err := aRun(t, interactive, aNameNoScenarioCarries)
+func TestARunNamingAnUnknownScenario_ShouldStopBeforeProvisioningAndNameTheScenariosThatExist(t *testing.T) {
+	cases := map[string][]string{
+		"without --interactive": {aNameNoScenarioCarries},
+		"with --interactive":    {interactive, aNameNoScenarioCarries},
+	}
 
-	expectNamed(t, err, everyScenarioNameInOrder(t))
+	for named, arguments := range cases {
+		t.Run(named, func(t *testing.T) {
+			_, err := aRun(t, arguments...)
+
+			expectNamed(t, err, everyScenarioNameInOrder(t))
+		})
+	}
 }
 
-func TestScenarioNamesAnInteractiveRunCannotTake_ShouldStopTheLabBeforeTheEngineNamingTheScenariosThatExist(t *testing.T) {
+func TestScenarioNamesARunCannotTake_ShouldStopTheLabBeforeTheEngineNamingTheScenariosThatExist(t *testing.T) {
 	refused := map[string][]string{
-		"no name":                      {interactive},
-		"two names":                    {interactive, theFirstScenarioOfTheLab, aSecondScenarioOfTheLab},
-		"a name without --interactive": {theFirstScenarioOfTheLab},
+		"no name with --interactive":            {interactive},
+		"two names with --interactive":          {interactive, theFirstScenarioOfTheLab, aSecondScenarioOfTheLab},
+		"two names without --interactive":       {theFirstScenarioOfTheLab, aSecondScenarioOfTheLab},
+		"a repeated name without --interactive": {theFirstScenarioOfTheLab, theFirstScenarioOfTheLab},
 	}
 
 	for named, arguments := range refused {
@@ -513,6 +523,16 @@ func TestScenarioNamesAnInteractiveRunCannotTake_ShouldStopTheLabBeforeTheEngine
 			expectNamed(t, err, everyScenarioNameInOrder(t))
 		})
 	}
+}
+
+func TestArgumentsNamingOneScenarioWithoutInteractive_ShouldSelectThatScenarioAloneAndHoldNone(t *testing.T) {
+	setting, err := resolveSetting([]string{theFirstScenarioOfTheLab}, io.Discard)
+	if err != nil {
+		t.Fatalf("resolve the setting of a run naming %s: %v", theFirstScenarioOfTheLab, err)
+	}
+
+	expect.Expect(t, len(setting.selected)).To(expect.Equal(1))
+	expect.Expect(t, setting.held == nil).To(expect.Equal(true))
 }
 
 func TestArgumentsNamingOneScenarioWithInteractive_ShouldCarryTheScenarioNameIntoTheSetting(t *testing.T) {

@@ -94,6 +94,7 @@ git clone https://github.com/woditschka/k8s-resilience-lab.git
 cd k8s-resilience-lab
 
 make run                                 # every Scenario, each on a Simulated Cluster of its own
+make run ARGS="a-node-that-stops-responding"  # one Scenario alone, reported as a full run reports it
 make run ARGS="--whole-timeline"         # print every Timeline entry under each filing line
 make run ARGS="--k8s-version <version>"  # mirror another patch of the pinned Kubernetes minor
 make interactive SCENARIO=a-node-that-stops-responding  # hold one Scenario's cluster and watch it live
