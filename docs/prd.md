@@ -60,7 +60,7 @@ An engineer names one Scenario to re-run it alone `[REQ-SIM-003]`.
 One command decides whether the lab itself is sound, and the repository holds exactly one implementation of the lab `[REQ-SIM-004]`.
 
 <a id="req-sim-007"></a>
-The same command holds the lab to its declared dependencies, free of known vulnerabilities, and to closing every connection it opens `[REQ-SIM-007]`.
+The same command holds the lab to its declared dependencies and to closing every connection it opens, and the build keeps it free of known vulnerabilities `[REQ-SIM-007]`.
 
 <a id="req-sim-035"></a>
 The lab's own tests run on their own by kind, needing a container engine or not, so those needing none wait for no Simulated Cluster `[REQ-SIM-035]`. The one command runs both.
@@ -90,7 +90,8 @@ The lab's own tests run on their own by kind, needing a container engine or not,
 - `[REQ-SIM-003]` a name matching no Scenario stops the run before provisioning, naming the Scenarios that exist.
 - `[REQ-SIM-004]` the one command runs the lab's rules, tests and build on the declared toolchain. Any failure, or a part able to reach a cluster the lab did not provision, fails it, named.
 - `[REQ-SIM-004]` the repository holds exactly one implementation of the lab.
-- `[REQ-SIM-007]` a dependency differing from its declaration, vulnerable, or named like a permitted one fails the one command, named.
+- `[REQ-SIM-007]` a dependency differing from its declaration, or named like a permitted one, fails the one command, named.
+- `[REQ-SIM-007]` a known vulnerability in code the lab calls fails the build, named, on each push to main, each pull request and once a week. The one command checks for none.
 - `[REQ-SIM-007]` when the lab's own tests end, no connection the lab opened to a Simulated Cluster stays open.
 - `[REQ-SIM-035]` given no reachable container engine, the tests needing none each run and pass, and no Simulated Cluster starts.
 - `[REQ-SIM-035]` with a reachable container engine, the tests needing one run alone.
