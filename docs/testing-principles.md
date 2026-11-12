@@ -13,6 +13,10 @@ A well-written test answers three questions instantly:
 
 If a reader needs more than a few seconds to answer all three, the test is too complex.
 
+A test is evidence, so it must be able to fail. A fix's test is seen failing before the fix. One that passed from the start guards a behavior, and says so.
+
+A test asserts the property it names, never a symptom of it. "At once" is shown by overlap and "before" by order; a duration shows neither.
+
 ## Four-Phase Test Structure
 
 Organize every test into four distinct phases:
@@ -230,6 +234,7 @@ Every test suite should cover:
 - Corrupted data triggers recovery, not crashes
 - I/O errors are caught and logged
 - Unparseable input produces a warning, not an exception
+- Every way out of a changed function has a test, the interrupted ways included: a stop, a timeout, work still under way
 
 ### State and Idempotency Testing
 
@@ -256,3 +261,5 @@ When an agent writes or refactors a test, it walks through these checks:
 12. **Signal vs. noise:** Reader can tell at a glance which values matter?
 13. **Transparent expectations:** Expected values derived from inputs?
 14. **Zero duplication:** Reusable patterns in the shared vocabulary?
+15. **Able to fail:** Seen failing without the change, or named as a guard?
+16. **The property itself:** Asserting what the name states, not a duration or a count that usually goes with it?
