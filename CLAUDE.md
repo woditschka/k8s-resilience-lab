@@ -168,6 +168,7 @@ make test-race   # Same as make test
 make lint        # Run golangci-lint
 make lint-fix    # Run golangci-lint with auto-fix
 make deps-check  # Verify no prohibited dependencies
+make vuln-check  # Scan for known vulnerabilities in code the lab calls; needs the network, and make ci does not run it
 make ci          # Full CI pipeline: tidy-check, fmt-check, vet, lint, deps-check, test (race detector), build
 ```
 

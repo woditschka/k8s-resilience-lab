@@ -2,6 +2,9 @@
 # Runs the full gate on every push to main and every pull request, then reports
 # the result: a public record that the pushed code passed. It gates a merge only
 # where branch protection requires this check.
+# A second job, vuln-check, scans for known vulnerabilities on the same triggers
+# and once a week, since advisories arrive between commits; the gate does not run
+# on the weekly trigger.
 # This workflow is "checks": file, display name, and badge label all match.
 name: checks
 
@@ -9,6 +12,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
 
 # Least privilege: the gate only reads the tree.
 permissions:
@@ -16,6 +21,7 @@ permissions:
 
 jobs:
   gate:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # The gate takes minutes; the bound stops a hung cluster from holding a
     # runner for the six-hour default.
@@ -47,3 +53,17 @@ jobs:
       # detector needs and the Docker engine each Simulated Cluster starts on.
       - name: Run the gate
         run: make ci
+
+  vuln-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The scanned standard library is the one the module builds with.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Scan for known vulnerabilities
+        run: make vuln-check

@@ -102,6 +102,7 @@ make demo                                # the same, for the Descheduler Scenari
 make test-unit                           # the lab's tests needing no container engine
 make test-integration                    # the lab's tests needing one, each starting Simulated Clusters
 make ci                                  # the full quality gate, both kinds of test and the Scenarios included
+make vuln-check                          # scan the code the lab calls for known vulnerabilities (needs the network; the workflow runs it, the gate does not)
 ```
 
 All Scenarios run at once, so a run lasts about as long as its slowest Scenario, and each reports as the section What It Looks Like in Practice shows. Stopping a run with Ctrl-C ends each Scenario still running part-way, naming the stop, and removes its Simulated Clusters. A second Ctrl-C ends the run at once and leaves the clusters not yet removed, as killing it does: `docker ps -a --filter name=k8s-resilience-lab` lists them and `docker rm -f` removes them.

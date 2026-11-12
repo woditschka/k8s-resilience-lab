@@ -23,7 +23,7 @@ PROHIBITED_IMPORTS := \
 	sigs.k8s.io/controller-runtime \
 	k8s.io/kubectl
 
-.PHONY: ci run interactive demo tidy-check fmt fmt-check vet lint lint-fix deps-check test test-unit test-integration test-race build
+.PHONY: ci run interactive demo tidy-check fmt fmt-check vet lint lint-fix deps-check test test-unit test-integration test-race build vuln-check
 
 ci: tidy-check fmt-check vet lint deps-check test build
 
@@ -147,6 +147,12 @@ test-unit:
 # engine then drops requests.
 test-integration:
 	@go test -race -tags integration -p 1 -parallel 2 -timeout 30m ./... || { $(RACE_REFUSED); }
+
+# vuln-check scans the code the lab calls, dependencies and standard library, for
+# known vulnerabilities, with govulncheck pinned in tools.mod apart from the lab's
+# own module. It needs the network, so the workflow runs it and the gate does not.
+vuln-check:
+	go tool -modfile=tools.mod govulncheck ./...
 
 # test-race is an alias for the detector run.
 # The gate's own test check is that run, so the two names are one target.

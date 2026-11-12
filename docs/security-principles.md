@@ -38,6 +38,6 @@ The classes below derive from the dependency policy and threat model in `docs/sy
 Checks the project does not run, and why. A reviewer states a listed gap in one clause and raises nothing for it. A gap not listed here is raised once, as a `clarify` finding to the owner, and then listed.
 
 - **Image digest pinning** is not in force. The cluster and Descheduler images are pinned by tag only.
-- **Dependency vulnerability scanning** does not run. `govulncheck` is absent from the agent runtime, and the gate command does not invoke it.
+- **Dependency vulnerability scanning** runs in the build, not in the gate. `make vuln-check` needs the network, so the gate command does not invoke it and an agent cannot run it.
 - **Container image scanning** does not run. The gate command invokes no image scanner.
 - **Static security analysis** does not run. `gosec` is outside the enabled linter set.
