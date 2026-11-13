@@ -85,6 +85,38 @@ Scenario a-node-that-stops-responding, on k8s-resilience-lab-a-node-that-stops-r
 
 The narrative states an eviction and the replacement scheduled after it in order, and claims no link between them.
 
+## Try a Failure by Hand
+
+A Scenario answers a question you already wrote down. An Interactive run is for the questions you have not written yet. It holds one Scenario's Simulated Cluster and shows it in a browser, the Live view. Click a Node, a Zone or a Pod there to inject a Failure, and watch where the control plane places the Pods. What surprises you there is the next Scenario to write.
+
+```bash
+make demo                                # hold the Descheduler Scenario's cluster and open its Live view
+make interactive SCENARIO=a-node-that-stops-responding  # hold another Scenario's cluster, and open the address yourself
+```
+
+Below, one click on zone-2 stopped its three Nodes. Their Pods were evicted, and the replacements landed on Nodes of zone-1 and zone-3.
+
+<img src="docs/images/live-view-zone-stopped.png" width="720" alt="The Live view after zone-2 stopped responding: its three Nodes NotReady and empty, all nine Pods on the Nodes of zone-1 and zone-3">
+
+The terminal reports the click as a When, then names each moment that changed the Placement:
+
+```text
+  When Zone zone-2 stops responding
+  +29.580s  Node zone-2-node-2 NotReady
+  +29.581s  Node zone-2-node-3 NotReady
+  +29.582s  Node zone-2-node-1 NotReady
+  +34.302s  Pod checkout-xs7xn evicted from zone-2-node-1
+  +34.399s  Pod checkout-fs929 evicted from zone-2-node-3
+  +34.502s  Pod checkout-svqkk evicted from zone-2-node-2
+  +34.404s  Pod checkout-qljvw scheduled on zone-3-node-1, Running at +35.247s
+  +34.311s  Pod checkout-25rg6 scheduled on zone-1-node-1, Running at +35.301s
+  +34.507s  Pod checkout-rb2hl scheduled on zone-1-node-2, Running at +35.505s
+```
+
+Click zone-2 again and it responds again. The Descheduler then evicts one Pod on each pass until the three Zones hold three Pods each.
+
+An Interactive run carries out its Scenario's Steps up to the first When, then names the Live view's address on `127.0.0.1`. Click a stopped Node or Zone to make it respond again; a lost Pod has no recovery. A click the lab cannot carry out prints a "Not injected:" line naming why. Ctrl-C files the Timeline and removes the Simulated Cluster. The [requirements](docs/prd.md#injecting-a-failure-from-the-live-view) list every case.
+
 ## Quick Start
 
 Needed once: Go at the version in the Toolchain table of [CLAUDE.md](CLAUDE.md), and a container engine reachable over a Unix socket, such as Docker Desktop or Rancher Desktop. The lab probes the usual socket paths and honours a `unix://` `DOCKER_HOST`.
@@ -108,8 +140,6 @@ make vuln-check                          # scan the code the lab calls for known
 All Scenarios run at once, so a run lasts about as long as its slowest Scenario, and each reports as the section What It Looks Like in Practice shows. Stopping a run with Ctrl-C ends each Scenario still running part-way, naming the stop, and removes its Simulated Clusters. A second Ctrl-C ends the run at once and leaves the clusters not yet removed, as killing it does: `docker ps -a --filter name=k8s-resilience-lab` lists them and `docker rm -f` removes them.
 
 `--k8s-version` names the Kubernetes version every Simulated Cluster mirrors, the lab's pinned default when absent. A run of every Scenario carries those declaring a Descheduler policy, so on a minor the lab pairs no Descheduler with it stops before provisioning, naming that version. The pinned default's minor has one. An Interactive run of a Scenario declaring no policy runs on any version, as in `make interactive SCENARIO=a-node-that-stops-responding ARGS="--k8s-version <version>"`.
-
-An Interactive run, `make interactive` with one Scenario name, or `--interactive` with the name on the lab itself, carries out that Scenario's Steps up to its first When and reports them as a run does. The terminal names the Live view's address on `127.0.0.1`. Open it in a browser to watch each Zone as a box of Nodes and each Node as a box of Pods, with its NodePool, labels, capacity, requests and room left, as the Placement changes. Click a Node, a Zone or a placed Pod box there to inject a Failure, and the terminal prints its When, such as "When Node worker-2 stops responding" or "When Pod checkout-abc12 is lost". A clicked Failure the lab does not inject prints a "Not injected:" line in the When's place, naming the Failure and why, such as "Not injected: Node worker-2 stops responding, because the Node is gone". A click making a Node or Zone respond again that cannot be carried out prints the same line, and a Zone responding again only in part names each Node that did not. While the cluster is held, the terminal also names each Node turning Ready or NotReady and each Pod evicted or scheduled, as a Wait narrative does. Each such line opens with its elapsed time to the millisecond, and the Descheduler's evictions stand apart from a Failure's. Click a stopped Node, or a Zone whose every Node stopped, to make it respond again, such as "When Node worker-2 responds again". A lost Pod has no recovery. Stop the lab with Ctrl-C, which files the Timeline, prints its line and removes the Simulated Cluster. A name matching no Scenario stops the lab and lists the Scenario names. `make demo` is an Interactive run that opens the Live view for you: it holds a-zone-that-responds-again-under-a-descheduler, or the Scenario named in `SCENARIO`, and hands the address to `open` (macOS) or `xdg-open` (Linux) once the terminal names it. With neither on the machine the address stays on the terminal and the run goes on.
 
 The command suite runs every Scenario and fails when one reports a Finding or ends at a Step. The Scenarios are therefore the lab's own acceptance tests.
 
