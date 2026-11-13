@@ -66,10 +66,10 @@ What a held run's terminal names. The owner asked for "all changes", then accept
 26. **The Descheduler's evictions and their replacements alone** — quiet, and silent on what a click causes.
 27. **Every moment a Wait narrative names, each line printed once its moment is complete** — a click's effects and a pass's alike, worded as a run's narrative.
 
-What the stop does with a terminal that stopped taking lines, the owner having left it open. Any wait on the terminal at the stop leaves the cluster running and unfiled:
+What the stop does with a terminal that stopped taking lines, the owner asking for a bounded wait. Any unbounded wait leaves the cluster running, and no option drops the line of an entry handed before the stop (REQ-SIM-040):
 
 28. **Holding the lines not yet printed** — printed once the terminal resumes, the lab ending only then.
-29. **Dropping them** — the stop waits on no line, and the filed Timeline holds their entries.
+29. **Dropping them after a bounded wait** — the stop waits for the lines of each entry handed before it, then drops the rest, and the filed Timeline holds their entries.
 
 How a clicked Failure that cannot be injected, wholly or in part, stands in the Timeline (REQ-SIM-028 edge case 5). The PRD names it not injected, and why, in place of its When:
 
@@ -95,13 +95,13 @@ Options 3, 8, 10, 12, 14, 17, 22, 24, 27, 29, 32 and 34.
 - `cmd/lab` prints each narrative above its Wait's board. `--whole-timeline` adds every entry.
 - Every control-plane request, a watch's opening included, keeps the 30-second deadline. A stream runs on a second client with the same address, no credential and no deadline, ending with its recording.
 - An Interactive run records until the lab stops. Each click changing the cluster is noted as a When through the owning goroutine. Its Wait narratives come from the Timeline recorded so far at the hold, and the Timeline is filed at the stop.
-- At the hold the owning goroutine hands over the Timeline so far and then each later entry, until the lab stops. From the stop it hands on none, and the run's reader prints no further line and is waited for only when no line is printing (option 29). A pure reader in `internal/scenario` turns them into the terminal's lines through the Wait narratives' own reading. A click's When is worded as its Step, and every moment as a Wait narrative's line.
+- At the hold the owning goroutine hands over the Timeline so far and then each later entry, until the lab stops. From the stop it hands on none. The run's reader still prints the lines of each entry handed before, the stop waiting for it at most `followingStopWait` (option 29). Then no line starts, and one printing is abandoned. A pure reader in `internal/scenario` turns them into the terminal's lines through the Wait narratives' own reading. A click's When is worded as its Step, and every moment as a Wait narrative's line.
 - A click injecting a Failure holds its note open from before its first change (option 32). Once the injection returns, the note is recorded as the When, or as the Failure not injected with its cause. A Node the click stopped stays stopped. A click making Nodes respond again notes its When before its first change.
 - Both control-plane clients set no client-side rate limit (option 34).
 
 ## Consequences
 
-Every change the API server pushed before the Scenario ended, or before an Interactive run's lab stopped, is in the Timeline, and stopping the record drains each stream. A held Timeline grows for as long as the cluster is held; a bound is an open question in the PRD. A held run's terminal stalling holds up its record until the lab stops, as a stalled file write does. Stopping files the Timeline and removes the cluster whatever the terminal does, and a moment recorded after the stop prints no line on any terminal. Cross-stream order is receipt order, not causal order. A filed Timeline narrates as the run that recorded it did. A Wait settles on two observations a poll interval apart, far above a stream's delivery on loopback, so its narrative holds the changes it reflects.
+Every change the API server pushed before the Scenario ended, or before an Interactive run's lab stopped, is in the Timeline, and stopping the record drains each stream. A held Timeline grows for as long as the cluster is held; a bound is an open question in the PRD. A held run's terminal stalling holds up its record until the lab stops, as a stalled file write does. Stopping files the Timeline and removes the cluster whatever the terminal does, a stalled terminal delaying both by the bounded wait at most. A moment recorded after the stop prints no line on any terminal. Cross-stream order is receipt order, not causal order. A filed Timeline narrates as the run that recorded it did. A Wait settles on two observations a poll interval apart, far above a stream's delivery on loopback, so its narrative holds the changes it reflects.
 
 While a click's note is held open, the file and the terminal lag by the injection's length, bounded by the request deadline and its conflict retries. The API server alone paces the lab's requests, so a burst of them waits on its limits rather than the client's.
 
@@ -109,7 +109,7 @@ Timeline files accumulate until an engineer deletes them; retention is an open q
 
 ## Implementation
 
-**Requirements:** REQ-SIM-005, REQ-SIM-008, REQ-SIM-021, REQ-SIM-028, REQ-SIM-033, REQ-SIM-034
+**Requirements:** REQ-SIM-005, REQ-SIM-008, REQ-SIM-021, REQ-SIM-028, REQ-SIM-033, REQ-SIM-034, REQ-SIM-040
 
 ## References
 

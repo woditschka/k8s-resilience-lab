@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/woditschka/k8s-resilience-lab/internal/cluster"
@@ -476,4 +477,40 @@ func TestAnOutcomeThatCarriedOutEveryStep_ShouldLeaveNoStepUndone(t *testing.T) 
 	carriedOut := Outcome{Name: someEndedScenarioName, Steps: []Step{{Kind: GivenStep, Name: someTopologyName}}}
 
 	expect.Expect(t, carriedOut.StepLeftUndone()).To(expect.Equal[error](nil))
+}
+
+// The Descheduler interval's stop stands for any line taken: it is the one
+// line the reader takes through a function, which a test can hold the reader
+// in between taking the line and printing it.
+const someLineTakenByTheReader = "some line taken by the reader"
+
+// The reader is held after taking the line until the lab's stop is under way.
+// The record has stopped by then, as the lab's stop always finds it.
+func TestALineTakenByTheReaderJustBeforeTheLabStops_ShouldStillBePrinted(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		var printed []string
+		later, intervalStopped, takingIt := make(chan scenario.Entry), make(chan struct{}), make(chan struct{})
+		close(intervalStopped)
+		stop := (&holding{followed: func(line string) { printed = append(printed, line) }}).follow(
+			scenario.NewTimeline(nil), later, intervalStopped,
+			func() string {
+				<-takingIt
+
+				return someLineTakenByTheReader
+			})
+		synctest.Wait()
+		close(later)
+		labStopped := make(chan struct{})
+		go func() {
+			defer close(labStopped)
+			stop()
+		}()
+		synctest.Wait()
+
+		close(takingIt)
+		<-labStopped
+
+		expect.Expect(t, printed).To(expect.Equal([]string{someLineTakenByTheReader}))
+	})
 }

@@ -626,7 +626,7 @@ The Nodes of one Failure stop together, by a click or a Scenario's When, so a Zo
 2. A Zone with only some Nodes stopped. A click stops the others.
 3. A click loses a placed Pod on a stopped Node all the same.
 4. A Node that responded again after a click. A further click stops it again.
-5. A click whose Failure cannot be injected, wholly or in part. The terminal and the Timeline name that Failure as not injected, and why, in place of its When. A click making a Node or Zone respond again is named so too `[REQ-SIM-037]`.
+5. A click whose Failure cannot be injected, wholly or in part. The terminal and the Timeline name that Failure as not injected, and why, in place of its When.
 6. A click whose Failure was injected in part. The Nodes it stopped stay stopped, and the run goes on holding the cluster.
 7. A click making a Zone respond again only in part. The Nodes that responded again keep responding, and the run goes on holding the cluster `[REQ-SIM-037]`.
 
@@ -658,6 +658,9 @@ One command starts an Interactive run and opens its Live view in the machine's b
 <a id="req-sim-033"></a>
 An Interactive run's Timeline keeps recording while its cluster is held, each click joining it as a When `[REQ-SIM-033]`. The terminal names each moment that changes the Placement, as a Wait narrative does.
 
+<a id="req-sim-040"></a>
+At the lab's stop, a terminal still taking lines has printed every earlier line `[REQ-SIM-040]`.
+
 **Done when:**
 
 - `[REQ-SIM-033]` a click on a held cluster puts in the Timeline, at its moment, the When the terminal prints, worded and indented as before.
@@ -668,6 +671,7 @@ An Interactive run's Timeline keeps recording while its cluster is held, each cl
 - `[REQ-SIM-033]` each line naming a moment is indented as a Wait narrative's and opens with its elapsed time to the millisecond, the filed Timeline holding its Entry.
 - `[REQ-SIM-033]` with a-zone-that-responds-again-under-a-descheduler held, clicking its Zone to stop and respond again, the terminal names its Nodes turning NotReady and Ready, and the Pods evicted and moved back, with their Nodes.
 - `[REQ-SIM-033]` every Scenario's run report, Timeline and Live view stay as before.
+- `[REQ-SIM-040]` on a terminal still taking lines, each click and moment before the lab's stop has its line printed.
 
 **Edge cases:**
 
@@ -678,7 +682,7 @@ An Interactive run's Timeline keeps recording while its cluster is held, each cl
 5. No terminal line names a replacement no Node has room for.
 6. With no Descheduler on an interval, the terminal names the clicks and the moments after them alone.
 7. No terminal line names Pods the lab places while provisioning the Topology.
-8. The terminal stops taking lines while the cluster is held. At the lab's stop, it still files the Timeline and removes the cluster, dropping unprinted lines.
+8. The terminal stops taking lines while the cluster is held. The lab's stop, after a bounded wait, files the Timeline and removes the cluster, dropping unprinted lines.
 9. A Descheduler on an interval stops while the cluster is held. The terminal names why as a run names a Step left undone, the cluster stays held, and the lab fails once stopped.
 
 **Design:** [system-design.md](system-design.md)

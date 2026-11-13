@@ -328,10 +328,11 @@ type Observer struct {
 // returned carries it and the Outcome reported does not.
 //
 // Each line scenario.Following reads from the entries recorded while held is
-// handed to followed, after the Outcome and in order, from one goroutine. No
-// line is handed once Hold returns, but a line followed is still taking when
-// the lab stops may finish after it, so a terminal that stopped taking lines
-// keeps no cluster from being removed.
+// handed to followed, after the Outcome and in order, from one goroutine. The
+// lab's stop waits for the lines of the entries recorded before it, but no
+// longer than followingStopWait. No line starts once Hold returns, but a line
+// followed is still taking by then may finish after it, so a terminal that
+// stopped taking lines keeps no cluster from being removed.
 //
 // A Scenario declaring a Descheduler policy has its image obtained, as for a
 // run, before the cluster is provisioned.
@@ -441,15 +442,17 @@ func (h *holding) hold(ctx context.Context, running *Scenario, name string) Outc
 
 // follow starts once the Outcome is reported, so no line comes before it, and
 // returns the function that ends it once the record has stopped. The record
-// waits on this reader until the lab stops, then hands it nothing more. The
-// interval's stop is named through the same reader, so it takes its place
-// among the lines and keeps a stalled terminal from holding up the lab's stop
-// as they do.
+// waits on this reader until the lab stops, then hands it nothing more, and
+// the function returned waits in turn for the lines of what it was handed, as
+// linesFollowed bounds it. The interval's stop is named through the same
+// reader, so it takes its place among the lines and holds up the lab's stop on
+// a stalled terminal no longer than they do.
 func (h *holding) follow(soFar scenario.Timeline, later <-chan scenario.Entry,
 	intervalStopped <-chan struct{}, intervalStop func() string,
 ) (stop func()) {
-	lines := &linesFollowed{}
-	lines.reading.Go(func() {
+	lines := &linesFollowed{read: make(chan struct{})}
+	go func() {
+		defer close(lines.read)
 		following := scenario.NewFollowing(soFar)
 		for {
 			var handed []string
@@ -468,62 +471,47 @@ func (h *holding) follow(soFar scenario.Timeline, later <-chan scenario.Entry,
 				return
 			}
 		}
-	})
+	}()
 
 	return lines.stop
 }
 
-// linesFollowed lets the stop wait for a reader between lines and never for a
-// line the terminal has stopped taking: no line starts after the stop, and one
-// already printing is left to finish on its own.
+// followingStopWait bounds how long the lab's stop waits for the lines of the
+// entries handed before it, so a terminal that stopped taking lines delays the
+// cluster's removal by no more.
+const followingStopWait = 2 * time.Second
+
+// linesFollowed lets the stop wait for every line of the entries the reader
+// was handed before it, and never longer than followingStopWait for a
+// terminal that stopped taking lines: then no line starts, and one already
+// printing is left to finish on its own.
 type linesFollowed struct {
-	mu       sync.Mutex
-	stopped  bool
-	printing bool
-	reading  sync.WaitGroup
+	stopped atomic.Bool
+	// read is closed once the reader has nothing more to hand.
+	read chan struct{}
 }
 
-// hand reports false once the stop came before a line, and nothing more is to
-// be handed.
+// hand reports false once the stop gave up waiting before a line, and nothing
+// more is to be handed.
 func (l *linesFollowed) hand(lines []string, followed func(string)) bool {
 	for _, line := range lines {
-		if !l.startPrinting() {
+		if l.stopped.Load() {
 			return false
 		}
 		followed(line)
-		l.donePrinting()
 	}
 
 	return true
-}
-
-func (l *linesFollowed) startPrinting() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.stopped {
-		return false
-	}
-	l.printing = true
-
-	return true
-}
-
-func (l *linesFollowed) donePrinting() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	l.printing = false
 }
 
 func (l *linesFollowed) stop() {
-	l.mu.Lock()
-	l.stopped = true
-	abandoned := l.printing
-	l.mu.Unlock()
+	waited := time.NewTimer(followingStopWait)
+	defer waited.Stop()
 
-	if !abandoned {
-		l.reading.Wait()
+	select {
+	case <-l.read:
+	case <-waited.C:
+		l.stopped.Store(true)
 	}
 }
 
